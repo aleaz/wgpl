@@ -1,8 +1,12 @@
 import typer
+from typer import rich_utils as typer_styles
 import json
 import sqlite3
 import sys
 import ipaddress
+from typing import Any
+
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -20,11 +24,57 @@ app.add_typer(peer_app, name="peer")
 console = Console(stderr=True) # Always write logs to stderr
 out_console = Console() # For stdout tables if not JSON
 
+_STYLE_ID = typer_styles.STYLE_COMMANDS_TABLE_FIRST_COLUMN
+_STYLE_VALUE = typer_styles.STYLE_TYPES
+_STYLE_META = typer_styles.STYLE_HELPTEXT
+_STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
+
 _PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at")
+
+def _styled(text: str, style: str = "") -> str:
+    """Wrap text in Rich markup for a given style (empty = no markup)."""
+    if not style:
+        return text
+    return f"[{style}]{text}[/{style}]"
 
 def _public_peer_rows(peers: list[sqlite3.Row]) -> list[dict[str, str]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
     return [{field: peer[field] for field in _PUBLIC_PEER_FIELDS} for peer in peers]
+
+def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
+    """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
+    if total_peers == 1:
+        return peer_id
+    return peer_id.replace("-", "")[:12]
+
+def _print_list_table(
+    title: str,
+    empty_label: str,
+    columns: list[tuple[str, dict[str, Any]]],
+    rows: list[list[str]],
+) -> None:
+    """Print a full-width Rich table aligned with Typer help styling."""
+    if not rows:
+        console.print(f"[{typer_styles.STYLE_USAGE}]No {empty_label} found.[/{typer_styles.STYLE_USAGE}]")
+        return
+
+    table = Table(
+        box=box.ROUNDED,
+        expand=True,
+        header_style=_STYLE_ID,
+        border_style=_STYLE_BORDER,
+        show_edge=True,
+        pad_edge=True,
+    )
+    for header, kwargs in columns:
+        table.add_column(header, **kwargs)
+    for row in rows:
+        table.add_row(*row)
+    out_console.print()
+    out_console.print(f"[bold]{title}[/bold]", justify="center")
+    out_console.print()
+    out_console.print(table)
+    out_console.print()
 
 @app.callback()
 def main(
@@ -120,13 +170,24 @@ def interface_list(ctx: typer.Context):
         if ctx.obj.get("json"):
             _output(ctx, data)
         else:
-            table = Table(title="WireGuard Interfaces")
-            table.add_column("Name")
-            table.add_column("Endpoint")
-            table.add_column("Pool")
-            for i in data:
-                table.add_row(i["name"], f"{i['endpoint']}:{i['port']}", i["address_pool"])
-            out_console.print(table)
+            rows = [
+                [
+                    _styled(i["name"], _STYLE_ID),
+                    _styled(f"{i['endpoint']}:{i['port']}", ""),
+                    _styled(i["address_pool"], _STYLE_META),
+                ]
+                for i in data
+            ]
+            _print_list_table(
+                "WireGuard Interfaces",
+                "interfaces",
+                [
+                    ("Name", {"overflow": "fold"}),
+                    ("Endpoint", {"overflow": "fold"}),
+                    ("Pool", {"overflow": "fold"}),
+                ],
+                rows,
+            )
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
@@ -200,15 +261,29 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
             _output(ctx, _public_peer_rows(peers))
         else:
             data = [dict(p) for p in peers]
-            table = Table(title="WireGuard Peers")
-            table.add_column("ID")
-            table.add_column("Interface")
-            table.add_column("Name")
-            table.add_column("IP Address")
-            table.add_column("Created At")
-            for p in data:
-                table.add_row(p["id"], p["interface"], p["name"], p["ip_address"], p["created_at"])
-            out_console.print(table)
+            total_peers = len(data)
+            rows = [
+                [
+                    _styled(_format_peer_id_display(p["id"], total_peers), _STYLE_ID),
+                    _styled(p["interface"], ""),
+                    _styled(p["name"], _STYLE_ID),
+                    _styled(p["ip_address"], _STYLE_VALUE),
+                    _styled(p["created_at"], _STYLE_META),
+                ]
+                for p in data
+            ]
+            _print_list_table(
+                "WireGuard Peers",
+                "peers",
+                [
+                    ("ID", {"overflow": "fold"}),
+                    ("Interface", {"overflow": "fold"}),
+                    ("Name", {"overflow": "fold"}),
+                    ("IP Address", {}),
+                    ("Created At", {"overflow": "fold"}),
+                ],
+                rows,
+            )
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)

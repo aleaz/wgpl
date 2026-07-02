@@ -3,7 +3,7 @@ import json
 from typer.testing import CliRunner
 
 from wgpl import core
-from wgpl.cli import _public_peer_rows, app
+from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
 
 
 runner = CliRunner()
@@ -50,3 +50,13 @@ def test_peer_list_json_redacts_secrets(wg0_interface: str) -> None:
     assert "private_key" not in peers[0]
     assert "preshared_key" not in peers[0]
     assert peers[0]["name"] == "json_peer"
+
+
+def test_format_peer_id_full_when_single_peer() -> None:
+    uid = "55c521ad-2d94-4689-8abc-123456789abc"
+    assert _format_peer_id_display(uid, 1) == uid
+
+
+def test_format_peer_id_short_when_multiple_peers() -> None:
+    uid = "55c521ad-2d94-4689-8abc-123456789abc"
+    assert _format_peer_id_display(uid, 3) == "55c521ad2d94"
