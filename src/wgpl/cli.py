@@ -1,5 +1,6 @@
 import typer
 import json
+import sqlite3
 import sys
 import ipaddress
 from rich.console import Console
@@ -18,6 +19,12 @@ app.add_typer(peer_app, name="peer")
 
 console = Console(stderr=True) # Always write logs to stderr
 out_console = Console() # For stdout tables if not JSON
+
+_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at")
+
+def _public_peer_rows(peers: list[sqlite3.Row]) -> list[dict[str, str]]:
+    """Return peer rows safe for JSON output (no private keys or PSK)."""
+    return [{field: peer[field] for field in _PUBLIC_PEER_FIELDS} for peer in peers]
 
 @app.callback()
 def main(
@@ -189,10 +196,10 @@ def peer_remove(
 def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, help="Filter by interface")):
     try:
         peers = db.list_peers(interface)
-        data = [dict(p) for p in peers]
         if ctx.obj.get("json"):
-            _output(ctx, data)
+            _output(ctx, _public_peer_rows(peers))
         else:
+            data = [dict(p) for p in peers]
             table = Table(title="WireGuard Peers")
             table.add_column("ID")
             table.add_column("Interface")

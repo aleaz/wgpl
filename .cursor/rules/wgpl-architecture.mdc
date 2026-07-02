@@ -1,0 +1,57 @@
+---
+description: WGPL architecture and security invariants
+alwaysApply: true
+---
+
+# WGPL — architecture rules
+
+WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
+*peers*. ALWAYS respect these invariants.
+
+## Layers (one direction only)
+
+`cli.py` (Typer / presentation) → `core.py` (business) → `db.py` / `wireguard.py` (infra).
+
+- `core.py` MUST NOT import Typer or format output.
+- `db.py` / `wireguard.py` MUST NOT contain business logic.
+
+## SSOT and synchronization
+
+- The SQLite database is the single source of truth (SSOT).
+- NEVER sync WireGuard automatically in `add_peer` / `remove_peer`.
+  State reaches the OS only via `wgpl apply` (local) or
+  `wgpl interface export | ssh ... wg syncconf` (remote).
+
+## Concurrency and integrity
+
+- Multi-step writes go inside `db.transaction()` (`BEGIN EXCLUSIVE`).
+- Compute the free IP (`_get_next_available_ip`) and INSERT the peer in the
+  SAME transaction to avoid IP collisions.
+
+## Security
+
+- Enforce `chmod 600` on the DB file on every connection.
+- Generate keys with `cryptography` (x25519) in memory; do not rely on `wg` to create them.
+- `subprocess` with argument lists, NEVER `shell=True`.
+- SQL always parameterized (`?`).
+- Domain errors inherit from `WgplException` (`exceptions.py`); `cli.py` catches them
+  and exits with `sys.exit(1)`.
+
+## Output contract
+
+- This is a Typer CLI, NOT a web framework. Ignore FastAPI/Django suggestions.
+- With `--json`: data on stdout, logs and errors on stderr.
+
+## Validation (same as CI)
+
+- `uv run ruff check src/`
+- `uv run mypy src/`
+- `uv run pytest` (once `tests/` exists).
+
+## Documentation language
+
+- All project documentation, AI context files (rules, skills, memory), and code
+  comments/docstrings MUST be written in **English**.
+- User-facing CLI help text and error messages in `cli.py` remain in English
+  (already the case).
+- Conversations with the user may be in any language; generated artifacts are not.

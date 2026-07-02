@@ -65,6 +65,8 @@ venv.bak/
 # Agent IDE metadata
 .agents/
 .gemini/
+.temp_ag_kit
+.DS_Store
 
 # Linters & Typecheckers
 .mypy_cache/

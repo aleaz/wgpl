@@ -1,5 +1,8 @@
 # WireGuard Peer Lite (WGPL)
 
+[![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **WGPL** is a secure, minimalist command-line tool designed exclusively for managing the lifecycle of WireGuard *peers*.
 
 It is designed as a **Disconnected Configuration Compiler**. This means WGPL does not need to run on the VPN server itself. You can install it on your local laptop, manage the cryptographic state offline in a local SQLite database, and export the configuration to pipe it to your remote servers securely.
@@ -30,8 +33,8 @@ WGPL is designed to run locally using `uv`.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/aazario/wgmp.git
-cd wgmp
+git clone https://github.com/aleaz/wgpl.git
+cd wgpl
 ```
 
 ### 2. Sync the environment
