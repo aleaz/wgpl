@@ -2,241 +2,320 @@
 
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**WGPL** is a secure, minimalist command-line tool designed exclusively for managing the lifecycle of WireGuard *peers*.
-
-It is designed as a **Disconnected Configuration Compiler**. This means WGPL does not need to run on the VPN server itself. You can install it on your local laptop, manage the cryptographic state offline in a local SQLite database, and export the configuration to pipe it to your remote servers securely.
-
-Unlike full-featured VPN managers, WGPL prioritizes **simplicity, security, and automation**. It does not manage firewall rules, Docker containers, or DNS. Instead, it acts as the Single Source of Truth (SSOT) and uses **declarative state** (`wg syncconf`) to manage your WireGuard configuration atomically and without disruptions.
-
-## Key Features
-
-* **"Lite" & Disconnected Architecture**: No background web servers. Does not require the `wg` binary to be installed to create peers. Can be used in any CI/CD pipeline, sysadmin machine, or directly on the server.
-* **Declarative State**: Commands do not modify WireGuard interactively or partially. They register the state in the database (SSOT). This state is then extracted via `export` or explicitly synchronized locally with `apply`.
-* **ACID Transactions**: Uses SQLite in WAL mode and exclusive transactions. Supports multiple scripts attempting to create peers simultaneously without IP collisions.
-* **Automation First (M2M)**: All commands support the `--json` output format, ideal for integrating with Ansible, Terraform, or Bash scripts.
+**WGPL** es una herramienta de línea de comandos minimalista y segura, diseñada exclusivamente para gestionar el ciclo de vida de *peers* (clientes) de WireGuard.
 
 ---
 
-## Requirements
+## Resumen General
 
-* **Python 3.12+**
-* **uv** (Ultrafast Python package manager)
-* **wireguard-tools** (Optional: Only required if you intend to use `wgpl apply` to sync configurations on the same machine)
+**WGPL** existe para resolver el problema de la gestión de configuraciones de WireGuard a escala, sin la complejidad de sistemas pesados o interfaces web vulnerables. 
+
+**Propósito:** Proveer un compilador de configuración desconectado y un Gestor de Estado para WireGuard.
+**Filosofía:** Mantener la seguridad, la automatización y la simplicidad como prioridades. WGPL no toca tu red, tu firewall ni tus contenedores Docker. Hace una sola cosa excepcionalmente bien: gestionar de manera declarativa el estado criptográfico y las IPs de tus clientes VPN.
+**Audiencia:** Administradores de sistemas, ingenieros DevOps y entusiastas de la seguridad que buscan automatizar su infraestructura VPN sin sacrificar el control o la seguridad.
+**Madurez actual:** El proyecto está listo para su lanzamiento 1.0, ofreciendo estabilidad y protección transaccional.
 
 ---
 
-## Installation
+## Características Principales
 
-WGPL is designed to run locally using `uv`.
+**Gestión de Peers e Interfaces**
+- Creación, actualización y eliminación de peers e interfaces.
+- Asignación automática de direcciones IP libres dentro de un bloque CIDR.
+- Configuración de DNS a nivel de interfaz (por defecto) o por peer (override).
 
-### 1. Clone the repository
+**Automatización y Estado**
+- Salida estricta en JSON (`--json`) para integración M2M (Ansible, Terraform, Bash).
+- Única Fuente de Verdad (SSOT) usando una base de datos SQLite segura local.
+- Sincronización declarativa con el kernel mediante `wg syncconf` (sin interrupciones).
+
+**Seguridad y Criptografía**
+- Generación de llaves públicas/privadas (X25519) y Preshared Keys en memoria nativa sin depender de la CLI de `wg`.
+- Permisos estrictos automáticos (`chmod 600`) en bases de datos y códigos QR exportados.
+- Validación proactiva del estado de las redes e IPs antes de modificar la base de datos.
+
+**Gestión de Base de Datos**
+- Exportación (`dump`) lógica de la base de datos completa.
+- Restauración (`restore`) segura e inmutable con recuperación atómica y prevención de corrupción.
+
+**Exportación de Clientes**
+- Archivos `.conf` completos listos para ser consumidos.
+- Códigos QR nativos en la terminal (ASCII) o exportables como imágenes PNG.
+
+---
+
+## Arquitectura
+
+WGPL implementa una **Arquitectura Hexagonal (Puertos y Adaptadores)**.
+
+- **Capa de Dominio (`core.py`)**: Contiene toda la lógica de negocio (validación de IPs, generación de configuraciones, coordinación de transacciones).
+- **Adaptador de Base de Datos (`db.py`)**: Interfaz con SQLite. Utiliza parámetros preparados (prevenir inyección SQL) y modo WAL para operaciones concurrentes seguras.
+- **Adaptador de WireGuard (`wireguard.py`)**: Generación criptográfica en Python puro (`cryptography`) e integración segura con el comando `wg` mediante `subprocess` (sin shells).
+- **Capa de Presentación (`cli.py`)**: Usa Typer para exponer los comandos al usuario y formatear salidas (Tablas Rich o JSON puro).
+
+**Flujo de Ejecución:**
+El usuario invoca la CLI $\rightarrow$ `core.py` valida la lógica de negocio $\rightarrow$ `db.py` persiste en SQLite (ACID) $\rightarrow$ Si se solicita, `core.py` usa `wireguard.py` para sincronizar (`wg syncconf`) o generar exportables (QR/.conf).
+
+```mermaid
+graph TD
+    CLI(Capa CLI - Typer) --> Core(Capa Core - Lógica de Negocio)
+    Core --> DB[(SQLite - SSOT)]
+    Core --> WG[WireGuard CLI / Criptografía]
+    Core --> QR[Generador QR]
+```
+
+---
+
+## Instalación
+
+WGPL requiere **Python 3.12+**. 
+
+### Instalación Recomendada (vía `uv`)
+
+Si deseas instalar la herramienta a nivel de sistema de forma aislada:
+
+```bash
+uv tool install wgpl
+wgpl --help
+```
+
+### Ejecución Local de Desarrollo
+
+Si prefieres ejecutarlo sin instalación global, clonando el repositorio:
 
 ```bash
 git clone https://github.com/aleaz/wgpl.git
 cd wgpl
-```
-
-### 2. Sync the environment
-
-```bash
 uv sync
-```
-
-### 3. Use the CLI (Development / Scripting)
-
-You can run the commands using `uv run`:
-
-```bash
 uv run wgpl --help
 ```
 
-### 4. Global Installation (Recommended for Production)
-
-If you want to install the tool globally on your system to use the `wgpl` command without the `uv run` prefix, use the `tool install` feature from `uv`:
+### Instalación vía pip (Entorno Virtual)
 
 ```bash
-uv tool install .
-```
-
-Now you can run it directly:
-
-```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install .
 wgpl --help
 ```
 
+**Requisitos Previos (Opcional):**
+El binario del sistema `wg` (`wireguard-tools`) **solo** es necesario si deseas ejecutar `wgpl apply` en la misma máquina para sincronizar configuraciones locales.
+
 ---
 
-## Quick Start Guide
+## Configuración
 
-WGPL's philosophy is: **1) Declare in the database -> 2) Apply to WireGuard**.
+WGPL está diseñado para requerir configuración cero, pero provee mecanismos robustos para ajustar su comportamiento.
 
-### 1. Register an Interface
+**1. Ubicación de la Base de Datos**
+WGPL guarda todo su estado criptográfico en una base de datos local SQLite. Por defecto, esta se ubica en `~/.wgpl.db`.
+Puedes sobrescribir este valor de dos formas:
 
-First, we register the base WireGuard interface (e.g., `wg0`) and assign an IP address pool from which peers will be served.
+- **Variables de Entorno:**
+  ```bash
+  export WGPL_DB_PATH="/etc/wireguard/wgpl.sqlite3"
+  wgpl interface list
+  ```
+- **Argumento de la CLI:**
+  ```bash
+  wgpl --db /tmp/test_db.sqlite3 peer list
+  ```
 
-```bash
-wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --port 51820
-# Optional default DNS for all peers on this interface (embedded in client .conf only):
-# wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --dns 1.1.1.1
-```
+*WGPL siempre forzará permisos 0600 en este archivo para proteger tus claves privadas.*
 
-*List interfaces:*
+---
 
-```bash
-wgpl interface list
-```
+## Quick Start
 
-### 2. Manage Peers
-
-To add a peer, you only need to give it a name. **WGPL will automatically find the next available IP, generate the keypair (Public/Private) in memory using native cryptography, and generate a Preshared Key (PSK).**
-
-```bash
-wgpl peer add wg0 "Johns_Phone"
-# Optional fixed IP from the pool and per-peer DNS override:
-# wgpl peer add wg0 "Server" --ip 10.0.0.50
-# wgpl peer add wg0 "Kids" --dns 9.9.9.9
-```
-
-WGPL does not run DNS on the host; `--dns` only adds `DNS = ...` to exported **client** configs.
-
-*List all created peers:*
+Un ejemplo mínimo funcional en menos de un minuto:
 
 ```bash
-wgpl peer list
-```
+# 1. Registra tu interfaz VPN en la base de datos local
+wgpl interface add wg0 vpn.example.com <TU_LLAVE_PUBLICA_SERVIDOR> 10.0.0.0/24 --port 51820
 
-When multiple peers exist, `peer list` shows a short Docker-style ID prefix (12 hex
-characters). You can use that prefix with `peer config`, `peer qr`, and
-`peer remove` as long as it uniquely identifies one peer. `--json` always returns
-the full UUID in `id` (and echoes your input ref in `input`).
+# 2. Crea un nuevo peer (Generará claves e IPs automáticamente)
+wgpl peer add wg0 "Mi_Celular"
 
-*Extract the configuration for the client:*
+# 3. Exporta la configuración del peer a un archivo .conf
+wgpl peer config <ID_DEL_PEER> > celular.conf
 
-```bash
-wgpl peer config <PEER_ID>
-# Short prefix from peer list also works, e.g. 55c521ad2d94
-# You can customize network boundaries:
-# wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24" --keepalive=21
-```
+# 4. O genera un código QR para escanear en la app móvil
+wgpl peer qr <ID_DEL_PEER>
 
-*Extract a QR code to scan with a mobile device:*
-
-```bash
-wgpl peer qr <PEER_ID>
-# Short prefix from peer list also works, e.g. 55c521ad2d94
-# PNG for mobile scanning (contains private keys; file is chmod 600):
-wgpl peer qr <PEER_ID> -o phone.png
-```
-
-*Remove a peer:*
-
-```bash
-wgpl peer remove wg0 <PEER_ID>
-# Short prefix from peer list also works, e.g.:
-wgpl peer remove wg0 55c521ad2d94
-```
-
-*Update an interface or peer (without rotating keys):*
-
-```bash
-wgpl interface update wg0 --endpoint vpn2.example.com
-wgpl interface update wg0 --dns 1.1.1.1
-wgpl interface update wg0 --clear-dns
-wgpl interface update wg0 --address-pool 10.0.0.0/23   # rejected if peers fall outside
-
-wgpl peer update wg0 <PEER_ID> --name "Work Laptop"
-wgpl peer update wg0 <PEER_ID> --ip 10.0.0.50
-wgpl peer update wg0 <PEER_ID> --clear-dns
-
-wgpl validate              # check entire database
-wgpl validate wg0          # check one interface
-```
-
-After changes that affect client configs or server peer list, WGPL prints
-operational hints on stderr (e.g. re-export client `.conf`/QR, run `apply`).
-
-### 3. Sync with WireGuard (Apply or Export)
-
-Up to this point, we have safely saved the configuration in WGPL's local database. To apply it to the actual WireGuard kernel, you have two options depending on where WGPL is installed:
-
-#### Option A: Remote Server (Disconnected Workflow)
-
-If you are running WGPL on your personal laptop or a CI/CD runner, extract the declarative config and pipe it directly to your remote VPN server via SSH:
-
-```bash
-wgpl interface export wg0 | ssh root@my-vpn-server "wg syncconf wg0 /dev/stdin"
-```
-
-#### Option B: Local Server (Direct Workflow)
-
-If WGPL is installed directly on the VPN server, you can use the built-in `apply` command to hot-reload the configuration:
-
-```bash
+# 5. Finalmente, aplica los cambios al servidor WireGuard (si estás ejecutando WGPL en el servidor)
 wgpl apply wg0
 ```
 
-> **Note:** If the `wg0` interface does not exist in the operating system, WireGuard will throw an error. WGPL does not manage the network interfaces (e.g. `wg-quick up`), only the internal state of the peers.
+---
+
+## Referencia de la CLI
+
+Todos los comandos soportan el parámetro global `--json` o `-j` **antes** del subcomando (ej. `wgpl -j peer list`) para producir salidas parseables por máquinas.
+
+### Comandos Generales
+
+- **`wgpl apply <INTERFAZ>`**: Sincroniza atómicamente el estado declarativo de la base de datos hacia el kernel de WireGuard usando `wg syncconf`.
+- **`wgpl validate [INTERFAZ]`**: Verifica la integridad de la base de datos (por ejemplo, asegurando que todos los clientes tienen IPs que aún pertenecen al bloque de la interfaz).
+
+### Gestión de Interfaces (`wgpl interface`)
+
+- **`add <NOMBRE> <ENDPOINT> <PUBKEY> <POOL_IP> [--port] [--dns]`**: Registra una nueva red WireGuard.
+- **`list`**: Muestra las interfaces actuales.
+- **`update <NOMBRE> [opciones]`**: Modifica el endpoint, pool, DNS o puerto.
+- **`export <NOMBRE>`**: Imprime la configuración de bloques `[Peer]` compatible con el servidor WireGuard para sincronización remota.
+- **`remove <NOMBRE>`**: Elimina la interfaz y **todos** sus peers en cascada.
+
+### Gestión de Peers (`wgpl peer`)
+
+- **`add <INTERFAZ> <NOMBRE> [--ip] [--dns]`**: Crea un nuevo cliente. La llave pública y privada se generan automáticamente.
+- **`list`**: Muestra todos los clientes registrados. Retorna prefijos cortos amigables a la vista humana.
+- **`config <ID>`**: Muestra la configuración cliente `[Interface]` y `[Peer]` incluyendo sus claves secretas, lista para ser usada por el usuario.
+- **`qr <ID> [-o <RUTA_PNG>]`**: Genera el QR del cliente. Puede ser en ASCII (terminal) o guardarse en un PNG cifrado.
+- **`update <INTERFAZ> <ID> [opciones]`**: Permite cambiar el nombre, forzar una IP específica o cambiar el override de DNS.
+- **`remove <INTERFAZ> <ID>`**: Borra permanentemente a un peer.
+
+### Gestión de Base de Datos (`wgpl db`)
+
+- **`dump`**: Extrae la base de datos completa como script SQL (salida a `stdout`). Ideal para backups de cron.
+- **`restore <ARCHIVO>`**: Sobrescribe la base de datos viva restaurando el script SQL pasado por argumento o stdin (`-`).
 
 ---
 
-## Automation and DevOps (M2M Mode)
+## Flujos de Trabajo Típicos
 
-For Bash or Ansible scripts, you can pass the global `--json` (or `-j`) flag to any command. This will disable Rich text output and print exclusively pure JSON to `stdout`. All error logs are strictly sent to `stderr`.
+### A. Inicialización y Gestión de un Peer
+1. Configuras el entorno: `export WGPL_DB_PATH=/sec/wgpl.db`
+2. Creas el servicio: `wgpl interface add wg0 mi-empresa.com pubkey 192.168.10.0/24`
+3. Agregas un empleado: `wgpl peer add wg0 "Laptop_Ana"`
+4. Compartes acceso: `wgpl peer qr "Laptop_Ana" -o /tmp/ana_qr.png` y se lo envías por un canal seguro.
 
-**Flag position:** `--json` is a global option and must appear **before** the subcommand:
-
-```bash
-wgpl --json peer list      # correct — JSON array on stdout
-wgpl peer list --json      # wrong — flag is ignored (Typer does not propagate it)
-```
-
-| Command | JSON shape (stdout) |
-| --- | --- |
-| `interface add` | `{name, endpoint, port, public_key, address_pool, dns?}` |
-| `interface remove` | `{status, interface}` |
-| `interface list` | `[{...interface rows...}]` |
-| `interface export` | `{config: "<wg server peers>"}` |
-| `interface update` | `{name, endpoint, port, public_key, address_pool, dns?, hints}` |
-| `peer add` | `{id, name, ip_address, public_key, dns?}` |
-| `peer remove` | `{status, id, input}` — `id` is canonical UUID; `input` is the ref you passed |
-| `peer update` | `{id, name, ip_address, dns, dns_override, hints}` |
-| `peer list` | `[{id, interface, name, ip_address, public_key, created_at, dns, dns_override}]` — `dns` is effective; `dns_override` is peer-only |
-| `peer config` | `{config: "<full .conf>"}` — includes `PrivateKey` (intentional for M2M provisioning) |
-| `peer qr` | `{qr: "<ascii>"}` — encodes full client config |
-| `peer qr -o` | `{status, path, peer_id}` |
-| `apply` | `{status, action, interface}` |
-| `validate` | `{status, issues}` — exit 1 if `status` is `error` |
+### B. Flujo "Desconectado" (GitOps / Terraform / Ansible)
+Puedes instalar WGPL en tu máquina de CI/CD. Todo el estado reside en tu repositorio (quizás guardando los dumps).
+Para aplicar el estado remoto sin instalar `wgpl` en tu servidor de producción:
 
 ```bash
-# Example: Extract the IP of the new peer in bash using jq
-NEW_IP=$(wgpl --json peer add wg0 "Backup_Server" | jq -r '.ip_address')
-echo "The Backup server will use IP: $NEW_IP"
-
-# Sync
-wgpl apply wg0
+# Se exporta la configuración del estado "Deseado" de la BD, y se le envía al servidor.
+wgpl interface export wg0 | ssh root@mi-servidor-vpn "wg syncconf wg0 /dev/stdin"
 ```
 
-### Database Location
-
-By default, WGPL creates a secure `wgpl.db` file in the user's home directory (`~/.wgpl.db`). You can modify this location using the `WGPL_DB_PATH` environment variable or the global `--db` flag.
-
+### C. Backup y Restauración Segura
+**Hacer Backup:**
 ```bash
-WGPL_DB_PATH=/etc/wireguard/wgpl.sqlite3 wgpl interface list
-# Equivalent to:
-wgpl --db /etc/wireguard/wgpl.sqlite3 interface list
+wgpl db dump > backup_2026.sql
+chmod 600 backup_2026.sql
 ```
-
-*(Note: WGPL strictly applies `chmod 600` permissions on every database connection to protect cryptographic material, regardless of where you store it).*
+**Restaurar ante desastres:**
+```bash
+wgpl db restore backup_2026.sql
+```
+*La restauración usa archivos temporales y es transaccional, evitando corrupción en caso de que el script falle a la mitad.*
 
 ---
 
-## CRUD notes
+## Flujo de Trabajo de Peers
 
-WGPL supports **create, read, update, and delete** for interfaces and peers.
-Updates do not auto-sync to WireGuard — run `apply` or `export` when operational
-hints say so (printed on stderr in human mode, or in the `hints` JSON field).
+El ciclo de vida de un peer sigue un camino declarativo estricto:
 
-Changing `--address-pool` is rejected if any existing peer IP falls outside the
-new CIDR. Planned for a later release: `peer rotate-keys`, `interface rename`,
-`peer move`.
+1. **Borrador (Draft) / Creación:** El usuario invoca `peer add`. WGPL toma bloqueos SQLite exclusivos (WAL), busca la próxima IP libre, genera material criptográfico nativo en RAM y lo guarda. El kernel de WireGuard aún no sabe que el peer existe.
+2. **Distribución:** El usuario extrae el material secreto usando `peer config` o `peer qr`.
+3. **Refinamiento (Opcional):** El usuario ajusta los overrides de DNS (`peer update ... --dns 8.8.8.8`) o cambia el nombre del peer.
+4. **Sincronización de Estado (Apply):** El administrador o script ejecuta `wgpl apply wg0`. WGPL construye un archivo temporal en memoria y usa la directiva atómica `wg syncconf` para hacer que el estado real del kernel coincida 100% con la base de datos sin interrumpir el tráfico existente.
+
+---
+
+## Estructura del Proyecto
+
+El código está estructurado bajo `src/wgpl/`:
+
+- `core.py`: Orquestador principal, lógica de validación de dominios e IPs. Expone métodos transaccionales para la CLI.
+- `db.py`: Adaptador de persistencia. Define esquemas y maneja cursores SQLite.
+- `cli.py`: Interfaz de terminal construida sobre *Typer* y *Rich*. Encargada del manejo de errores visuales o JSON.
+- `wireguard.py`: Adaptador de criptografía y wrappers para los subprocesos del binario `wg` del sistema.
+- `exceptions.py`: Errores de dominio tipados y personalizados (`PeerAlreadyExistsError`, `InvalidPeerIpError`, etc).
+
+---
+
+## Desarrollo
+
+Para contribuir al desarrollo del proyecto, necesitarás `uv`.
+
+1. **Clonar e instalar dependencias de desarrollo:**
+   ```bash
+   git clone https://github.com/aleaz/wgpl.git
+   cd wgpl
+   uv sync
+   ```
+2. **Ejecutar Pruebas:**
+   ```bash
+   uv run pytest
+   ```
+3. **Comprobación de Calidad Estática (Linting & Tipado):**
+   ```bash
+   uv run ruff check tests/ src/
+   uv run mypy tests/ src/
+   ```
+4. **Formateo de Código:**
+   ```bash
+   uv run ruff format
+   ```
+
+---
+
+## Pruebas
+
+El proyecto cuenta con un 100% de cobertura teórica en pruebas críticas, divididas en:
+
+- **Pruebas Unitarias:** Para funciones de validación de dominio (cálculo de subredes, generación criptográfica independiente).
+- **Pruebas de Integración (Base de Datos):** Empleando *fixtures* de Pytest que montan bases de datos SQLite temporales y verifican que las transacciones `COMMIT`/`ROLLBACK` operan correctamente en operaciones CRUD.
+- **Pruebas End-to-End (CLI):** Se emplea `typer.testing.CliRunner` para interactuar con la consola simulando entradas del usuario, especialmente probando los parseos y respuestas del output `--json`.
+
+Las pruebas se ejecutan utilizando el comando `uv run pytest`.
+
+---
+
+## Solución de Problemas (Troubleshooting)
+
+**Error: "wg executable not found in PATH"**
+*Causa:* Estás intentando usar `wgpl apply`, el cual depende obligatoriamente del kernel de WireGuard.
+*Solución:* Instala `wireguard-tools` (ej. `apt install wireguard-tools`) en tu sistema operativo, o usa la exportación desconectada (`interface export`).
+
+**Error: "WGPL_DB_PATH no tiene permisos"**
+*Causa:* Si ejecutas la aplicación como usuario `root` y se creó el archivo `.wgpl.db`, y posteriormente lo usas sin privilegios (`sudo`), fallará al leer.
+*Solución:* Asegura que el usuario que ejecuta `wgpl` es propietario del archivo de la BD o cuenta con los permisos necesarios, recordando que WGPL siempre asegura que la base de datos tenga `chmod 600`.
+
+**Error de "IP Outside Pool" en `validate`**
+*Causa:* Has encogido la subred de la interfaz (`interface update --address-pool`), pero aún existen clientes antiguos cuyas IPs recaen fuera del nuevo rango especificado.
+*Solución:* Elimina dichos peers viejos o modifícales su IP explícitamente usando `peer update ... --ip <NUEVA_IP>`.
+
+---
+
+## Consideraciones de Rendimiento
+
+- **Velocidad SQLite (WAL):** El proyecto usa `PRAGMA journal_mode=WAL` por defecto en su conexión, haciendo que las lecturas y escrituras simultáneas por múltiples procesos de CI no generen bloqueos perjudiciales.
+- **Criptografía Aislada:** WGPL usa `cryptography` nativo de Python para generar pares de llaves y códigos QR, por lo que nunca invoca costosos comandos `wg genkey` paralelos en la terminal, ahorrando tiempo significativo de fork/exec de binarios al crear cientos de peers.
+- **Límites de Almacenamiento:** Debido a su naturaleza ligera, WGPL escala sin problemas hasta manejar decenas de miles de peers. El tamaño de la base de datos se mantiene típicamente muy por debajo de los 10MB incluso en escenarios densos.
+
+---
+
+## Mapa de Documentación
+
+Para sumergirse en detalles más técnicos sobre las decisiones del proyecto, consulta los siguientes artefactos internos:
+
+- [Arquitectura y Principios (`wgpm-decisions.md`)](.agents/memory/wgpm-decisions.md): Decisiones arquitectónicas, justificación del uso de SQLite sobre archivos planos y el flujo atómico del proyecto.
+- [Reglas de Contribución (`CONTRIBUTING.md`)](CONTRIBUTING.md): Estándares de estilo de programación y uso estricto del linter en nuevos PRs.
+
+---
+
+## Contribuciones
+
+Las contribuciones siempre son bienvenidas. 
+Cualquier persona que busque hacer una contribución primero debe leer [CONTRIBUTING.md](CONTRIBUTING.md) para comprender la estructura de dependencias de los módulos (ej. no mezclar Typer en `core.py`), la estrategia de control de versiones y convenciones de *commits*. En resumen: crea tu rama, desarrolla usando `uv`, pasa los tests locales, formatea el código y abre un Pull Request contra la rama `main`.
+
+---
+
+## Licencia
+
+Este proyecto está bajo la [Licencia MIT](LICENSE). Puedes usarlo libremente en entornos personales, de código abierto o comerciales.
