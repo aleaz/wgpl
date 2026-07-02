@@ -115,12 +115,10 @@ def _print_list_table(
 def main(
     ctx: typer.Context,
     output_json: bool = typer.Option(False, "--json", "-j", help="Output results in JSON format"),
-    non_interactive: bool = typer.Option(False, "--non-interactive", help="Disable interactive prompts"),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database")
 ):
     ctx.ensure_object(dict)
     ctx.obj["json"] = output_json
-    ctx.obj["non_interactive"] = non_interactive
     if db_path:
         import os
         os.environ["WGPL_DB_PATH"] = db_path

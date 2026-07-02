@@ -12,27 +12,18 @@ class Keypair:
     private_key: str
     public_key: str
 
-def run_wg_command(*args: str, input_data: str | None = None) -> str:
+def run_wg_command(*args: str) -> str:
     """Wrapper to run wg commands securely."""
     wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
     cmd = [wg_bin] + list(args)
-    
+
     try:
-        if input_data is not None:
-            result = subprocess.run(
-                cmd, 
-                input=input_data, 
-                text=True, 
-                capture_output=True,
-                check=True
-            )
-        else:
-            result = subprocess.run(
-                cmd,
-                text=True,
-                capture_output=True,
-                check=True
-            )
+        result = subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
         return result.stdout.strip()
     except FileNotFoundError:
         raise WgBinaryNotFoundError("The 'wg' command was not found. Make sure wireguard-tools is installed on the target system.")
@@ -71,6 +62,3 @@ def syncconf(interface: str, conf_content: str) -> None:
         run_wg_command("syncconf", interface, path)
     finally:
         os.remove(path)
-
-def show_dump(interface: str) -> str:
-    return run_wg_command("show", interface, "dump")

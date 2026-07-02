@@ -25,7 +25,7 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 ## Concurrency and integrity
 
 - Multi-step writes go inside `db.transaction()` (`BEGIN EXCLUSIVE`).
-- Compute the free IP (`_get_next_available_ip`) and INSERT the peer in the
+- Compute the free IP (`allocate_peer_ip`) and INSERT the peer in the
   SAME transaction to avoid IP collisions.
 
 ## Security

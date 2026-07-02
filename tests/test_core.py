@@ -3,7 +3,7 @@ import datetime
 import pytest
 
 from wgpl import core, db, wireguard
-from wgpl.core import validate_dns, _get_next_available_ip, resolve_peer_ref
+from wgpl.core import validate_dns, allocate_peer_ip, resolve_peer_ref
 from wgpl.exceptions import (
     AmbiguousPeerIdError,
     InvalidDnsError,
@@ -25,16 +25,16 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
     assert "preshared_key" not in result
 
 
-def test_get_next_available_ip_skips_gateway(wg0_interface: str) -> None:
+def test_allocate_peer_ip_skips_gateway(wg0_interface: str) -> None:
     with db.transaction() as conn:
-        first_ip = _get_next_available_ip(wg0_interface, conn)
+        first_ip = allocate_peer_ip(wg0_interface, conn)
 
     assert first_ip == "10.0.0.2"
 
     core.add_peer(wg0_interface, "peer_one")
 
     with db.transaction() as conn:
-        second_ip = _get_next_available_ip(wg0_interface, conn)
+        second_ip = allocate_peer_ip(wg0_interface, conn)
 
     assert second_ip == "10.0.0.3"
 

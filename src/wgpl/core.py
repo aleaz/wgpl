@@ -166,10 +166,6 @@ def allocate_peer_ip(
     return requested
 
 
-def _get_next_available_ip(interface_name: str, conn: sqlite3.Connection) -> str:
-    """Calculates the next available IP address in the interface's pool."""
-    return allocate_peer_ip(interface_name, conn)
-
 def add_peer(
     interface_name: str,
     peer_name: str,
