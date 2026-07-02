@@ -7,7 +7,58 @@ import sqlite3
 
 from . import db
 from . import wireguard
-from .exceptions import InterfaceNotFoundError, PeerNotFoundError, NoAvailableIpsError
+from .exceptions import (
+    AmbiguousPeerIdError,
+    InterfaceNotFoundError,
+    PeerNotFoundError,
+    NoAvailableIpsError,
+)
+
+_MIN_PEER_ID_PREFIX_LEN = 4
+_PEER_ID_HEX_LEN = 32
+
+
+def _normalize_peer_ref(ref: str) -> str:
+    """Return lowercase hex ID without hyphens."""
+    return ref.replace("-", "").lower()
+
+
+def _format_peer_id_short(peer_id: str) -> str:
+    """Return the 12-char hex prefix shown in peer list tables."""
+    return _normalize_peer_ref(peer_id)[:12]
+
+
+def resolve_peer_ref(ref: str, interface: str | None = None) -> str:
+    """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
+    normalized = _normalize_peer_ref(ref)
+
+    if not normalized or not all(c in "0123456789abcdef" for c in normalized):
+        raise PeerNotFoundError(f"Peer {ref} not found")
+
+    if len(normalized) == _PEER_ID_HEX_LEN:
+        matches = db.find_peers_by_id_prefix(normalized, interface)
+        exact = [peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized]
+        if len(exact) == 1:
+            return str(exact[0]["id"])
+        if len(exact) > 1:
+            raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, exact))
+
+    if len(normalized) < _MIN_PEER_ID_PREFIX_LEN:
+        raise PeerNotFoundError(f"Peer {ref} not found")
+
+    matches = db.find_peers_by_id_prefix(normalized, interface)
+    if not matches:
+        raise PeerNotFoundError(f"Peer {ref} not found")
+    if len(matches) == 1:
+        return str(matches[0]["id"])
+    raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, matches))
+
+
+def _ambiguous_peer_message(ref: str, matches: list[sqlite3.Row]) -> str:
+    candidates = ", ".join(
+        f"{_format_peer_id_short(peer['id'])} ({peer['name']})" for peer in matches
+    )
+    return f"Peer ID prefix '{ref}' is ambiguous. Matches: {candidates}"
 
 def _get_next_available_ip(interface_name: str, conn: sqlite3.Connection) -> str:
     """Calculates the next available IP address in the interface's pool."""
@@ -76,21 +127,23 @@ def add_peer(interface_name: str, peer_name: str) -> dict[str, str]:
 
 def remove_peer(interface_name: str, peer_id: str) -> None:
     """Removes a peer from the database given its ID and interface."""
+    canonical_id = resolve_peer_ref(peer_id, interface_name)
     with db.transaction() as conn:
-        peer = db.get_peer(peer_id, conn=conn)
+        peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_id} not found")
-            
+
         if peer['interface'] != interface_name:
             raise ValueError(f"Peer {peer_id} does not belong to interface {interface_name}")
-            
-        db.remove_peer(peer_id, conn=conn)
+
+        db.remove_peer(canonical_id, conn=conn)
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
 def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 25) -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
-    peer = db.get_peer(peer_id)
+    canonical_id = resolve_peer_ref(peer_id)
+    peer = db.get_peer(canonical_id)
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
         

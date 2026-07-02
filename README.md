@@ -99,10 +99,16 @@ wgpl peer add wg0 "Johns_Phone"
 wgpl peer list
 ```
 
+When multiple peers exist, `peer list` shows a short Docker-style ID prefix (12 hex
+characters). You can use that prefix with `peer config`, `peer qr`, and
+`peer remove` as long as it uniquely identifies one peer. `--json` always returns
+the full UUID.
+
 *Extract the configuration for the client:*
 
 ```bash
 wgpl peer config <PEER_ID>
+# Short prefix from peer list also works, e.g. 55c521ad2d94
 # You can customize network boundaries:
 # wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24" --keepalive=21
 ```
@@ -111,6 +117,15 @@ wgpl peer config <PEER_ID>
 
 ```bash
 wgpl peer qr <PEER_ID>
+# Short prefix from peer list also works, e.g. 55c521ad2d94
+```
+
+*Remove a peer:*
+
+```bash
+wgpl peer remove wg0 <PEER_ID>
+# Short prefix from peer list also works, e.g.:
+wgpl peer remove wg0 55c521ad2d94
 ```
 
 ### 3. Sync with WireGuard (Apply or Export)

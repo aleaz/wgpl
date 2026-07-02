@@ -22,10 +22,13 @@ wgpl interface list
 wgpl peer add wg0 "Johns_Phone"
 wgpl peer list
 
-# 3. Extract client configuration
+# 3. Extract client configuration (full UUID or short prefix from peer list)
 wgpl peer config <PEER_ID>
+wgpl peer config 55c521ad2d94
 wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24" --keepalive=21
 wgpl peer qr <PEER_ID>
+wgpl peer remove wg0 <PEER_ID>
+wgpl peer remove wg0 55c521ad2d94
 
 # 4. Sync with WireGuard
 #   Remote (disconnected):

@@ -238,7 +238,7 @@ def peer_add(
 def peer_remove(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
-    peer_id: str = typer.Argument(..., help="Peer ID")
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)")
 ):
     try:
         core.remove_peer(interface, peer_id)
@@ -294,7 +294,7 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
 @peer_app.command("config")
 def peer_config(
     ctx: typer.Context, 
-    peer_id: str = typer.Argument(...),
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
     keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
 ):
@@ -315,7 +315,7 @@ def peer_config(
 @peer_app.command("qr")
 def peer_qr(
     ctx: typer.Context, 
-    peer_id: str = typer.Argument(...),
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
     keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
 ):

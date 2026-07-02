@@ -18,6 +18,10 @@ class PeerNotFoundError(WgplException):
     """Raised when a peer is not found in the database."""
     pass
 
+class AmbiguousPeerIdError(WgplException):
+    """Raised when a peer ID prefix matches more than one peer."""
+    pass
+
 class PeerAlreadyExistsError(WgplException):
     """Raised when a peer name already exists in an interface."""
     pass

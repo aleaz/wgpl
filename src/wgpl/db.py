@@ -162,6 +162,35 @@ def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | N
         cursor = c.execute("SELECT * FROM peers WHERE id = ?", (id,))
         return cursor.fetchone()
 
+def find_peers_by_id_prefix(
+    prefix: str,
+    interface: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[sqlite3.Row]:
+    """Find peers whose hex ID (without hyphens) starts with prefix."""
+    like_pattern = f"{prefix}%"
+    with _ensure_conn(conn) as c:
+        if interface:
+            cursor = c.execute(
+                """
+                SELECT * FROM peers
+                WHERE REPLACE(LOWER(id), '-', '') LIKE ?
+                  AND interface = ?
+                ORDER BY interface, ip_address
+                """,
+                (like_pattern, interface),
+            )
+        else:
+            cursor = c.execute(
+                """
+                SELECT * FROM peers
+                WHERE REPLACE(LOWER(id), '-', '') LIKE ?
+                ORDER BY interface, ip_address
+                """,
+                (like_pattern,),
+            )
+        return cursor.fetchall()
+
 def list_peers(interface: str | None = None, conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
     """Lists all peers, optionally filtered by a specific interface."""
     with _ensure_conn(conn) as c:
