@@ -232,8 +232,15 @@ def add_peer(
                 "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns),
             )
-    except sqlite3.IntegrityError:
-        raise PeerAlreadyExistsError(f"Peer name '{name}' already exists in interface '{interface}'.")
+    except sqlite3.IntegrityError as exc:
+        error_msg = str(exc).lower()
+        if "ip_address" in error_msg:
+            raise IpAlreadyInUseError(
+                f"IP {ip_address} is already assigned in interface '{interface}'"
+            ) from exc
+        raise PeerAlreadyExistsError(
+            f"Peer name '{name}' already exists in interface '{interface}'."
+        ) from exc
 
 def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
     """Retrieves a peer by its unique ID."""

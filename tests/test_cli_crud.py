@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from wgpl import core, db, wireguard
@@ -65,3 +66,23 @@ def test_cli_interface_remove_not_found(wgpl_db: str) -> None:
     result = runner.invoke(app, ["interface", "remove", "missing"])
 
     assert result.exit_code == 1
+
+
+def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
+    wgpl_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+    pubkey = wireguard.generate_keypair().public_key
+    runner.invoke(
+        app,
+        ["interface", "add", "wg1", "vpn2.example.com", pubkey, "10.0.1.0/24"],
+    )
+    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+
+    result = runner.invoke(app, ["peer", "remove", "wg1", peer["id"]])
+
+    assert result.exit_code == 1
+    assert "WGPL Error" in result.stderr
+    assert "does not belong" in result.stderr
+    assert "Unexpected Error" not in result.stderr

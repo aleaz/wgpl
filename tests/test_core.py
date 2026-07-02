@@ -1,4 +1,5 @@
 import datetime
+import uuid
 
 import pytest
 
@@ -11,6 +12,7 @@ from wgpl.exceptions import (
     IpAlreadyInUseError,
     NoUpdateFieldsError,
     PeerAlreadyExistsError,
+    PeerInterfaceMismatchError,
     PeerNotFoundError,
     PeersOutsidePoolError,
 )
@@ -293,3 +295,83 @@ def test_validate_state_detects_bad_ip(wg0_interface: str) -> None:
 
     assert result["status"] == "error"
     assert any(issue["code"] == "ip_outside_pool" for issue in result["issues"])
+
+
+def test_remove_peer_interface_mismatch_raises_domain_error(
+    wg0_interface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+
+    with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
+        core.remove_peer("wg1", peer["id"])
+
+
+def test_update_peer_interface_mismatch_raises_domain_error(
+    wg0_interface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+
+    with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
+        core.update_peer("wg1", peer["id"], name="renamed")
+
+
+def test_db_add_peer_duplicate_ip_raises_ip_error(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "first", ip_address="10.0.0.2")
+    keypair = wireguard.generate_keypair()
+
+    with pytest.raises(IpAlreadyInUseError, match="10.0.0.2"):
+        db.add_peer(
+            id=str(uuid.uuid4()),
+            interface=wg0_interface,
+            name="second",
+            ip_address="10.0.0.2",
+            public_key=keypair.public_key,
+            private_key=keypair.private_key,
+            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+
+def test_db_add_peer_duplicate_name_raises_name_error(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "taken", ip_address="10.0.0.2")
+    keypair = wireguard.generate_keypair()
+
+    with pytest.raises(PeerAlreadyExistsError, match="taken"):
+        db.add_peer(
+            id=str(uuid.uuid4()),
+            interface=wg0_interface,
+            name="taken",
+            ip_address="10.0.0.3",
+            public_key=keypair.public_key,
+            private_key=keypair.private_key,
+            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+
+def test_get_interface_config_excludes_removed_peer(wg0_interface: str) -> None:
+    kept = core.add_peer(wg0_interface, "keep")
+    removed = core.add_peer(wg0_interface, "gone")
+    core.remove_peer(wg0_interface, removed["id"])
+
+    config = core.get_interface_config(wg0_interface)
+
+    assert kept["public_key"] in config
+    assert removed["public_key"] not in config
+
+
+def test_add_interface_registers_row(wgpl_db: str) -> None:
+    pubkey = wireguard.generate_keypair().public_key
+    result = core.add_interface("wg0", "vpn.example.com", pubkey, "10.0.0.0/24", dns="1.1.1.1")
+
+    assert result["address_pool"] == "10.0.0.0/24"
+    assert result["dns"] == "1.1.1.1"
+    assert db.get_interface("wg0") is not None
+
+
+def test_remove_interface_deletes_peers(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "p")
+    core.remove_interface(wg0_interface)
+
+    assert db.get_interface(wg0_interface) is None
+    assert db.get_peer(peer["id"]) is None

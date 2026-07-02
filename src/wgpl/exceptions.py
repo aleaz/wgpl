@@ -30,6 +30,10 @@ class PeerNotFoundError(WgplException):
     """Raised when a peer is not found in the database."""
     pass
 
+class PeerInterfaceMismatchError(WgplException):
+    """Raised when a peer does not belong to the requested interface."""
+    pass
+
 class AmbiguousPeerIdError(WgplException):
     """Raised when a peer ID prefix matches more than one peer."""
     pass

@@ -161,37 +161,20 @@ def interface_add(
     dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs (e.g. 1.1.1.1)"),
 ):
     try:
-        # Validate Port
-        if not (1 <= port <= 65535):
-            console.print(f"[red]WGPL Error: Port must be between 1 and 65535, got {port}.[/red]")
-            sys.exit(1)
-            
-        # Validate Address Pool CIDR
-        try:
-            ipaddress.IPv4Network(address_pool, strict=False)
-        except ValueError as e:
-            console.print(f"[red]WGPL Error: Invalid address pool '{address_pool}'. {e}[/red]")
-            sys.exit(1)
-
-        normalized_dns = core.validate_dns(dns) if dns is not None else None
-        db.add_interface(name, endpoint, public_key, address_pool, port, dns=normalized_dns)
-        data = {
-            "name": name,
-            "endpoint": endpoint,
-            "port": port,
-            "public_key": public_key,
-            "address_pool": address_pool,
-        }
-        if normalized_dns is not None:
-            data["dns"] = normalized_dns
+        result = core.add_interface(
+            name, endpoint, public_key, address_pool, port=port, dns=dns
+        )
         if ctx.obj.get("json"):
-            _output(ctx, data)
+            _output(ctx, result)
         else:
             console.print(f"[green]Added interface {name}[/green]")
     except InterfaceAlreadyExistsError:
         console.print(f"[red]WGPL Error: Interface {name} already exists.[/red]")
         sys.exit(1)
     except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except ValueError as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
     except Exception as e:
@@ -204,7 +187,7 @@ def interface_remove(
     name: str = typer.Argument(..., help="Interface name (e.g. wg0)")
 ):
     try:
-        db.remove_interface(name)
+        core.remove_interface(name)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "interface": name})
         else:

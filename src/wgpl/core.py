@@ -17,6 +17,7 @@ from .exceptions import (
     NoAvailableIpsError,
     NoUpdateFieldsError,
     PeerAlreadyExistsError,
+    PeerInterfaceMismatchError,
     PeerNotFoundError,
     PeersOutsidePoolError,
 )
@@ -82,6 +83,45 @@ def validate_dns(value: str) -> str:
             raise InvalidDnsError(f"Invalid DNS address '{part}'") from exc
         normalized.append(part)
     return ", ".join(normalized)
+
+
+def add_interface(
+    name: str,
+    endpoint: str,
+    public_key: str,
+    address_pool: str,
+    port: int = 51820,
+    dns: str | None = None,
+) -> dict[str, str | int | None]:
+    """Register a WireGuard interface in the database."""
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Port must be between 1 and 65535, got {port}")
+
+    try:
+        normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
+    except ValueError as exc:
+        raise ValueError(f"Invalid address pool '{address_pool}'") from exc
+
+    normalized_dns = validate_dns(dns) if dns is not None else None
+    db.add_interface(
+        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns
+    )
+
+    result: dict[str, str | int | None] = {
+        "name": name,
+        "endpoint": endpoint,
+        "port": port,
+        "public_key": public_key,
+        "address_pool": normalized_pool,
+    }
+    if normalized_dns is not None:
+        result["dns"] = normalized_dns
+    return result
+
+
+def remove_interface(name: str) -> None:
+    """Remove an interface and all associated peers from the database."""
+    db.remove_interface(name)
 
 
 def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
@@ -223,7 +263,9 @@ def remove_peer(interface_name: str, peer_id: str) -> None:
             raise PeerNotFoundError(f"Peer {peer_id} not found")
 
         if peer['interface'] != interface_name:
-            raise ValueError(f"Peer {peer_id} does not belong to interface {interface_name}")
+            raise PeerInterfaceMismatchError(
+                f"Peer {peer_id} does not belong to interface {interface_name}"
+            )
 
         db.remove_peer(canonical_id, conn=conn)
 
@@ -462,7 +504,9 @@ def update_peer(
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
         if peer["interface"] != interface_name:
-            raise ValueError(f"Peer {peer_ref} does not belong to interface {interface_name}")
+            raise PeerInterfaceMismatchError(
+                f"Peer {peer_ref} does not belong to interface {interface_name}"
+            )
 
         validated_ip: str | UnsetType = UNSET
         if ip_address is not None:
