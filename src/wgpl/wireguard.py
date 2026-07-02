@@ -63,9 +63,9 @@ def generate_preshared_key() -> str:
 
 def syncconf(interface: str, conf_content: str) -> None:
     """Applies a declarative configuration to a WireGuard interface."""
-    # Write the config to a secure temporary file
     fd, path = tempfile.mkstemp()
     try:
+        os.chmod(path, 0o600)
         with os.fdopen(fd, 'wb') as f:
             f.write(conf_content.encode('utf-8'))
         run_wg_command("syncconf", interface, path)

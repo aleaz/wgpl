@@ -137,6 +137,25 @@ wgpl peer remove wg0 <PEER_ID>
 wgpl peer remove wg0 55c521ad2d94
 ```
 
+*Update an interface or peer (without rotating keys):*
+
+```bash
+wgpl interface update wg0 --endpoint vpn2.example.com
+wgpl interface update wg0 --dns 1.1.1.1
+wgpl interface update wg0 --clear-dns
+wgpl interface update wg0 --address-pool 10.0.0.0/23   # rejected if peers fall outside
+
+wgpl peer update wg0 <PEER_ID> --name "Work Laptop"
+wgpl peer update wg0 <PEER_ID> --ip 10.0.0.50
+wgpl peer update wg0 <PEER_ID> --clear-dns
+
+wgpl validate              # check entire database
+wgpl validate wg0          # check one interface
+```
+
+After changes that affect client configs or server peer list, WGPL prints
+operational hints on stderr (e.g. re-export client `.conf`/QR, run `apply`).
+
 ### 3. Sync with WireGuard (Apply or Export)
 
 Up to this point, we have safely saved the configuration in WGPL's local database. To apply it to the actual WireGuard kernel, you have two options depending on where WGPL is installed:
@@ -178,13 +197,16 @@ wgpl peer list --json      # wrong — flag is ignored (Typer does not propagate
 | `interface remove` | `{status, interface}` |
 | `interface list` | `[{...interface rows...}]` |
 | `interface export` | `{config: "<wg server peers>"}` |
+| `interface update` | `{name, endpoint, port, public_key, address_pool, dns?, hints}` |
 | `peer add` | `{id, name, ip_address, public_key, dns?}` |
 | `peer remove` | `{status, id, input}` — `id` is canonical UUID; `input` is the ref you passed |
+| `peer update` | `{id, name, ip_address, dns, dns_override, hints}` |
 | `peer list` | `[{id, interface, name, ip_address, public_key, created_at, dns, dns_override}]` — `dns` is effective; `dns_override` is peer-only |
 | `peer config` | `{config: "<full .conf>"}` — includes `PrivateKey` (intentional for M2M provisioning) |
 | `peer qr` | `{qr: "<ascii>"}` — encodes full client config |
 | `peer qr -o` | `{status, path, peer_id}` |
 | `apply` | `{status, action, interface}` |
+| `validate` | `{status, issues}` — exit 1 if `status` is `error` |
 
 ```bash
 # Example: Extract the IP of the new peer in bash using jq
@@ -206,3 +228,15 @@ wgpl --db /etc/wireguard/wgpl.sqlite3 interface list
 ```
 
 *(Note: WGPL strictly applies `chmod 600` permissions on every database connection to protect cryptographic material, regardless of where you store it).*
+
+---
+
+## CRUD notes
+
+WGPL supports **create, read, update, and delete** for interfaces and peers.
+Updates do not auto-sync to WireGuard — run `apply` or `export` when operational
+hints say so (printed on stderr in human mode, or in the `hints` JSON field).
+
+Changing `--address-pool` is rejected if any existing peer IP falls outside the
+new CIDR. Planned for a later release: `peer rotate-keys`, `interface rename`,
+`peer move`.

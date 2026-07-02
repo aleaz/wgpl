@@ -9,7 +9,10 @@ from wgpl.exceptions import (
     InvalidDnsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
+    NoUpdateFieldsError,
+    PeerAlreadyExistsError,
     PeerNotFoundError,
+    PeersOutsidePoolError,
 )
 
 
@@ -187,3 +190,106 @@ def test_get_peer_config_peer_dns_overrides_interface(wg0_interface: str) -> Non
 
     assert "DNS = 9.9.9.9" in config
     assert "1.1.1.1" not in config
+
+
+def test_update_interface_endpoint(wg0_interface: str) -> None:
+    result = core.update_interface(wg0_interface, endpoint="vpn2.example.com")
+
+    assert result["endpoint"] == "vpn2.example.com"
+    assert "re_export_clients" in result["hints"]
+    assert db.get_interface(wg0_interface)["endpoint"] == "vpn2.example.com"
+
+
+def test_update_interface_pool_expand_ok(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "peer_one")
+
+    result = core.update_interface(wg0_interface, address_pool="10.0.0.0/23")
+
+    assert result["address_pool"] == "10.0.0.0/23"
+
+
+def test_update_interface_pool_shrink_rejects(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "high_host", ip_address="10.0.0.200")
+
+    with pytest.raises(PeersOutsidePoolError):
+        core.update_interface(wg0_interface, address_pool="10.0.0.0/25")
+
+
+def test_update_interface_pool_wrong_subnet_rejects(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "peer_one", ip_address="10.0.0.2")
+
+    with pytest.raises(PeersOutsidePoolError):
+        core.update_interface(wg0_interface, address_pool="10.0.1.0/24")
+
+
+def test_update_interface_no_fields_raises(wg0_interface: str) -> None:
+    with pytest.raises(NoUpdateFieldsError):
+        core.update_interface(wg0_interface)
+
+
+def test_update_peer_name(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "old_name")
+
+    result = core.update_peer(wg0_interface, peer["id"], name="new_name")
+
+    assert result["name"] == "new_name"
+    assert db.get_peer(peer["id"])["name"] == "new_name"
+
+
+def test_update_peer_name_conflict(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "taken")
+    peer = core.add_peer(wg0_interface, "mine")
+
+    with pytest.raises(PeerAlreadyExistsError):
+        core.update_peer(wg0_interface, peer["id"], name="taken")
+
+
+def test_update_peer_ip(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "mobile", ip_address="10.0.0.2")
+
+    result = core.update_peer(wg0_interface, peer["id"], ip_address="10.0.0.50")
+
+    assert result["ip_address"] == "10.0.0.50"
+    assert "apply_server" in result["hints"]
+    assert "re_export_client" in result["hints"]
+
+
+def test_update_peer_ip_same(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "stable", ip_address="10.0.0.2")
+
+    result = core.update_peer(wg0_interface, peer["id"], ip_address="10.0.0.2")
+
+    assert result["ip_address"] == "10.0.0.2"
+
+
+def test_update_peer_clear_dns(wgpl_db: str) -> None:
+    public_key = wireguard.generate_keypair().public_key
+    db.add_interface("wg_dns", "vpn.example.com", public_key, "10.0.0.0/24", dns="1.1.1.1")
+    peer = core.add_peer("wg_dns", "phone", dns="9.9.9.9")
+
+    result = core.update_peer("wg_dns", peer["id"], clear_dns=True)
+
+    assert result["dns_override"] is None
+    assert result["dns"] == "1.1.1.1"
+
+
+def test_validate_state_ok(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "valid_peer")
+
+    result = core.validate_state()
+
+    assert result == {"status": "ok", "issues": []}
+
+
+def test_validate_state_detects_bad_ip(wg0_interface: str) -> None:
+    peer_id = "55c521ad-2d94-4689-8abc-123456789abc"
+    _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
+
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id))
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+
+    assert result["status"] == "error"
+    assert any(issue["code"] == "ip_outside_pool" for issue in result["issues"])

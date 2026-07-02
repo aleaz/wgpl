@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `interface update` — change endpoint, port, public key, address pool, or DNS without removing peers
+- `peer update` — change name, IP, or DNS override without rotating keys
+- `wgpl validate [interface]` — dry-run consistency check (peer IPs in pool, valid DNS)
 - Docker-style peer ID prefixes: `peer config`, `peer qr`, and `peer remove` accept a unique hex prefix (as shown in `peer list`); `--json` still returns the full UUID
 - `peer qr --output` / `-o` writes a scannable PNG (ASCII remains the default)
 - Optional `--ip` on `peer add` and `--dns` on `interface add` / `peer add` (interface default, peer override; embedded in client config export)
@@ -21,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - README: document `--json` flag position (before subcommand) and JSON output shapes per command
+- `interface remove` reports an error when the interface does not exist
+- `syncconf` temp file is created with `chmod 600` before writing peer config
+
+### Security
+
+- SECURITY.md: clarify `peer update` vs key rotation via remove/add
 
 ## [0.1.0] - 2026-07-02
 

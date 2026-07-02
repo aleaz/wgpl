@@ -33,3 +33,6 @@ jobs:
 
     - name: Run Tests
       run: uv run pytest
+
+    - name: Build package
+      run: uv build

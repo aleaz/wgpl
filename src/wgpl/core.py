@@ -6,6 +6,7 @@ import io
 import sqlite3
 
 from . import db
+from .db import UNSET, UnsetType
 from . import wireguard
 from .exceptions import (
     AmbiguousPeerIdError,
@@ -13,8 +14,11 @@ from .exceptions import (
     InvalidDnsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
-    PeerNotFoundError,
     NoAvailableIpsError,
+    NoUpdateFieldsError,
+    PeerAlreadyExistsError,
+    PeerNotFoundError,
+    PeersOutsidePoolError,
 )
 
 _MIN_PEER_ID_PREFIX_LEN = 4
@@ -91,7 +95,11 @@ def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
     return None
 
 
-def _pool_used_ips(interface_name: str, conn: sqlite3.Connection) -> tuple[ipaddress.IPv4Network, set[str]]:
+def _pool_used_ips(
+    interface_name: str,
+    conn: sqlite3.Connection,
+    exclude_peer_id: str | None = None,
+) -> tuple[ipaddress.IPv4Network, set[str]]:
     """Return the interface pool network and all reserved/used host IPs."""
     iface = db.get_interface(interface_name, conn=conn)
     if not iface:
@@ -99,6 +107,11 @@ def _pool_used_ips(interface_name: str, conn: sqlite3.Connection) -> tuple[ipadd
 
     network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
     used_ips = {peer["ip_address"] for peer in db.list_peers(interface_name, conn=conn)}
+
+    if exclude_peer_id:
+        peer = db.get_peer(exclude_peer_id, conn=conn)
+        if peer:
+            used_ips.discard(peer["ip_address"])
 
     try:
         used_ips.add(str(network[1]))
@@ -108,8 +121,8 @@ def _pool_used_ips(interface_name: str, conn: sqlite3.Connection) -> tuple[ipadd
     return network, used_ips
 
 
-def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ips: set[str]) -> None:
-    """Raise if ip is invalid, outside the pool, reserved, or already used."""
+def _validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
+    """Raise if ip is invalid, outside the pool, or reserved for the gateway."""
     try:
         ipaddress.IPv4Address(ip)
     except ValueError as exc:
@@ -125,6 +138,11 @@ def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ip
     except IndexError:
         pass
 
+
+def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ips: set[str]) -> None:
+    """Raise if ip is invalid, outside the pool, reserved, or already used."""
+    _validate_peer_ip_in_pool(ip, network)
+
     if ip in used_ips:
         raise IpAlreadyInUseError(f"IP {ip} is already assigned in this interface")
 
@@ -133,9 +151,10 @@ def allocate_peer_ip(
     interface_name: str,
     conn: sqlite3.Connection,
     requested: str | None = None,
+    exclude_peer_id: str | None = None,
 ) -> str:
     """Allocate the next free IP or validate a requested IP within the interface pool."""
-    network, used_ips = _pool_used_ips(interface_name, conn)
+    network, used_ips = _pool_used_ips(interface_name, conn, exclude_peer_id=exclude_peer_id)
 
     if requested is None:
         available = next((str(ip) for ip in network.hosts() if str(ip) not in used_ips), None)
@@ -305,3 +324,240 @@ def sync_interface(interface_name: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
     conf_content = get_interface_config(interface_name)
     wireguard.syncconf(interface_name, conf_content)
+
+
+def _interface_row_to_dict(iface: sqlite3.Row) -> dict[str, str | int | None]:
+    return {
+        "name": iface["name"],
+        "endpoint": iface["endpoint"],
+        "port": iface["port"],
+        "public_key": iface["public_key"],
+        "address_pool": iface["address_pool"],
+        "dns": iface["dns"],
+    }
+
+
+def validate_peers_in_pool(
+    interface_name: str,
+    pool_cidr: str,
+    conn: sqlite3.Connection,
+) -> None:
+    """Raise PeersOutsidePoolError if any peer IP is invalid in the given pool."""
+    network = ipaddress.IPv4Network(pool_cidr, strict=False)
+    conflicts: list[dict[str, str]] = []
+
+    for peer in db.list_peers(interface_name, conn=conn):
+        ip = str(peer["ip_address"])
+        try:
+            _validate_peer_ip_in_pool(ip, network)
+        except InvalidPeerIpError as exc:
+            conflicts.append({"name": str(peer["name"]), "ip_address": ip, "detail": str(exc)})
+
+    if conflicts:
+        raise PeersOutsidePoolError(interface_name, conflicts)
+
+
+def update_interface(
+    name: str,
+    *,
+    endpoint: str | None = None,
+    port: int | None = None,
+    public_key: str | None = None,
+    address_pool: str | None = None,
+    dns: str | None = None,
+    clear_dns: bool = False,
+) -> dict[str, str | int | list[str] | None]:
+    """Update interface fields. Returns the updated row and operational hints."""
+    if clear_dns and dns is not None:
+        raise ValueError("Cannot set both dns and clear_dns")
+
+    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns))
+    if not has_field and not clear_dns:
+        raise NoUpdateFieldsError("No fields provided to update")
+
+    hints: list[str] = []
+    if endpoint is not None:
+        hints.append("re_export_clients")
+    if port is not None:
+        hints.append("re_export_clients")
+    if public_key is not None:
+        hints.append("re_export_clients")
+    if address_pool is not None:
+        hints.append("re_export_clients")
+    if dns is not None or clear_dns:
+        hints.append("re_export_clients")
+
+    if port is not None and not (1 <= port <= 65535):
+        raise ValueError(f"Port must be between 1 and 65535, got {port}")
+
+    normalized_pool: str | None = None
+    if address_pool is not None:
+        try:
+            normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"Invalid address pool '{address_pool}'") from exc
+
+    normalized_dns: str | None | UnsetType = UNSET
+    if clear_dns:
+        normalized_dns = None
+    elif dns is not None:
+        normalized_dns = validate_dns(dns)
+
+    with db.transaction() as conn:
+        iface = db.get_interface(name, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+        if normalized_pool is not None and normalized_pool != iface["address_pool"]:
+            validate_peers_in_pool(name, normalized_pool, conn)
+
+        db.update_interface(
+            name,
+            endpoint=endpoint if endpoint is not None else UNSET,
+            port=port if port is not None else UNSET,
+            public_key=public_key if public_key is not None else UNSET,
+            address_pool=normalized_pool if normalized_pool is not None else UNSET,
+            dns=normalized_dns,
+            conn=conn,
+        )
+
+        updated = db.get_interface(name, conn=conn)
+        if not updated:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+    result: dict[str, str | int | list[str] | None] = dict(_interface_row_to_dict(updated))
+    result["hints"] = list(dict.fromkeys(hints))
+    return result
+
+
+def update_peer(
+    interface_name: str,
+    peer_ref: str,
+    *,
+    name: str | None = None,
+    ip_address: str | None = None,
+    dns: str | None = None,
+    clear_dns: bool = False,
+) -> dict[str, str | list[str] | None]:
+    """Update peer fields. Returns safe peer data and operational hints."""
+    if clear_dns and dns is not None:
+        raise ValueError("Cannot set both dns and clear_dns")
+
+    has_field = any(v is not None for v in (name, ip_address, dns))
+    if not has_field and not clear_dns:
+        raise NoUpdateFieldsError("No fields provided to update")
+
+    canonical_id = resolve_peer_ref(peer_ref, interface_name)
+    hints: list[str] = []
+
+    if ip_address is not None:
+        hints.extend(["apply_server", "re_export_client"])
+    if dns is not None or clear_dns:
+        hints.append("re_export_client")
+
+    normalized_dns: str | None | UnsetType = UNSET
+    if clear_dns:
+        normalized_dns = None
+    elif dns is not None:
+        normalized_dns = validate_dns(dns)
+
+    with db.transaction() as conn:
+        peer = db.get_peer(canonical_id, conn=conn)
+        if not peer:
+            raise PeerNotFoundError(f"Peer {peer_ref} not found")
+        if peer["interface"] != interface_name:
+            raise ValueError(f"Peer {peer_ref} does not belong to interface {interface_name}")
+
+        validated_ip: str | UnsetType = UNSET
+        if ip_address is not None:
+            validated_ip = allocate_peer_ip(
+                interface_name,
+                conn,
+                ip_address,
+                exclude_peer_id=canonical_id,
+            )
+
+        try:
+            db.update_peer(
+                canonical_id,
+                name=name if name is not None else UNSET,
+                ip_address=validated_ip,
+                dns=normalized_dns,
+                conn=conn,
+            )
+        except PeerAlreadyExistsError:
+            raise
+
+        updated = db.get_peer(canonical_id, conn=conn)
+        if not updated:
+            raise PeerNotFoundError(f"Peer {peer_ref} not found")
+
+        iface = db.get_interface(interface_name, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+
+    effective_dns = _effective_peer_dns(updated, iface)
+    return {
+        "id": str(updated["id"]),
+        "name": str(updated["name"]),
+        "ip_address": str(updated["ip_address"]),
+        "dns": effective_dns,
+        "dns_override": updated["dns"],
+        "hints": list(dict.fromkeys(hints)),
+    }
+
+
+def validate_state(interface: str | None = None) -> dict[str, str | list[dict[str, str]]]:
+    """Validate DB consistency without mutating state."""
+    issues: list[dict[str, str]] = []
+
+    if interface is not None:
+        iface = db.get_interface(interface)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {interface} not found")
+        interfaces = [iface]
+    else:
+        interfaces = db.list_interfaces()
+
+    for iface in interfaces:
+        iface_name = str(iface["name"])
+        pool = str(iface["address_pool"])
+        network = ipaddress.IPv4Network(pool, strict=False)
+
+        if iface["dns"]:
+            try:
+                validate_dns(str(iface["dns"]))
+            except InvalidDnsError as exc:
+                issues.append({
+                    "interface": iface_name,
+                    "peer": "",
+                    "code": "invalid_dns",
+                    "detail": f"Interface DNS: {exc}",
+                })
+
+        for peer in db.list_peers(iface_name):
+            peer_name = str(peer["name"])
+            ip = str(peer["ip_address"])
+            try:
+                _validate_peer_ip_in_pool(ip, network)
+            except InvalidPeerIpError as exc:
+                issues.append({
+                    "interface": iface_name,
+                    "peer": peer_name,
+                    "code": "ip_outside_pool",
+                    "detail": str(exc),
+                })
+
+            if peer["dns"]:
+                try:
+                    validate_dns(str(peer["dns"]))
+                except InvalidDnsError as exc:
+                    issues.append({
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "invalid_dns",
+                        "detail": str(exc),
+                    })
+
+    status = "ok" if not issues else "error"
+    return {"status": status, "issues": issues}

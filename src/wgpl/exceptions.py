@@ -38,6 +38,19 @@ class PeerAlreadyExistsError(WgplException):
     """Raised when a peer name already exists in an interface."""
     pass
 
+class NoUpdateFieldsError(WgplException):
+    """Raised when an update command is invoked without any fields to change."""
+    pass
+
+class PeersOutsidePoolError(WgplException):
+    """Raised when a new address pool would leave existing peers outside the CIDR."""
+
+    def __init__(self, interface: str, conflicts: list[dict[str, str]]) -> None:
+        self.interface = interface
+        self.conflicts = conflicts
+        details = ", ".join(f"{c['name']} ({c['ip_address']})" for c in conflicts)
+        super().__init__(f"Peers outside pool for interface {interface}: {details}")
+
 class WireguardConfigError(WgplException):
     """Raised when a WireGuard configuration command fails."""
     pass

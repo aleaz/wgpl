@@ -212,3 +212,50 @@ def test_json_flag_must_precede_subcommand(wgpl_db: str, iface_pubkey: str) -> N
 
     # Global --json must precede the subcommand; trailing flag is not recognized.
     assert result.exit_code != 0 or not result.stdout.strip().startswith("[")
+
+
+def test_json_interface_update(wgpl_db: str, iface_pubkey: str) -> None:
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+
+    result = runner.invoke(
+        app, ["--json", "interface", "update", "wg0", "--endpoint", "vpn2.example.com"]
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["endpoint"] == "vpn2.example.com"
+    assert "re_export_clients" in payload["hints"]
+
+
+def test_json_peer_update(wgpl_db: str, iface_pubkey: str) -> None:
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout)
+
+    result = runner.invoke(
+        app,
+        ["--json", "peer", "update", "wg0", peer["id"], "--name", "Work"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["name"] == "Work"
+    assert payload["id"] == peer["id"]
+
+
+def test_json_validate(wgpl_db: str, iface_pubkey: str) -> None:
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+    runner.invoke(app, ["peer", "add", "wg0", "phone"])
+
+    result = runner.invoke(app, ["--json", "validate", "wg0"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"status": "ok", "issues": []}

@@ -25,6 +25,12 @@ wgpl peer add wg0 "Server" --ip 10.0.0.50
 wgpl peer add wg0 "Kids" --dns 9.9.9.9
 wgpl peer list
 
+# 2b. Update without rotating keys
+wgpl interface update wg0 --endpoint vpn2.example.com
+wgpl peer update wg0 <PEER_ID> --name "Work Laptop"
+wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
+wgpl validate wg0
+
 # 3. Extract client configuration (full UUID or short prefix from peer list)
 wgpl peer config <PEER_ID>
 wgpl peer config 55c521ad2d94
@@ -56,6 +62,11 @@ wgpl apply wg0
 | `src/wgpl/db.py` | Secure connection, transactions, SQLite CRUD |
 | `src/wgpl/wireguard.py` | x25519 keys, PSK, `wg syncconf` |
 | `src/wgpl/exceptions.py` | `WgplException` hierarchy |
+
+## CRUD commands
+
+`interface update`, `peer update`, and `validate` are implemented. Future work:
+`peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).
 
 ## Pre-PR checklist (repo-specific)
 

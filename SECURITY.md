@@ -43,4 +43,7 @@ Out of scope:
 
 - Restrict filesystem permissions on the database path (`WGPL_DB_PATH` or `--db`).
 - Run `wgpl interface export` over SSH to trusted hosts only.
-- Rotate peers by removing and re-adding them if a key may have been exposed.
+- Use `wgpl peer update` to change peer name, IP, or DNS without rotating keys.
+- If a private key or PSK may have been exposed, remove the peer and add a new one
+  (key rotation is not available via `peer update`).
+- Run `wgpl validate` after bulk changes to confirm peer IPs still fit their pools.

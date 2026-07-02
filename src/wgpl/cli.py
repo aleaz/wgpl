@@ -6,7 +6,7 @@ import sqlite3
 import sys
 import ipaddress
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from rich import box
 from rich.console import Console
@@ -15,6 +15,12 @@ from rich.table import Table
 from . import db
 from . import core
 from .exceptions import WgplException, InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgBinaryNotFoundError
+
+_HINT_MESSAGES = {
+    "re_export_clients": "Re-export client configs (peer config / qr) for peers on this interface.",
+    "re_export_client": "Re-export this peer's client config or QR.",
+    "apply_server": "Run wgpl apply or interface export to sync the server.",
+}
 
 app = typer.Typer(help="WGPL - WireGuard Peer Manager (Lite)")
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
@@ -124,6 +130,17 @@ def main(
 def _output(ctx: typer.Context, data: dict | list):
     if ctx.obj.get("json"):
         print(json.dumps(data))
+
+def _extract_hints(result: Mapping[str, object]) -> list[str]:
+    hints = result.get("hints")
+    if isinstance(hints, list):
+        return [hint for hint in hints if isinstance(hint, str)]
+    return []
+
+def _print_hints(hints: list[str]) -> None:
+    for hint in hints:
+        message = _HINT_MESSAGES.get(hint, hint)
+        console.print(f"[yellow]Hint: {message}[/yellow]")
 
 def _validate_allowed_ips(allowed_ips: str) -> None:
     for ip in allowed_ips.split(","):
@@ -251,6 +268,46 @@ def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="I
         console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
+@interface_app.command("update")
+def interface_update(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    endpoint: str | None = typer.Option(None, "--endpoint", help="Public endpoint hostname"),
+    port: int | None = typer.Option(None, "--port", help="Listen port"),
+    public_key: str | None = typer.Option(None, "--public-key", help="Server public key"),
+    address_pool: str | None = typer.Option(None, "--address-pool", help="Address pool CIDR"),
+    dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs"),
+    clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove interface default DNS"),
+):
+    try:
+        if clear_dns and dns is not None:
+            console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
+            sys.exit(1)
+
+        result = core.update_interface(
+            name,
+            endpoint=endpoint,
+            port=port,
+            public_key=public_key,
+            address_pool=address_pool,
+            dns=dns,
+            clear_dns=clear_dns,
+        )
+        if ctx.obj.get("json"):
+            _output(ctx, result)
+        else:
+            console.print(f"[green]Updated interface {name}[/green]")
+            _print_hints(_extract_hints(result))
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except ValueError as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected Error: {e}[/red]")
+        sys.exit(1)
+
 # --- Peers ---
 
 @peer_app.command("add")
@@ -292,6 +349,47 @@ def peer_remove(
         else:
             console.print(f"[green]Removed peer {peer_id}[/green]")
     except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected Error: {e}[/red]")
+        sys.exit(1)
+
+@peer_app.command("update")
+def peer_update(
+    ctx: typer.Context,
+    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
+    name: str | None = typer.Option(None, "--name", help="New peer name"),
+    ip: str | None = typer.Option(None, "--ip", help="New peer IP from the interface pool"),
+    dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
+    clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove peer DNS override (inherit interface default)"),
+):
+    try:
+        if clear_dns and dns is not None:
+            console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
+            sys.exit(1)
+
+        result = core.update_peer(
+            interface,
+            peer_id,
+            name=name,
+            ip_address=ip,
+            dns=dns,
+            clear_dns=clear_dns,
+        )
+        if ctx.obj.get("json"):
+            _output(ctx, result)
+        else:
+            console.print(f"[green]Updated peer {peer_id}[/green]")
+            _print_hints(_extract_hints(result))
+    except PeerAlreadyExistsError as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except ValueError as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
     except Exception as e:
@@ -393,6 +491,39 @@ def peer_qr(
                 _output(ctx, {"qr": qr})
             else:
                 print(qr)
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected Error: {e}[/red]")
+        sys.exit(1)
+
+# --- Validate ---
+
+@app.command("validate")
+def validate_cmd(
+    ctx: typer.Context,
+    interface: str | None = typer.Argument(None, help="Interface name to check (all if omitted)"),
+):
+    """Validate database consistency (peer IPs in pool, DNS values)."""
+    try:
+        result = core.validate_state(interface)
+        if ctx.obj.get("json"):
+            _output(ctx, result)
+        elif result["status"] == "ok":
+            scope = interface or "database"
+            console.print(f"[green]Validation passed for {scope}[/green]")
+        else:
+            issues = result["issues"]
+            assert isinstance(issues, list)
+            for issue in issues:
+                peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
+                console.print(
+                    f"[red]{issue['interface']}{peer_part}: "
+                    f"{issue['code']} — {issue['detail']}[/red]"
+                )
+        if result["status"] != "ok":
+            sys.exit(1)
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)

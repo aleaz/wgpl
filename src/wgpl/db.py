@@ -1,9 +1,24 @@
 import sqlite3
 import os
 from contextlib import contextmanager
-from typing import Generator
+from typing import Any, Generator
 
-from .exceptions import InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgplException
+from .exceptions import (
+    InterfaceAlreadyExistsError,
+    InterfaceNotFoundError,
+    IpAlreadyInUseError,
+    PeerAlreadyExistsError,
+    WgplException,
+)
+
+
+class _UnsetType:
+    """Sentinel: field was not provided for a partial UPDATE."""
+
+
+_UNSET = _UnsetType()
+UNSET = _UNSET
+UnsetType = _UnsetType
 
 def get_db_path() -> str:
     """Returns the absolute path to the SQLite database file."""
@@ -151,7 +166,50 @@ def list_interfaces(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]
 def remove_interface(name: str, conn: sqlite3.Connection | None = None) -> None:
     """Removes an interface and all its associated peers (CASCADE)."""
     with _ensure_conn(conn, commit=True) as c:
-        c.execute("DELETE FROM interfaces WHERE name = ?", (name,))
+        cursor = c.execute("DELETE FROM interfaces WHERE name = ?", (name,))
+        if cursor.rowcount == 0:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+
+def update_interface(
+    name: str,
+    *,
+    endpoint: str | _UnsetType = _UNSET,
+    port: int | _UnsetType = _UNSET,
+    public_key: str | _UnsetType = _UNSET,
+    address_pool: str | _UnsetType = _UNSET,
+    dns: str | None | _UnsetType = _UNSET,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Update only the interface fields that are not _UNSET."""
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if endpoint is not _UNSET:
+        updates.append("endpoint = ?")
+        params.append(endpoint)
+    if port is not _UNSET:
+        updates.append("port = ?")
+        params.append(port)
+    if public_key is not _UNSET:
+        updates.append("public_key = ?")
+        params.append(public_key)
+    if address_pool is not _UNSET:
+        updates.append("address_pool = ?")
+        params.append(address_pool)
+    if dns is not _UNSET:
+        updates.append("dns = ?")
+        params.append(dns)
+
+    if not updates:
+        return
+
+    params.append(name)
+    with _ensure_conn(conn, commit=True) as c:
+        c.execute(
+            f"UPDATE interfaces SET {', '.join(updates)} WHERE name = ?",
+            params,
+        )
 
 # --- Peers CRUD ---
 
@@ -225,3 +283,47 @@ def remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
     """Removes a peer by its unique ID."""
     with _ensure_conn(conn, commit=True) as c:
         c.execute("DELETE FROM peers WHERE id = ?", (id,))
+
+
+def update_peer(
+    peer_id: str,
+    *,
+    name: str | _UnsetType = _UNSET,
+    ip_address: str | _UnsetType = _UNSET,
+    dns: str | None | _UnsetType = _UNSET,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Update only the peer fields that are not _UNSET."""
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if name is not _UNSET:
+        updates.append("name = ?")
+        params.append(name)
+    if ip_address is not _UNSET:
+        updates.append("ip_address = ?")
+        params.append(ip_address)
+    if dns is not _UNSET:
+        updates.append("dns = ?")
+        params.append(dns)
+
+    if not updates:
+        return
+
+    params.append(peer_id)
+    try:
+        with _ensure_conn(conn, commit=True) as c:
+            c.execute(
+                f"UPDATE peers SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+    except sqlite3.IntegrityError as exc:
+        if name is not _UNSET:
+            raise PeerAlreadyExistsError(
+                f"Peer name '{name}' already exists in this interface."
+            ) from exc
+        if ip_address is not _UNSET:
+            raise IpAlreadyInUseError(
+                f"IP {ip_address} is already assigned in this interface"
+            ) from exc
+        raise
