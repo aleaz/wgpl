@@ -192,7 +192,7 @@ wgpl peer list --json      # wrong — flag is ignored (Typer does not propagate
 ```
 
 | Command | JSON shape (stdout) |
-|---|---|
+| --- | --- |
 | `interface add` | `{name, endpoint, port, public_key, address_pool, dns?}` |
 | `interface remove` | `{status, interface}` |
 | `interface list` | `[{...interface rows...}]` |
