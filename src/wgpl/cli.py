@@ -31,7 +31,7 @@ _STYLE_VALUE = typer_styles.STYLE_TYPES
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
 
-_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at", "dns")
+_BASE_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at")
 
 def _styled(text: str, style: str = "") -> str:
     """Wrap text in Rich markup for a given style (empty = no markup)."""
@@ -39,15 +39,36 @@ def _styled(text: str, style: str = "") -> str:
         return text
     return f"[{style}]{text}[/{style}]"
 
-def _public_peer_rows(peers: list[sqlite3.Row]) -> list[dict[str, str | None]]:
+def _resolve_effective_dns(
+    peer_dns: str | None,
+    iface_dns: str | None,
+) -> str | None:
+    if peer_dns:
+        return str(peer_dns)
+    if iface_dns:
+        return str(iface_dns)
+    return None
+
+def _public_peer_rows(
+    peers: list[sqlite3.Row],
+    iface_dns: dict[str, str | None] | None = None,
+) -> list[dict[str, str | None]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
-    return [
-        {field: peer[field] for field in _PUBLIC_PEER_FIELDS}
-        for peer in peers
-    ]
+    iface_dns_map = iface_dns or {}
+    rows: list[dict[str, str | None]] = []
+    for peer in peers:
+        peer_dns = peer["dns"]
+        row = {field: peer[field] for field in _BASE_PUBLIC_PEER_FIELDS}
+        row["dns"] = _resolve_effective_dns(peer_dns, iface_dns_map.get(peer["interface"]))
+        row["dns_override"] = peer_dns
+        rows.append(row)
+    return rows
 
 def _display_dns(value: str | None) -> str:
     return value if value else "—"
+
+def _interface_dns_map() -> dict[str, str | None]:
+    return {row["name"]: row["dns"] for row in db.list_interfaces()}
 
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
     """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
@@ -264,9 +285,10 @@ def peer_remove(
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)")
 ):
     try:
+        canonical_id = core.resolve_peer_ref(peer_id, interface)
         core.remove_peer(interface, peer_id)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "id": peer_id})
+            _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
         else:
             console.print(f"[green]Removed peer {peer_id}[/green]")
     except WgplException as e:
@@ -280,11 +302,11 @@ def peer_remove(
 def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, help="Filter by interface")):
     try:
         peers = db.list_peers(interface)
+        iface_dns = _interface_dns_map()
         if ctx.obj.get("json"):
-            _output(ctx, _public_peer_rows(peers))
+            _output(ctx, _public_peer_rows(peers, iface_dns))
         else:
             data = [dict(p) for p in peers]
-            iface_dns = {row["name"]: row["dns"] for row in db.list_interfaces()}
             total_peers = len(data)
             rows = [
                 [
@@ -293,7 +315,7 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
                     _styled(p["name"], _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
                     _styled(
-                        _display_dns(p["dns"] or iface_dns.get(p["interface"])),
+                        _display_dns(_resolve_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
                         _STYLE_META,
                     ),
                     _styled(p["created_at"], _STYLE_META),

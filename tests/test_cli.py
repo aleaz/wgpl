@@ -27,7 +27,7 @@ def test_public_peer_rows_redact_secrets() -> None:
         }
     ]
 
-    public = _public_peer_rows(rows)
+    public = _public_peer_rows(rows, {"wg0": "1.1.1.1"})
 
     assert public == [
         {
@@ -37,7 +37,8 @@ def test_public_peer_rows_redact_secrets() -> None:
             "ip_address": "10.0.0.2",
             "public_key": "pub",
             "created_at": "2026-01-01T00:00:00+00:00",
-            "dns": None,
+            "dns": "1.1.1.1",
+            "dns_override": None,
         }
     ]
     assert "private_key" not in public[0]

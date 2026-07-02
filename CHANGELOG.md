@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `peer qr --output` / `-o` writes a scannable PNG (ASCII remains the default)
 - Optional `--ip` on `peer add` and `--dns` on `interface add` / `peer add` (interface default, peer override; embedded in client config export)
 
+### Fixed
+
+- `peer list --json`: `dns` now reflects the effective value (interface default or peer override); added `dns_override` for the peer-stored value
+- `peer remove --json`: returns canonical UUID in `id` plus the user-supplied ref in `input`
+
+### Changed
+
+- README: document `--json` flag position (before subcommand) and JSON output shapes per command
+
 ## [0.1.0] - 2026-07-02
 
 ### Added

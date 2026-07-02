@@ -109,7 +109,7 @@ wgpl peer list
 When multiple peers exist, `peer list` shows a short Docker-style ID prefix (12 hex
 characters). You can use that prefix with `peer config`, `peer qr`, and
 `peer remove` as long as it uniquely identifies one peer. `--json` always returns
-the full UUID.
+the full UUID in `id` (and echoes your input ref in `input`).
 
 *Extract the configuration for the client:*
 
@@ -164,6 +164,27 @@ wgpl apply wg0
 ## Automation and DevOps (M2M Mode)
 
 For Bash or Ansible scripts, you can pass the global `--json` (or `-j`) flag to any command. This will disable Rich text output and print exclusively pure JSON to `stdout`. All error logs are strictly sent to `stderr`.
+
+**Flag position:** `--json` is a global option and must appear **before** the subcommand:
+
+```bash
+wgpl --json peer list      # correct — JSON array on stdout
+wgpl peer list --json      # wrong — flag is ignored (Typer does not propagate it)
+```
+
+| Command | JSON shape (stdout) |
+|---|---|
+| `interface add` | `{name, endpoint, port, public_key, address_pool, dns?}` |
+| `interface remove` | `{status, interface}` |
+| `interface list` | `[{...interface rows...}]` |
+| `interface export` | `{config: "<wg server peers>"}` |
+| `peer add` | `{id, name, ip_address, public_key, dns?}` |
+| `peer remove` | `{status, id, input}` — `id` is canonical UUID; `input` is the ref you passed |
+| `peer list` | `[{id, interface, name, ip_address, public_key, created_at, dns, dns_override}]` — `dns` is effective; `dns_override` is peer-only |
+| `peer config` | `{config: "<full .conf>"}` — includes `PrivateKey` (intentional for M2M provisioning) |
+| `peer qr` | `{qr: "<ascii>"}` — encodes full client config |
+| `peer qr -o` | `{status, path, peer_id}` |
+| `apply` | `{status, action, interface}` |
 
 ```bash
 # Example: Extract the IP of the new peer in bash using jq
