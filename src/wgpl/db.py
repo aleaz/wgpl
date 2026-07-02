@@ -3,7 +3,7 @@ import os
 from contextlib import contextmanager
 from typing import Generator
 
-from .exceptions import InterfaceAlreadyExistsError, PeerAlreadyExistsError
+from .exceptions import InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgplException
 
 def get_db_path() -> str:
     """Returns the absolute path to the SQLite database file."""
@@ -19,11 +19,19 @@ def _create_connection() -> sqlite3.Connection:
         os.close(fd)
     except FileExistsError:
         pass
+    except PermissionError:
+        raise WgplException(f"Permission denied to access database at {db_path}. Try running with sudo or check file permissions.")
         
     # INVARIANT FIX: Always enforce 0o600, even if the file pre-existed.
-    os.chmod(db_path, 0o600)
+    try:
+        os.chmod(db_path, 0o600)
+    except PermissionError:
+        raise WgplException(f"Permission denied to secure database at {db_path}. Try running with sudo or check file ownership.")
             
-    conn = sqlite3.connect(db_path)
+    try:
+        conn = sqlite3.connect(db_path)
+    except sqlite3.OperationalError as e:
+        raise WgplException(f"Failed to connect to database at {db_path}: {e}")
     # PRAGMAs for safety and performance
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

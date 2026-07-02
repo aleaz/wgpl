@@ -39,6 +39,14 @@ def _output(ctx: typer.Context, data: dict | list):
     if ctx.obj.get("json"):
         print(json.dumps(data))
 
+def _validate_allowed_ips(allowed_ips: str) -> None:
+    for ip in allowed_ips.split(","):
+        try:
+            ipaddress.ip_network(ip.strip(), strict=False)
+        except ValueError:
+            console.print(f"[red]WGPL Error: Invalid AllowedIPs format '{ip.strip()}'[/red]")
+            sys.exit(1)
+
 # --- Interfaces ---
 
 @interface_app.command("add")
@@ -209,6 +217,7 @@ def peer_config(
     keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
 ):
     try:
+        _validate_allowed_ips(allowed_ips)
         config = core.get_peer_config(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
         if ctx.obj.get("json"):
             _output(ctx, {"config": config})
@@ -229,6 +238,7 @@ def peer_qr(
     keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
 ):
     try:
+        _validate_allowed_ips(allowed_ips)
         qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
         if ctx.obj.get("json"):
             _output(ctx, {"qr": qr})
