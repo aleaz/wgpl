@@ -1,4 +1,7 @@
 import json
+import stat
+import tempfile
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -94,3 +97,43 @@ def test_peer_list_json_returns_full_uuid(wg0_interface: str) -> None:
     peers = json.loads(list_result.stdout)
     assert peers[0]["id"] == peer_id
     assert len(peers[0]["id"]) == 36
+
+
+def test_peer_qr_ascii_default(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "ascii_qr")
+
+    qr_result = runner.invoke(app, ["peer", "qr", result["id"]])
+
+    assert qr_result.exit_code == 0
+    assert "█" in qr_result.stdout or "▀" in qr_result.stdout
+
+
+def test_peer_qr_output_png(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "png_qr")
+    output_path = Path(tempfile.mkdtemp()) / "peer.png"
+
+    qr_result = runner.invoke(app, ["peer", "qr", result["id"], "-o", str(output_path)])
+
+    assert qr_result.exit_code == 0
+    assert qr_result.stdout == ""
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"\x89PNG")
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+
+
+def test_peer_qr_output_json(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "json_qr")
+    output_path = Path(tempfile.mkdtemp()) / "peer.png"
+
+    qr_result = runner.invoke(
+        app, ["--json", "peer", "qr", result["id"], "-o", str(output_path)]
+    )
+
+    assert qr_result.exit_code == 0
+    payload = json.loads(qr_result.stdout)
+    assert payload == {
+        "status": "success",
+        "path": str(output_path),
+        "peer_id": result["id"],
+    }
+    assert "qr" not in payload

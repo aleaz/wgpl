@@ -185,6 +185,22 @@ def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 2
     f.seek(0)
     return f.read()
 
+def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 25) -> bytes:
+    """Generates a PNG QR code image for the given peer configuration."""
+    config = get_peer_config(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(config)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer)
+    return buffer.getvalue()
+
 def get_interface_config(interface_name: str) -> str:
     """Generates the declarative config string for the server interface."""
     iface = db.get_interface(interface_name)

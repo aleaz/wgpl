@@ -109,3 +109,11 @@ def test_remove_peer_with_prefix(wg0_interface: str) -> None:
     core.remove_peer(wg0_interface, "55c521ad2d94")
 
     assert db.get_peer(peer_id) is None
+
+
+def test_get_peer_qr_png_bytes_returns_valid_png(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "qr_peer")
+    png_bytes = core.get_peer_qr_png_bytes(result["id"])
+
+    assert png_bytes.startswith(b"\x89PNG")
+    assert len(png_bytes) > 100

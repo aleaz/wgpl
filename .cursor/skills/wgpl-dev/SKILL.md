@@ -27,6 +27,7 @@ wgpl peer config <PEER_ID>
 wgpl peer config 55c521ad2d94
 wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24" --keepalive=21
 wgpl peer qr <PEER_ID>
+wgpl peer qr <PEER_ID> -o phone.png
 wgpl peer remove wg0 <PEER_ID>
 wgpl peer remove wg0 55c521ad2d94
 

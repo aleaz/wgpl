@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Docker-style peer ID prefixes: `peer config`, `peer qr`, and `peer remove` accept a unique hex prefix (as shown in `peer list`); `--json` still returns the full UUID
+- `peer qr --output` / `-o` writes a scannable PNG (ASCII remains the default)
 
 ## [0.1.0] - 2026-07-02
 

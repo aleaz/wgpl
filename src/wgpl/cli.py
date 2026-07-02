@@ -1,9 +1,11 @@
 import typer
 from typer import rich_utils as typer_styles
 import json
+import os
 import sqlite3
 import sys
 import ipaddress
+from pathlib import Path
 from typing import Any
 
 from rich import box
@@ -314,18 +316,34 @@ def peer_config(
 
 @peer_app.command("qr")
 def peer_qr(
-    ctx: typer.Context, 
+    ctx: typer.Context,
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write QR code as PNG to this file"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
-    keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
+    keepalive: int = typer.Option(25, help="PersistentKeepalive interval"),
 ):
     try:
         _validate_allowed_ips(allowed_ips)
-        qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
-        if ctx.obj.get("json"):
-            _output(ctx, {"qr": qr})
+        if output is not None:
+            png_bytes = core.get_peer_qr_png_bytes(
+                peer_id, allowed_ips=allowed_ips, keepalive=keepalive
+            )
+            output.write_bytes(png_bytes)
+            os.chmod(output, 0o600)
+            canonical_id = core.resolve_peer_ref(peer_id)
+            if ctx.obj.get("json"):
+                _output(ctx, {"status": "success", "path": str(output), "peer_id": canonical_id})
+            else:
+                console.print(
+                    f"[green]Wrote QR code to {output}[/green] "
+                    "[yellow](contains private keys; keep file permissions restricted)[/yellow]"
+                )
         else:
-            print(qr) # print to stdout
+            qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+            if ctx.obj.get("json"):
+                _output(ctx, {"qr": qr})
+            else:
+                print(qr)
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)

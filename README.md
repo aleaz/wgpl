@@ -118,6 +118,8 @@ wgpl peer config <PEER_ID>
 ```bash
 wgpl peer qr <PEER_ID>
 # Short prefix from peer list also works, e.g. 55c521ad2d94
+# PNG for mobile scanning (contains private keys; file is chmod 600):
+wgpl peer qr <PEER_ID> -o phone.png
 ```
 
 *Remove a peer:*
