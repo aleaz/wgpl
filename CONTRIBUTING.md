@@ -35,6 +35,25 @@ Read [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc
 4. Ensure CI passes (ruff, mypy, pytest)
 5. Fill out the PR template checklist
 
+## Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.).
+The message must stand on its own in `git log` for anyone who was not in the authoring session.
+
+**Do not** reference internal process artifacts in the subject or body, for example:
+
+- Audit or review IDs (`V1`, `F3`, `gap V5`)
+- Plan or todo slugs from `.cursor/plans/`, agent sessions, or checklists
+- Intermediate analysis doc names that are not versioned in the repo
+
+Those identifiers do not exist in the codebase and become meaningless once the session ends.
+
+**Bad:** `fix: close invariant verification gaps (V1-V3, V5)`
+
+**Good:** `fix: route interface add/remove through core and improve peer errors`
+
+Describe *what* changed and *why* in terms of the product and code, not the internal workflow that produced the change.
+
 ## Security
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting. Do not include real WireGuard keys or database files in issues or PRs.

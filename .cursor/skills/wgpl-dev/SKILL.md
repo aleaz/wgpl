@@ -73,8 +73,15 @@ wgpl apply wg0
 1. `uv run ruff check src/ tests/` passes with no findings.
 2. `uv run mypy src/` passes with no type errors.
 3. `uv run pytest` passes.
-3. Invariants in `.cursor/rules/wgpl-architecture.mdc` respected
+4. Invariants in `.cursor/rules/wgpl-architecture.mdc` respected
    (SSOT, no auto-sync, exclusive transactions, `chmod 600`, no `shell=True`).
-4. New commands support `--json` and send logs to stderr.
-5. New domain errors inherit from `WgplException`.
-6. CLI smoke test with a temporary `WGPL_DB_PATH` before opening the PR.
+5. New commands support `--json` and send logs to stderr.
+6. New domain errors inherit from `WgplException`.
+7. CLI smoke test with a temporary `WGPL_DB_PATH` before opening the PR.
+
+## Commit messages
+
+Follow Conventional Commits. Write subjects that make sense in `git log` without
+session context. **Never** cite internal IDs (audit items, plan todos, `.cursor/plans/`
+slugs, agent checklist steps) — they are not in the repo and mean nothing later.
+See [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages).
