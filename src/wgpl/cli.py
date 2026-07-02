@@ -118,7 +118,8 @@ def main(
     ctx: typer.Context,
     output_json: bool = typer.Option(False, "--json", "-j", help="Output results in JSON format"),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database")
-):
+) -> None:
+    """Initialize the CLI application context and database connection."""
     ctx.ensure_object(dict)
     ctx.obj["json"] = output_json
     if db_path:
@@ -127,7 +128,8 @@ def main(
         
     db.init_db()
 
-def _output(ctx: typer.Context, data: dict | list):
+def _output(ctx: typer.Context, data: dict[str, Any] | list[Any]) -> None:
+    """Output data as JSON to stdout if the --json flag was provided."""
     if ctx.obj.get("json"):
         print(json.dumps(data))
 
@@ -173,14 +175,8 @@ def interface_add(
     except InterfaceAlreadyExistsError:
         console.print(f"[red]WGPL Error: Interface {name} already exists.[/red]")
         sys.exit(1)
-    except WgplException as e:
+    except (WgplException, ValueError) as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except ValueError as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @interface_app.command("remove")
@@ -197,12 +193,9 @@ def interface_remove(
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 @interface_app.command("list")
-def interface_list(ctx: typer.Context):
+def interface_list(ctx: typer.Context) -> None:
     try:
         ifaces = db.list_interfaces()
         data = [dict(row) for row in ifaces]
@@ -232,9 +225,6 @@ def interface_list(ctx: typer.Context):
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 @interface_app.command("export")
 def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name to export (e.g. wg0)")):
@@ -246,9 +236,6 @@ def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="I
             print(conf)
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @interface_app.command("update")
@@ -281,14 +268,8 @@ def interface_update(
         else:
             console.print(f"[green]Updated interface {name}[/green]")
             _print_hints(_extract_hints(result))
-    except WgplException as e:
+    except (WgplException, ValueError) as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except ValueError as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 # --- Peers ---
@@ -314,9 +295,6 @@ def peer_add(
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 @peer_app.command("remove")
 def peer_remove(
@@ -333,9 +311,6 @@ def peer_remove(
             console.print(f"[green]Removed peer {peer_id}[/green]")
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @peer_app.command("update")
@@ -369,14 +344,8 @@ def peer_update(
     except PeerAlreadyExistsError as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except WgplException as e:
+    except (WgplException, ValueError) as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except ValueError as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @peer_app.command("list")
@@ -419,9 +388,6 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 @peer_app.command("config")
 def peer_config(
@@ -439,9 +405,6 @@ def peer_config(
             print(config) # print to stdout
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @peer_app.command("qr")
@@ -477,9 +440,6 @@ def peer_qr(
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 # --- Validate ---
 
@@ -510,22 +470,16 @@ def validate_cmd(
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 # --- Database ---
 
 @db_app.command("dump")
-def db_dump(ctx: typer.Context):
+def db_dump(ctx: typer.Context) -> None:
     """Export the database as a logical SQL script to standard output."""
     try:
         core.dump_database()
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 @db_app.command("restore")
@@ -547,9 +501,6 @@ def db_restore(
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
-        sys.exit(1)
 
 # --- Apply ---
 
@@ -568,9 +519,6 @@ def apply(ctx: typer.Context, interface: str = typer.Argument(..., help="Interfa
         sys.exit(1)
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected Error: {e}[/red]")
         sys.exit(1)
 
 if __name__ == "__main__":

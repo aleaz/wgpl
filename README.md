@@ -171,6 +171,10 @@ wgpl db restore backup_2026.sql
 Contributions are always welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) to understand module dependencies (e.g., don't mix Typer in `core.py`), version control strategy, and commit conventions.
 Briefly: create a branch, develop using `uv`, run local tests, format the code, and open a PR against `main`.
 
+## Author
+
+- **aleaz** - [GitHub](https://github.com/aleaz)
+
 ## License
 
 MIT
