@@ -67,7 +67,12 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
 
 @contextmanager
 def _ensure_conn(conn: sqlite3.Connection | None, commit: bool = False) -> Generator[sqlite3.Connection, None, None]:
-    """Yields the provided connection, or creates a temporary one if None."""
+    """Yields the provided connection, or creates a temporary one if None.
+
+    When ``conn`` is provided, it is yielded as-is. The ``commit`` flag only
+    applies to auto-created connections — the caller who owns the external
+    connection is responsible for its transaction lifecycle.
+    """
     if conn:
         yield conn
     else:

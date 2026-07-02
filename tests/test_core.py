@@ -118,7 +118,8 @@ def test_remove_peer_with_prefix(wg0_interface: str) -> None:
     peer_id = "55c521ad-2d94-4689-8abc-123456789abc"
     _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
 
-    core.remove_peer(wg0_interface, "55c521ad2d94")
+    canonical_id = core.resolve_peer_ref("55c521ad2d94")
+    core.remove_peer(wg0_interface, canonical_id)
 
     assert db.get_peer(peer_id) is None
 
@@ -397,3 +398,20 @@ def test_remove_interface_deletes_peers(wg0_interface: str) -> None:
     assert db.get_interface(wg0_interface) is None
     assert peer["id"] is not None
     assert db.get_peer(peer["id"]) is None
+
+
+def test_validate_state_interface_dns_issue_peer_is_none(wg0_interface: str) -> None:
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE interfaces SET dns = ? WHERE name = ?",
+            ("not-an-ip", wg0_interface),
+        )
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+
+    assert result["status"] == "error"
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    assert len(issues) >= 1
+    assert issues[0]["peer"] is None

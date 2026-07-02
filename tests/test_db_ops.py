@@ -1,65 +1,100 @@
+import glob
 import os
 import sqlite3
+import stat
+
 import pytest
 
 from wgpl import core
 from wgpl.exceptions import WgplException
 
-def test_dump_database(capsys: pytest.CaptureFixture, wg0_interface: str) -> None:
-    # `wg0_interface` fixture creates a database and populates it with 'wg0'
+_VALID_RESTORE_SQL = """
+BEGIN TRANSACTION;
+CREATE TABLE IF NOT EXISTS "interfaces" (
+    name TEXT PRIMARY KEY, endpoint TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
+    address_pool TEXT NOT NULL, dns TEXT
+);
+CREATE TABLE IF NOT EXISTS "peers" (
+    id TEXT PRIMARY KEY, interface TEXT NOT NULL,
+    name TEXT NOT NULL, ip_address TEXT NOT NULL,
+    public_key TEXT NOT NULL, private_key TEXT NOT NULL,
+    preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT
+);
+INSERT INTO "interfaces" VALUES('wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL);
+COMMIT;
+"""
+
+
+def test_dump_database(capsys: pytest.CaptureFixture[str], wg0_interface: str) -> None:
     core.dump_database()
-    
+
     captured = capsys.readouterr()
-    
-    # Check stderr for the security hint
+
     assert "Hint: Redirect this output" in captured.err
     assert "chmod 600" in captured.err
-    
-    # Check stdout for the SQL dump
     assert "BEGIN TRANSACTION;" in captured.out
     assert "CREATE TABLE interfaces" in captured.out
     assert "INSERT INTO \"interfaces\" VALUES('wg0'" in captured.out
     assert "COMMIT;" in captured.out
 
+
 def test_restore_database_success(wgpl_db: str) -> None:
-    # First, let's create a known SQL state
-    sql_script = """
-    BEGIN TRANSACTION;
-    CREATE TABLE IF NOT EXISTS "test_table" (id INTEGER PRIMARY KEY, value TEXT);
-    INSERT INTO "test_table" VALUES(1, 'restored_data');
-    COMMIT;
-    """
-    
-    core.restore_database(sql_script)
-    
-    # Verify the database was restored successfully
+    core.restore_database(_VALID_RESTORE_SQL)
+
     with sqlite3.connect(wgpl_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM test_table WHERE id = 1")
+        cursor = conn.execute("SELECT name FROM interfaces WHERE name = 'wg0'")
         result = cursor.fetchone()
-        
+
     assert result is not None
-    assert result[0] == 'restored_data'
-    
-    # Verify temp and wal files are cleaned up
+    assert result[0] == "wg0"
     assert not os.path.exists(f"{wgpl_db}.tmp")
     assert not os.path.exists(f"{wgpl_db}-wal")
 
+
 def test_restore_database_failure_invalid_syntax(wgpl_db: str) -> None:
-    # Create a table in the live DB to check if it survives the failed restore
     with sqlite3.connect(wgpl_db) as conn:
         conn.execute("CREATE TABLE original (id INT)")
-        
+
     invalid_sql = "BEGIN TRANSACTION; CREATE TABL ERROR SYNTAX;"
-    
+
     with pytest.raises(WgplException, match="Failed to restore database"):
         core.restore_database(invalid_sql)
-        
-    # Verify the live database was NOT overwritten
+
     with sqlite3.connect(wgpl_db) as conn:
-        cursor = conn.cursor()
-        # This will fail if the table doesn't exist, meaning the original DB was overwritten
-        cursor.execute("SELECT * FROM original") 
-        
-    # Verify temp file is cleaned up after failure
+        conn.execute("SELECT * FROM original")
+
     assert not os.path.exists(f"{wgpl_db}.tmp")
+
+
+def test_restore_backup_has_secure_permissions(wg0_interface: str, wgpl_db: str) -> None:
+    """Backup file created during restore must have 0o600 permissions."""
+    core.restore_database(_VALID_RESTORE_SQL)
+
+    backups = glob.glob(f"{wgpl_db}.bak.*")
+    assert len(backups) == 1
+    assert stat.S_IMODE(os.stat(backups[0]).st_mode) == 0o600
+
+
+def test_restore_rejects_missing_schema(wgpl_db: str) -> None:
+    """Restore must reject SQL that doesn't create interfaces+peers tables."""
+    bad_sql = """
+    BEGIN TRANSACTION;
+    CREATE TABLE IF NOT EXISTS unrelated (id INTEGER PRIMARY KEY);
+    COMMIT;
+    """
+    with pytest.raises(WgplException, match="missing required tables"):
+        core.restore_database(bad_sql)
+
+    assert not os.path.exists(f"{wgpl_db}.tmp")
+
+
+
+
+def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str) -> None:
+    """No tmp, tmp-wal, or tmp-shm files should remain after restore."""
+    core.restore_database(_VALID_RESTORE_SQL)
+
+    assert not os.path.exists(f"{wgpl_db}.tmp")
+    assert not os.path.exists(f"{wgpl_db}.tmp-wal")
+    assert not os.path.exists(f"{wgpl_db}.tmp-shm")

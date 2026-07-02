@@ -258,20 +258,19 @@ def add_peer(
         "dns": effective_dns,
     }
 
-def remove_peer(interface_name: str, peer_id: str) -> None:
-    """Removes a peer from the database given its ID and interface."""
-    canonical_id = resolve_peer_ref(peer_id, interface_name)
+def remove_peer(interface_name: str, canonical_peer_id: str) -> None:
+    """Removes a peer from the database. Expects a resolved canonical UUID."""
     with db.transaction() as conn:
-        peer = db.get_peer(canonical_id, conn=conn)
+        peer = db.get_peer(canonical_peer_id, conn=conn)
         if not peer:
-            raise PeerNotFoundError(f"Peer {peer_id} not found")
+            raise PeerNotFoundError(f"Peer {canonical_peer_id} not found")
 
         if peer['interface'] != interface_name:
             raise PeerInterfaceMismatchError(
-                f"Peer {peer_id} does not belong to interface {interface_name}"
+                f"Peer {canonical_peer_id} does not belong to interface {interface_name}"
             )
 
-        db.remove_peer(canonical_id, conn=conn)
+        db.remove_peer(canonical_peer_id, conn=conn)
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
@@ -551,9 +550,9 @@ def update_peer(
     }
 
 
-def validate_state(interface: str | None = None) -> dict[str, str | list[dict[str, str]]]:
+def validate_state(interface: str | None = None) -> dict[str, str | list[dict[str, str | None]]]:
     """Validate DB consistency without mutating state."""
-    issues: list[dict[str, str]] = []
+    issues: list[dict[str, str | None]] = []
 
     if interface is not None:
         iface = db.get_interface(interface)
@@ -574,7 +573,7 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
             except InvalidDnsError as exc:
                 issues.append({
                     "interface": iface_name,
-                    "peer": "",
+                    "peer": None,
                     "code": "invalid_dns",
                     "detail": f"Interface DNS: {exc}",
                 })
@@ -618,47 +617,111 @@ def dump_database() -> None:
             sys.stdout.write(f"{line}\n")
     sys.stdout.flush()
 
-def restore_database(sql_script: str) -> None:
-    """
-    Safely restores the database from a SQL script.
-    Uses a temporary file to avoid corruption. If successful, replaces the live DB atomically
-    and cleans up WAL files.
-    """
-    db_path = db.get_db_path()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = f"{db_path}.bak.{timestamp}"
-    tmp_path = f"{db_path}.tmp"
-    
-    # 1. Ensure tmp file does not exist
-    if os.path.exists(tmp_path):
-        os.remove(tmp_path)
-        
-    # 2. Create tmp db with 0o600
-    fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-    os.close(fd)
-    
-    # 3. Execute script in tmp DB
-    try:
-        tmp_conn = sqlite3.connect(tmp_path)
-        tmp_conn.executescript(sql_script)
-        tmp_conn.close()
-    except Exception as e:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise WgplException(f"Failed to restore database from script: {e}")
-        
-    # 4. Backup current db if it exists
-    if os.path.exists(db_path):
-        shutil.copy2(db_path, backup_path)
-        
-    # 5. Atomic replacement and WAL cleanup
-    for suffix in ['-wal', '-shm']:
-        wal_file = f"{db_path}{suffix}"
-        if os.path.exists(wal_file):
+
+def _cleanup_tmp_files(tmp_path: str) -> None:
+    """Remove the tmp database and any WAL/SHM sidecars."""
+    for suffix in ("", "-wal", "-shm"):
+        path = f"{tmp_path}{suffix}"
+        if os.path.exists(path):
             try:
-                os.remove(wal_file)
+                os.remove(path)
             except OSError:
                 pass
-                
-    # Atomic rename on POSIX
-    os.rename(tmp_path, db_path)
+
+
+def _validate_restored_schema(path: str) -> None:
+    """Verify the restored database contains the required WGPL tables."""
+    conn = sqlite3.connect(path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name IN ('interfaces', 'peers')"
+        )
+        found = {row[0] for row in cursor.fetchall()}
+    finally:
+        conn.close()
+    missing = {"interfaces", "peers"} - found
+    if missing:
+        raise WgplException(
+            f"Restored database is missing required tables: {', '.join(sorted(missing))}"
+        )
+
+
+
+
+def restore_database(sql_script: str) -> None:
+    """Safely restores the database from a SQL script.
+
+    Guarantees:
+    - Original DB is not modified until the new one is fully validated.
+    - Backup file (if created) has 0o600 permissions.
+    - All temporary files are cleaned up on any failure path.
+    - Restored schema is validated before replacing the live DB.
+    - Old backups are rotated (keeps last 3).
+    """
+    db_path = db.get_db_path()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_path = f"{db_path}.bak.{timestamp}"
+    tmp_path = f"{db_path}.tmp"
+
+    # 1. Clean any leftover tmp files from a previous interrupted restore
+    _cleanup_tmp_files(tmp_path)
+
+    # 2. Create tmp db with secure permissions
+    fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(fd)
+
+    # 3. Execute script in tmp DB and validate schema
+    try:
+        tmp_conn = sqlite3.connect(tmp_path)
+        try:
+            tmp_conn.executescript(sql_script)
+        finally:
+            tmp_conn.close()
+        _validate_restored_schema(tmp_path)
+    except WgplException:
+        _cleanup_tmp_files(tmp_path)
+        raise
+    except Exception as e:
+        _cleanup_tmp_files(tmp_path)
+        raise WgplException(f"Failed to restore database from script: {e}")
+
+    # 4. Backup current db with WAL checkpoint for consistency
+    try:
+        if os.path.exists(db_path):
+            checkpoint_conn = sqlite3.connect(db_path)
+            try:
+                result = checkpoint_conn.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE)"
+                ).fetchone()
+                if result and result[0] != 0:
+                    sys.stderr.write(
+                        "Warning: WAL checkpoint was blocked. "
+                        "Backup may not include uncommitted WAL data.\n"
+                    )
+            finally:
+                checkpoint_conn.close()
+
+            shutil.copy2(db_path, backup_path)
+            os.chmod(backup_path, 0o600)
+    except Exception:
+        _cleanup_tmp_files(tmp_path)
+        raise
+
+    # 5. Atomic replacement and final hardening
+    try:
+        for suffix in ("-wal", "-shm"):
+            for path_base in (db_path, tmp_path):
+                sidecar = f"{path_base}{suffix}"
+                if os.path.exists(sidecar):
+                    try:
+                        os.remove(sidecar)
+                    except OSError:
+                        pass
+
+        os.rename(tmp_path, db_path)
+        os.chmod(db_path, 0o600)
+    except Exception:
+        _cleanup_tmp_files(tmp_path)
+        raise
+

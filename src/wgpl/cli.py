@@ -304,7 +304,7 @@ def peer_remove(
 ):
     try:
         canonical_id = core.resolve_peer_ref(peer_id, interface)
-        core.remove_peer(interface, peer_id)
+        core.remove_peer(interface, canonical_id)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
         else:
