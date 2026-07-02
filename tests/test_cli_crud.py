@@ -80,6 +80,7 @@ def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
     )
     monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
 
+    assert peer["id"] is not None
     result = runner.invoke(app, ["peer", "remove", "wg1", peer["id"]])
 
     assert result.exit_code == 1

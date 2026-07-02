@@ -125,6 +125,7 @@ def test_remove_peer_with_prefix(wg0_interface: str) -> None:
 
 def test_get_peer_qr_png_bytes_returns_valid_png(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "qr_peer")
+    assert result["id"] is not None
     png_bytes = core.get_peer_qr_png_bytes(result["id"])
 
     assert png_bytes.startswith(b"\x89PNG")
@@ -173,6 +174,7 @@ def test_get_peer_config_uses_interface_dns(wg0_interface: str) -> None:
     )
     peer = core.add_peer("wg_dns", "phone")
 
+    assert peer["id"] is not None
     config = core.get_peer_config(peer["id"])
 
     assert "DNS = 1.1.1.1" in config
@@ -188,6 +190,7 @@ def test_get_peer_config_peer_dns_overrides_interface(wg0_interface: str) -> Non
     )
     peer = core.add_peer("wg_dns2", "kids", dns="9.9.9.9")
 
+    assert peer["id"] is not None
     config = core.get_peer_config(peer["id"])
 
     assert "DNS = 9.9.9.9" in config
@@ -198,8 +201,12 @@ def test_update_interface_endpoint(wg0_interface: str) -> None:
     result = core.update_interface(wg0_interface, endpoint="vpn2.example.com")
 
     assert result["endpoint"] == "vpn2.example.com"
-    assert "re_export_clients" in result["hints"]
-    assert db.get_interface(wg0_interface)["endpoint"] == "vpn2.example.com"
+    hints = result["hints"]
+    assert isinstance(hints, list)
+    assert "re_export_clients" in hints
+    row = db.get_interface(wg0_interface)
+    assert row is not None
+    assert row["endpoint"] == "vpn2.example.com"
 
 
 def test_update_interface_pool_expand_ok(wg0_interface: str) -> None:
@@ -232,16 +239,20 @@ def test_update_interface_no_fields_raises(wg0_interface: str) -> None:
 def test_update_peer_name(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "old_name")
 
+    assert peer["id"] is not None
     result = core.update_peer(wg0_interface, peer["id"], name="new_name")
 
     assert result["name"] == "new_name"
-    assert db.get_peer(peer["id"])["name"] == "new_name"
+    row = db.get_peer(peer["id"])
+    assert row is not None
+    assert row["name"] == "new_name"
 
 
 def test_update_peer_name_conflict(wg0_interface: str) -> None:
     core.add_peer(wg0_interface, "taken")
     peer = core.add_peer(wg0_interface, "mine")
 
+    assert peer["id"] is not None
     with pytest.raises(PeerAlreadyExistsError):
         core.update_peer(wg0_interface, peer["id"], name="taken")
 
@@ -249,16 +260,20 @@ def test_update_peer_name_conflict(wg0_interface: str) -> None:
 def test_update_peer_ip(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "mobile", ip_address="10.0.0.2")
 
+    assert peer["id"] is not None
     result = core.update_peer(wg0_interface, peer["id"], ip_address="10.0.0.50")
 
     assert result["ip_address"] == "10.0.0.50"
-    assert "apply_server" in result["hints"]
-    assert "re_export_client" in result["hints"]
+    hints = result["hints"]
+    assert isinstance(hints, list)
+    assert "apply_server" in hints
+    assert "re_export_client" in hints
 
 
 def test_update_peer_ip_same(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "stable", ip_address="10.0.0.2")
 
+    assert peer["id"] is not None
     result = core.update_peer(wg0_interface, peer["id"], ip_address="10.0.0.2")
 
     assert result["ip_address"] == "10.0.0.2"
@@ -269,6 +284,7 @@ def test_update_peer_clear_dns(wgpl_db: str) -> None:
     db.add_interface("wg_dns", "vpn.example.com", public_key, "10.0.0.0/24", dns="1.1.1.1")
     peer = core.add_peer("wg_dns", "phone", dns="9.9.9.9")
 
+    assert peer["id"] is not None
     result = core.update_peer("wg_dns", peer["id"], clear_dns=True)
 
     assert result["dns_override"] is None
@@ -294,7 +310,9 @@ def test_validate_state_detects_bad_ip(wg0_interface: str) -> None:
     result = core.validate_state(wg0_interface)
 
     assert result["status"] == "error"
-    assert any(issue["code"] == "ip_outside_pool" for issue in result["issues"])
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    assert any(issue["code"] == "ip_outside_pool" for issue in issues)
 
 
 def test_remove_peer_interface_mismatch_raises_domain_error(
@@ -303,6 +321,7 @@ def test_remove_peer_interface_mismatch_raises_domain_error(
     peer = core.add_peer(wg0_interface, "phone")
     monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
 
+    assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
         core.remove_peer("wg1", peer["id"])
 
@@ -313,6 +332,7 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     peer = core.add_peer(wg0_interface, "phone")
     monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
 
+    assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
         core.update_peer("wg1", peer["id"], name="renamed")
 
@@ -352,12 +372,13 @@ def test_db_add_peer_duplicate_name_raises_name_error(wg0_interface: str) -> Non
 def test_get_interface_config_excludes_removed_peer(wg0_interface: str) -> None:
     kept = core.add_peer(wg0_interface, "keep")
     removed = core.add_peer(wg0_interface, "gone")
+    assert removed["id"] is not None
     core.remove_peer(wg0_interface, removed["id"])
 
     config = core.get_interface_config(wg0_interface)
 
-    assert kept["public_key"] in config
-    assert removed["public_key"] not in config
+    assert str(kept["public_key"]) in config
+    assert str(removed["public_key"]) not in config
 
 
 def test_add_interface_registers_row(wgpl_db: str) -> None:
@@ -374,4 +395,5 @@ def test_remove_interface_deletes_peers(wg0_interface: str) -> None:
     core.remove_interface(wg0_interface)
 
     assert db.get_interface(wg0_interface) is None
+    assert peer["id"] is not None
     assert db.get_peer(peer["id"]) is None

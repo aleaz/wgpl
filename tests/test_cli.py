@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import stat
 import tempfile
 from pathlib import Path
@@ -27,7 +28,8 @@ def test_public_peer_rows_redact_secrets() -> None:
         }
     ]
 
-    public = _public_peer_rows(rows, {"wg0": "1.1.1.1"})
+    from typing import cast
+    public = _public_peer_rows(cast(list[sqlite3.Row], rows), {"wg0": "1.1.1.1"})
 
     assert public == [
         {
@@ -71,6 +73,7 @@ def test_format_peer_id_short_when_multiple_peers() -> None:
 def test_peer_config_accepts_short_prefix(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "prefix_peer")
     peer_id = result["id"]
+    assert peer_id is not None
     short_id = peer_id.replace("-", "")[:12]
 
     config_result = runner.invoke(app, ["peer", "config", short_id])
@@ -82,6 +85,7 @@ def test_peer_config_accepts_short_prefix(wg0_interface: str) -> None:
 def test_peer_remove_accepts_short_prefix(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "remove_me")
     peer_id = result["id"]
+    assert peer_id is not None
     short_id = peer_id.replace("-", "")[:12]
 
     remove_result = runner.invoke(app, ["peer", "remove", wg0_interface, short_id])
@@ -93,6 +97,7 @@ def test_peer_remove_accepts_short_prefix(wg0_interface: str) -> None:
 def test_peer_list_json_returns_full_uuid(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "uuid_peer")
     peer_id = result["id"]
+    assert peer_id is not None
 
     list_result = runner.invoke(app, ["--json", "peer", "list"])
 
@@ -105,6 +110,7 @@ def test_peer_list_json_returns_full_uuid(wg0_interface: str) -> None:
 def test_peer_qr_ascii_default(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "ascii_qr")
 
+    assert result["id"] is not None
     qr_result = runner.invoke(app, ["peer", "qr", result["id"]])
 
     assert qr_result.exit_code == 0
@@ -115,6 +121,7 @@ def test_peer_qr_output_png(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "png_qr")
     output_path = Path(tempfile.mkdtemp()) / "peer.png"
 
+    assert result["id"] is not None
     qr_result = runner.invoke(app, ["peer", "qr", result["id"], "-o", str(output_path)])
 
     assert qr_result.exit_code == 0
@@ -128,6 +135,7 @@ def test_peer_qr_output_json(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "json_qr")
     output_path = Path(tempfile.mkdtemp()) / "peer.png"
 
+    assert result["id"] is not None
     qr_result = runner.invoke(
         app, ["--json", "peer", "qr", result["id"], "-o", str(output_path)]
     )

@@ -2,12 +2,13 @@ import os
 import tempfile
 
 import pytest
+from typing import Generator
 
 from wgpl import db, wireguard
 
 
 @pytest.fixture
-def wgpl_db(monkeypatch: pytest.MonkeyPatch) -> str:
+def wgpl_db(monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
     """Isolated SQLite database for each test."""
     path = os.path.join(tempfile.mkdtemp(), "wgpl.db")
     monkeypatch.setenv("WGPL_DB_PATH", path)
