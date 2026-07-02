@@ -25,9 +25,11 @@ _HINT_MESSAGES = {
 app = typer.Typer(help="WGPL - WireGuard Peer Manager (Lite)")
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
 peer_app = typer.Typer(help="Manage WireGuard peers")
+db_app = typer.Typer(help="Manage the SQLite database (Backup & Restore)")
 
 app.add_typer(interface_app, name="interface")
 app.add_typer(peer_app, name="peer")
+app.add_typer(db_app, name="db")
 
 console = Console(stderr=True) # Always write logs to stderr
 out_console = Console() # For stdout tables if not JSON
@@ -505,6 +507,43 @@ def validate_cmd(
                 )
         if result["status"] != "ok":
             sys.exit(1)
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected Error: {e}[/red]")
+        sys.exit(1)
+
+# --- Database ---
+
+@db_app.command("dump")
+def db_dump(ctx: typer.Context):
+    """Export the database as a logical SQL script to standard output."""
+    try:
+        core.dump_database()
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected Error: {e}[/red]")
+        sys.exit(1)
+
+@db_app.command("restore")
+def db_restore(
+    ctx: typer.Context,
+    file: typer.FileText = typer.Argument(
+        "-", 
+        help="SQL file to restore from (use '-' for stdin)"
+    )
+):
+    """Restore the database from a logical SQL script (destructive)."""
+    try:
+        sql_script = file.read()
+        core.restore_database(sql_script)
+        if ctx.obj.get("json"):
+            _output(ctx, {"status": "success", "action": "restore"})
+        else:
+            console.print("[green]Database successfully restored.[/green]")
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)

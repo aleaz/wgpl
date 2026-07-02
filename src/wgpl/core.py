@@ -4,6 +4,9 @@ import datetime
 import qrcode
 import io
 import sqlite3
+import sys
+import os
+import shutil
 
 from . import db
 from .db import UNSET, UnsetType
@@ -20,6 +23,7 @@ from .exceptions import (
     PeerInterfaceMismatchError,
     PeerNotFoundError,
     PeersOutsidePoolError,
+    WgplException,
 )
 
 _MIN_PEER_ID_PREFIX_LEN = 4
@@ -601,3 +605,60 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 
     status = "ok" if not issues else "error"
     return {"status": status, "issues": issues}
+
+# --- Database Dump & Restore ---
+
+def dump_database() -> None:
+    """Dumps the SQLite database to stdout as a logical SQL script."""
+    sys.stderr.write("Hint: Redirect this output to a file (e.g. wgpl db dump > backup.sql).\n")
+    sys.stderr.write("      Ensure the resulting file has secure permissions (chmod 600) or encrypt it.\n\n")
+    sys.stderr.flush()
+    with db.get_db() as conn:
+        for line in conn.iterdump():
+            sys.stdout.write(f"{line}\n")
+    sys.stdout.flush()
+
+def restore_database(sql_script: str) -> None:
+    """
+    Safely restores the database from a SQL script.
+    Uses a temporary file to avoid corruption. If successful, replaces the live DB atomically
+    and cleans up WAL files.
+    """
+    db_path = db.get_db_path()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{db_path}.bak.{timestamp}"
+    tmp_path = f"{db_path}.tmp"
+    
+    # 1. Ensure tmp file does not exist
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+        
+    # 2. Create tmp db with 0o600
+    fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(fd)
+    
+    # 3. Execute script in tmp DB
+    try:
+        tmp_conn = sqlite3.connect(tmp_path)
+        tmp_conn.executescript(sql_script)
+        tmp_conn.close()
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise WgplException(f"Failed to restore database from script: {e}")
+        
+    # 4. Backup current db if it exists
+    if os.path.exists(db_path):
+        shutil.copy2(db_path, backup_path)
+        
+    # 5. Atomic replacement and WAL cleanup
+    for suffix in ['-wal', '-shm']:
+        wal_file = f"{db_path}{suffix}"
+        if os.path.exists(wal_file):
+            try:
+                os.remove(wal_file)
+            except OSError:
+                pass
+                
+    # Atomic rename on POSIX
+    os.rename(tmp_path, db_path)
