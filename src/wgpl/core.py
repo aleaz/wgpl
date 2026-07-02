@@ -10,6 +10,9 @@ from . import wireguard
 from .exceptions import (
     AmbiguousPeerIdError,
     InterfaceNotFoundError,
+    InvalidDnsError,
+    InvalidPeerIpError,
+    IpAlreadyInUseError,
     PeerNotFoundError,
     NoAvailableIpsError,
 )
@@ -60,69 +63,140 @@ def _ambiguous_peer_message(ref: str, matches: list[sqlite3.Row]) -> str:
     )
     return f"Peer ID prefix '{ref}' is ambiguous. Matches: {candidates}"
 
-def _get_next_available_ip(interface_name: str, conn: sqlite3.Connection) -> str:
-    """Calculates the next available IP address in the interface's pool."""
+
+def validate_dns(value: str) -> str:
+    """Validate and normalize a DNS server list for WireGuard client config."""
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if not parts:
+        raise InvalidDnsError("DNS value cannot be empty")
+
+    normalized: list[str] = []
+    for part in parts:
+        try:
+            ipaddress.ip_address(part)
+        except ValueError as exc:
+            raise InvalidDnsError(f"Invalid DNS address '{part}'") from exc
+        normalized.append(part)
+    return ", ".join(normalized)
+
+
+def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
+    """Return peer DNS override or interface default."""
+    peer_dns = peer["dns"]
+    if peer_dns:
+        return str(peer_dns)
+    iface_dns = iface["dns"]
+    if iface_dns:
+        return str(iface_dns)
+    return None
+
+
+def _pool_used_ips(interface_name: str, conn: sqlite3.Connection) -> tuple[ipaddress.IPv4Network, set[str]]:
+    """Return the interface pool network and all reserved/used host IPs."""
     iface = db.get_interface(interface_name, conn=conn)
     if not iface:
         raise InterfaceNotFoundError(f"Interface {interface_name} not found")
-        
-    network = ipaddress.IPv4Network(iface['address_pool'], strict=False)
-    
-    # Get all used IPs
-    peers = db.list_peers(interface_name, conn=conn)
-    used_ips = {peer['ip_address'] for peer in peers}
-    
-    # Typically .1 is the server itself
+
+    network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
+    used_ips = {peer["ip_address"] for peer in db.list_peers(interface_name, conn=conn)}
+
     try:
         used_ips.add(str(network[1]))
     except IndexError:
-        # If the network prefix is /32 or /31, there might not be a network[1].
-        # In this case, we just proceed as there is no gateway IP to reserve.
         pass
-    
-    # Find the first available IP using a fast generator expression
-    available = next((str(ip) for ip in network.hosts() if str(ip) not in used_ips), None)
-    
-    if available:
-        return available
-        
-    raise NoAvailableIpsError(f"No available IPs in pool {iface['address_pool']}")
 
-def add_peer(interface_name: str, peer_name: str) -> dict[str, str]:
+    return network, used_ips
+
+
+def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ips: set[str]) -> None:
+    """Raise if ip is invalid, outside the pool, reserved, or already used."""
+    try:
+        ipaddress.IPv4Address(ip)
+    except ValueError as exc:
+        raise InvalidPeerIpError(f"Invalid IP address '{ip}'") from exc
+
+    host_ips = {str(host) for host in network.hosts()}
+    if ip not in host_ips:
+        raise InvalidPeerIpError(f"IP {ip} is not a host in pool {network}")
+
+    try:
+        if ip == str(network[1]):
+            raise InvalidPeerIpError(f"IP {ip} is reserved for the interface gateway")
+    except IndexError:
+        pass
+
+    if ip in used_ips:
+        raise IpAlreadyInUseError(f"IP {ip} is already assigned in this interface")
+
+
+def allocate_peer_ip(
+    interface_name: str,
+    conn: sqlite3.Connection,
+    requested: str | None = None,
+) -> str:
+    """Allocate the next free IP or validate a requested IP within the interface pool."""
+    network, used_ips = _pool_used_ips(interface_name, conn)
+
+    if requested is None:
+        available = next((str(ip) for ip in network.hosts() if str(ip) not in used_ips), None)
+        if available:
+            return available
+        raise NoAvailableIpsError(f"No available IPs in pool {network}")
+
+    _validate_requested_peer_ip(requested, network, used_ips)
+    return requested
+
+
+def _get_next_available_ip(interface_name: str, conn: sqlite3.Connection) -> str:
+    """Calculates the next available IP address in the interface's pool."""
+    return allocate_peer_ip(interface_name, conn)
+
+def add_peer(
+    interface_name: str,
+    peer_name: str,
+    ip_address: str | None = None,
+    dns: str | None = None,
+) -> dict[str, str | None]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
     Returns a dictionary with the peer's essential information.
     """
-    # 1. Database Transaction (SSOT)
+    normalized_dns = validate_dns(dns) if dns is not None else None
+
     with db.transaction() as conn:
-        ip_address = _get_next_available_ip(interface_name, conn)
-            
+        allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
+
         keypair = wireguard.generate_keypair()
         preshared_key = wireguard.generate_preshared_key()
-        
+
         peer_id = str(uuid.uuid4())
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        
-        # Domain exceptions (like PeerAlreadyExistsError) are raised by db.py directly
+
         db.add_peer(
             id=peer_id,
             interface=interface_name,
             name=peer_name,
-            ip_address=ip_address,
+            ip_address=allocated_ip,
             public_key=keypair.public_key,
             private_key=keypair.private_key,
             preshared_key=preshared_key,
             created_at=created_at,
-            conn=conn
+            dns=normalized_dns,
+            conn=conn,
         )
-    
-    # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
-    
+
+        iface = db.get_interface(interface_name, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+
+    effective_dns = normalized_dns or (str(iface["dns"]) if iface["dns"] else None)
+
     return {
         "id": peer_id,
         "name": peer_name,
-        "ip_address": ip_address,
-        "public_key": keypair.public_key
+        "ip_address": allocated_ip,
+        "public_key": keypair.public_key,
+        "dns": effective_dns,
     }
 
 def remove_peer(interface_name: str, peer_id: str) -> None:
@@ -152,16 +226,22 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int
         raise InterfaceNotFoundError(f"Interface {peer['interface']} not found")
         
     network = ipaddress.IPv4Network(iface['address_pool'], strict=False)
-    
+
     config_lines = [
         "[Interface]",
         f"PrivateKey = {peer['private_key']}",
         f"Address = {peer['ip_address']}/{network.prefixlen}",
-        "# DNS = ... (optional)",
+    ]
+
+    effective_dns = _effective_peer_dns(peer, iface)
+    if effective_dns:
+        config_lines.append(f"DNS = {effective_dns}")
+
+    config_lines.extend([
         "",
         "[Peer]",
         f"PublicKey = {iface['public_key']}"
-    ]
+    ])
     
     if peer['preshared_key']:
         config_lines.append(f"PresharedKey = {peer['preshared_key']}")

@@ -16,10 +16,13 @@ truth (SSOT). See invariants in `.cursor/rules/wgpl-architecture.mdc`.
 ```bash
 # 1. Register the base interface and its IP pool
 wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --port 51820
+wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --dns 1.1.1.1
 wgpl interface list
 
 # 2. Create peers (IP, keypair, and PSK are generated automatically)
 wgpl peer add wg0 "Johns_Phone"
+wgpl peer add wg0 "Server" --ip 10.0.0.50
+wgpl peer add wg0 "Kids" --dns 9.9.9.9
 wgpl peer list
 
 # 3. Extract client configuration (full UUID or short prefix from peer list)

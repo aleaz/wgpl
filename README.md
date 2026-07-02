@@ -77,6 +77,8 @@ First, we register the base WireGuard interface (e.g., `wg0`) and assign an IP a
 
 ```bash
 wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --port 51820
+# Optional default DNS for all peers on this interface (embedded in client .conf only):
+# wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --dns 1.1.1.1
 ```
 
 *List interfaces:*
@@ -91,7 +93,12 @@ To add a peer, you only need to give it a name. **WGPL will automatically find t
 
 ```bash
 wgpl peer add wg0 "Johns_Phone"
+# Optional fixed IP from the pool and per-peer DNS override:
+# wgpl peer add wg0 "Server" --ip 10.0.0.50
+# wgpl peer add wg0 "Kids" --dns 9.9.9.9
 ```
+
+WGPL does not run DNS on the host; `--dns` only adds `DNS = ...` to exported **client** configs.
 
 *List all created peers:*
 

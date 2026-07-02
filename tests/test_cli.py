@@ -23,6 +23,7 @@ def test_public_peer_rows_redact_secrets() -> None:
             "private_key": "secret-private",
             "preshared_key": "secret-psk",
             "created_at": "2026-01-01T00:00:00+00:00",
+            "dns": None,
         }
     ]
 
@@ -36,6 +37,7 @@ def test_public_peer_rows_redact_secrets() -> None:
             "ip_address": "10.0.0.2",
             "public_key": "pub",
             "created_at": "2026-01-01T00:00:00+00:00",
+            "dns": None,
         }
     ]
     assert "private_key" not in public[0]
@@ -137,3 +139,40 @@ def test_peer_qr_output_json(wg0_interface: str) -> None:
         "peer_id": result["id"],
     }
     assert "qr" not in payload
+
+
+def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
+    from wgpl import wireguard
+
+    public_key = wireguard.generate_keypair().public_key
+    add_iface = runner.invoke(
+        app,
+        [
+            "interface",
+            "add",
+            "wg_dns",
+            "vpn.example.com",
+            public_key,
+            "10.0.3.0/24",
+            "--dns",
+            "1.1.1.1",
+        ],
+    )
+    assert add_iface.exit_code == 0
+
+    add_peer = runner.invoke(
+        app,
+        ["--json", "peer", "add", "wg_dns", "Work", "--ip", "10.0.3.50", "--dns", "9.9.9.9"],
+    )
+    assert add_peer.exit_code == 0
+    work_id = json.loads(add_peer.stdout)["id"]
+
+    config = runner.invoke(app, ["peer", "config", work_id])
+    assert config.exit_code == 0
+    assert "DNS = 9.9.9.9" in config.stdout
+
+    inherited = runner.invoke(app, ["--json", "peer", "add", "wg_dns", "Phone"])
+    assert inherited.exit_code == 0
+    phone_id = json.loads(inherited.stdout)["id"]
+    inherited_config = runner.invoke(app, ["peer", "config", phone_id])
+    assert "DNS = 1.1.1.1" in inherited_config.stdout

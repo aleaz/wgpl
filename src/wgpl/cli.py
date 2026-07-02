@@ -31,7 +31,7 @@ _STYLE_VALUE = typer_styles.STYLE_TYPES
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
 
-_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at")
+_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at", "dns")
 
 def _styled(text: str, style: str = "") -> str:
     """Wrap text in Rich markup for a given style (empty = no markup)."""
@@ -39,9 +39,15 @@ def _styled(text: str, style: str = "") -> str:
         return text
     return f"[{style}]{text}[/{style}]"
 
-def _public_peer_rows(peers: list[sqlite3.Row]) -> list[dict[str, str]]:
+def _public_peer_rows(peers: list[sqlite3.Row]) -> list[dict[str, str | None]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
-    return [{field: peer[field] for field in _PUBLIC_PEER_FIELDS} for peer in peers]
+    return [
+        {field: peer[field] for field in _PUBLIC_PEER_FIELDS}
+        for peer in peers
+    ]
+
+def _display_dns(value: str | None) -> str:
+    return value if value else "—"
 
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
     """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
@@ -115,7 +121,8 @@ def interface_add(
     endpoint: str = typer.Argument(..., help="Public endpoint (e.g. vpn.example.com)"),
     public_key: str = typer.Argument(..., help="Server public key"),
     address_pool: str = typer.Argument(..., help="Address pool (e.g. 10.0.0.0/24)"),
-    port: int = typer.Option(51820, help="Listen port")
+    port: int = typer.Option(51820, help="Listen port"),
+    dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs (e.g. 1.1.1.1)"),
 ):
     try:
         # Validate Port
@@ -130,8 +137,17 @@ def interface_add(
             console.print(f"[red]WGPL Error: Invalid address pool '{address_pool}'. {e}[/red]")
             sys.exit(1)
 
-        db.add_interface(name, endpoint, public_key, address_pool, port)
-        data = {"name": name, "endpoint": endpoint, "port": port, "public_key": public_key, "address_pool": address_pool}
+        normalized_dns = core.validate_dns(dns) if dns is not None else None
+        db.add_interface(name, endpoint, public_key, address_pool, port, dns=normalized_dns)
+        data = {
+            "name": name,
+            "endpoint": endpoint,
+            "port": port,
+            "public_key": public_key,
+            "address_pool": address_pool,
+        }
+        if normalized_dns is not None:
+            data["dns"] = normalized_dns
         if ctx.obj.get("json"):
             _output(ctx, data)
         else:
@@ -177,6 +193,7 @@ def interface_list(ctx: typer.Context):
                     _styled(i["name"], _STYLE_ID),
                     _styled(f"{i['endpoint']}:{i['port']}", ""),
                     _styled(i["address_pool"], _STYLE_META),
+                    _styled(_display_dns(i.get("dns")), _STYLE_META),
                 ]
                 for i in data
             ]
@@ -187,6 +204,7 @@ def interface_list(ctx: typer.Context):
                     ("Name", {"overflow": "fold"}),
                     ("Endpoint", {"overflow": "fold"}),
                     ("Pool", {"overflow": "fold"}),
+                    ("DNS", {"overflow": "fold"}),
                 ],
                 rows,
             )
@@ -218,14 +236,17 @@ def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="I
 def peer_add(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
-    name: str = typer.Argument(..., help="Peer name/description")
+    name: str = typer.Argument(..., help="Peer name/description"),
+    ip: str | None = typer.Option(None, "--ip", help="Peer IP from the interface pool (auto if omitted)"),
+    dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
 ):
     try:
-        result = core.add_peer(interface, name)
+        result = core.add_peer(interface, name, ip_address=ip, dns=dns)
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
-            console.print(f"[green]Added peer {name} ({result['ip_address']})[/green]")
+            dns_note = f", DNS {result['dns']}" if result.get("dns") else ""
+            console.print(f"[green]Added peer {name} ({result['ip_address']}{dns_note})[/green]")
     except PeerAlreadyExistsError as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
@@ -263,6 +284,7 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
             _output(ctx, _public_peer_rows(peers))
         else:
             data = [dict(p) for p in peers]
+            iface_dns = {row["name"]: row["dns"] for row in db.list_interfaces()}
             total_peers = len(data)
             rows = [
                 [
@@ -270,6 +292,10 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
                     _styled(p["interface"], ""),
                     _styled(p["name"], _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
+                    _styled(
+                        _display_dns(p["dns"] or iface_dns.get(p["interface"])),
+                        _STYLE_META,
+                    ),
                     _styled(p["created_at"], _STYLE_META),
                 ]
                 for p in data
@@ -282,6 +308,7 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
                     ("Interface", {"overflow": "fold"}),
                     ("Name", {"overflow": "fold"}),
                     ("IP Address", {}),
+                    ("DNS", {"overflow": "fold"}),
                     ("Created At", {"overflow": "fold"}),
                 ],
                 rows,

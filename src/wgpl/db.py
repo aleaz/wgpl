@@ -90,7 +90,8 @@ def init_db(path: str | None = None) -> None:
                 endpoint     TEXT NOT NULL,
                 port         INTEGER NOT NULL DEFAULT 51820,
                 public_key   TEXT NOT NULL,
-                address_pool TEXT NOT NULL
+                address_pool TEXT NOT NULL,
+                dns          TEXT
             );
         """)
         
@@ -101,9 +102,10 @@ def init_db(path: str | None = None) -> None:
                 name         TEXT NOT NULL,
                 ip_address   TEXT NOT NULL,
                 public_key   TEXT NOT NULL,
-                private_key  TEXT NOT NULL,     
+                private_key  TEXT NOT NULL,
                 preshared_key TEXT,
                 created_at   TEXT NOT NULL,
+                dns          TEXT,
                 UNIQUE(interface, ip_address),
                 UNIQUE(interface, name)
             );
@@ -115,13 +117,21 @@ def init_db(path: str | None = None) -> None:
 
 # --- Interfaces CRUD ---
 
-def add_interface(name: str, endpoint: str, public_key: str, address_pool: str, port: int = 51820, conn: sqlite3.Connection | None = None) -> None:
+def add_interface(
+    name: str,
+    endpoint: str,
+    public_key: str,
+    address_pool: str,
+    port: int = 51820,
+    dns: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
     """Adds a new WireGuard interface to the database."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool) VALUES (?, ?, ?, ?, ?)",
-                (name, endpoint, port, public_key, address_pool)
+                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, endpoint, port, public_key, address_pool, dns),
             )
     except sqlite3.IntegrityError:
         raise InterfaceAlreadyExistsError(f"Interface {name} already exists.")
@@ -145,13 +155,24 @@ def remove_interface(name: str, conn: sqlite3.Connection | None = None) -> None:
 
 # --- Peers CRUD ---
 
-def add_peer(id: str, interface: str, name: str, ip_address: str, public_key: str, private_key: str, created_at: str, preshared_key: str | None = None, conn: sqlite3.Connection | None = None) -> None:
+def add_peer(
+    id: str,
+    interface: str,
+    name: str,
+    ip_address: str,
+    public_key: str,
+    private_key: str,
+    created_at: str,
+    preshared_key: str | None = None,
+    dns: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
     """Adds a new peer associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at)
+                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns),
             )
     except sqlite3.IntegrityError:
         raise PeerAlreadyExistsError(f"Peer name '{name}' already exists in interface '{interface}'.")

@@ -6,6 +6,18 @@ class NoAvailableIpsError(WgplException):
     """Raised when there are no available IPs in the pool."""
     pass
 
+class InvalidPeerIpError(WgplException):
+    """Raised when a requested peer IP is invalid or outside the interface pool."""
+    pass
+
+class IpAlreadyInUseError(WgplException):
+    """Raised when a requested peer IP is already assigned."""
+    pass
+
+class InvalidDnsError(WgplException):
+    """Raised when a DNS server list is invalid."""
+    pass
+
 class InterfaceNotFoundError(WgplException):
     """Raised when an interface is not found in the database."""
     pass
