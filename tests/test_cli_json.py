@@ -7,7 +7,7 @@ import pytest
 
 from typer.testing import CliRunner
 
-from wgpl import core, wireguard
+from wgpl import core, db, wireguard
 from wgpl.cli import app
 
 
@@ -287,3 +287,42 @@ def test_json_validate(wgpl_db: str, iface_pubkey: str) -> None:
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"status": "ok", "issues": []}
+
+
+def test_json_validate_error(wgpl_db: str, iface_pubkey: str) -> None:
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout)
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?",
+            ("10.0.1.50", peer["id"]),
+        )
+        conn.commit()
+
+    result = runner.invoke(app, ["--json", "validate", "wg0"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert len(payload["issues"]) >= 1
+
+
+def test_json_interface_update_pool_rejected(wgpl_db: str, iface_pubkey: str) -> None:
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+    runner.invoke(app, ["peer", "add", "wg0", "high", "--ip", "10.0.0.200"])
+
+    result = runner.invoke(
+        app,
+        ["--json", "interface", "update", "wg0", "--address-pool", "10.0.0.0/25"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "pool" in payload["message"].lower()

@@ -130,6 +130,20 @@ def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
     assert "Address pool 10.0.0.0/24 is already used" in result.output
 
 
+def test_cli_interface_update_pool_rejected(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    runner.invoke(app, ["peer", "add", "wg0", "high", "--ip", "10.0.0.200"])
+
+    result = runner.invoke(
+        app,
+        ["interface", "update", "wg0", "--address-pool", "10.0.0.0/25"],
+    )
+
+    assert result.exit_code == 1
+    assert "WGPL Error" in result.stderr
+    assert "pool" in result.stderr.lower()
+
+
 def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
     import datetime
 

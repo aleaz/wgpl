@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Consistent point-in-time database dumps under exclusive lock
+- `peer update` resolves peer reference inside the transaction
+- Soft-delete timestamps use ISO-8601 UTC
+- `remove_peer` idempotent soft-remove; audit `updated` only on real value changes
 - Treat naive `expires_at` timestamps as UTC in lifecycle checks (no crash on legacy rows)
 - `peer history` / `interface history` `--limit` returns the most recent events (not the oldest)
 - `db restore`: validate row integrity before swap; rotate backups (keep 3); clean tmp on init failure
@@ -16,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tests: restore retry, chmod 600, JSON validate errors, pool rejection CLI, audit metadata asserts
 - Regression tests: audit rollback on failure, concurrent `add_peer`, dump/restore roundtrip, CLI `db restore`, peer update reclaim, audit metadata `preshared_key` guard
 - Append-only `audit_events` table; `peer history` and `interface history` commands (`--json` supported)
 - Audit events for peer create/remove/prune/reclaim and interface create/update/remove (including cascade on `--force`)

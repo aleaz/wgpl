@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 import subprocess
 import uuid
 from unittest.mock import patch
@@ -479,7 +480,7 @@ def test_remove_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, active_only=True: peer["id"],
+        lambda ref, iface=None, active_only=True, conn=None: peer["id"],
     )
 
     assert peer["id"] is not None
@@ -494,7 +495,7 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, active_only=True: peer["id"],
+        lambda ref, iface=None, active_only=True, conn=None: peer["id"],
     )
 
     assert peer["id"] is not None
@@ -649,3 +650,38 @@ def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
     assert result["status"] == "error"
     codes = {issue["code"] for issue in result["issues"]}
     assert "duplicate_ip" in codes
+
+
+def test_soft_delete_uses_iso_utc_timestamp(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    core.remove_peer(wg0_interface, str(peer["id"]))
+
+    row = db.get_peer(str(peer["id"]))
+    assert row is not None
+    assert row["deleted_at"] is not None
+    parsed = datetime.datetime.fromisoformat(str(row["deleted_at"]))
+    assert parsed.tzinfo is not None
+
+
+def test_update_peer_resolve_uses_transaction_connection(
+    wg0_interface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    seen_conn: list[sqlite3.Connection | None] = []
+    original = core.resolve_peer_ref
+
+    def tracking_resolve(
+        ref: str,
+        interface: str | None = None,
+        *,
+        active_only: bool = True,
+        conn: sqlite3.Connection | None = None,
+    ) -> str:
+        seen_conn.append(conn)
+        return original(ref, interface, active_only=active_only, conn=conn)
+
+    monkeypatch.setattr(core, "resolve_peer_ref", tracking_resolve)
+    core.update_peer(wg0_interface, str(peer["id"]), name="renamed")
+
+    assert seen_conn == [seen_conn[0]]
+    assert seen_conn[0] is not None

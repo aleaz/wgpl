@@ -1,3 +1,4 @@
+import datetime
 import json
 import sqlite3
 import os
@@ -145,6 +146,23 @@ def transaction() -> Generator[sqlite3.Connection, None, None]:
         raise
     finally:
         conn.close()
+
+
+@contextmanager
+def exclusive_snapshot() -> Generator[sqlite3.Connection, None, None]:
+    """Exclusive read snapshot for consistent iterdump (rolls back, never commits)."""
+    conn = _create_connection()
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("BEGIN EXCLUSIVE")
+        yield conn
+        conn.rollback()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def init_db(path: str | None = None) -> None:
     """Initializes the database schema and enforces restrictive permissions."""
@@ -424,8 +442,9 @@ def list_peers(interface: str | None = None, conn: sqlite3.Connection | None = N
 
 def remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
     """Soft-removes a peer by its unique ID, retaining it in the database for auditing and IP management."""
+    deleted_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     with _ensure_conn(conn, commit=True) as c:
-        c.execute("UPDATE peers SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
+        c.execute("UPDATE peers SET deleted_at = ? WHERE id = ?", (deleted_at, id))
 
 
 def hard_remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:

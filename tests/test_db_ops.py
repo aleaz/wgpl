@@ -190,3 +190,42 @@ def test_restore_init_db_failure_cleans_tmp(monkeypatch: pytest.MonkeyPatch, wgp
         core.restore_database(_VALID_RESTORE_SQL)
 
     assert not os.path.exists(f"{wgpl_db}.tmp")
+
+
+def test_restore_retry_after_leftover_tmp(wgpl_db: str) -> None:
+    tmp_path = f"{wgpl_db}.tmp"
+    open(tmp_path, "w").close()
+
+    core.restore_database(_VALID_RESTORE_SQL)
+
+    assert db.get_interface("wg0") is not None
+    assert not os.path.exists(tmp_path)
+
+
+def test_restore_rename_failure_preserves_live_db(
+    wg0_interface: str, wgpl_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    def fail_rename(src: str, dst: str) -> None:
+        if src.endswith(".tmp"):
+            raise OSError("rename blocked")
+
+    monkeypatch.setattr(os, "rename", fail_rename)
+
+    with pytest.raises(OSError, match="rename blocked"):
+        core.restore_database(_VALID_RESTORE_SQL)
+
+    restored = db.get_peer(peer_id)
+    assert restored is not None
+    assert restored["name"] == "phone"
+    backups = glob.glob(f"{wgpl_db}.bak.*")
+    assert len(backups) >= 1
+
+
+def test_db_connection_enforces_mode_600(wgpl_db: str) -> None:
+    os.chmod(wgpl_db, 0o644)
+    with db.get_db():
+        pass
+    assert stat.S_IMODE(os.stat(wgpl_db).st_mode) == 0o600

@@ -193,6 +193,7 @@ def resolve_peer_ref(
     interface: str | None = None,
     *,
     active_only: bool = True,
+    conn: sqlite3.Connection | None = None,
 ) -> str:
     """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
     normalized = _normalize_peer_ref(ref)
@@ -201,7 +202,7 @@ def resolve_peer_ref(
         raise PeerNotFoundError(f"Peer {ref} not found")
 
     if len(normalized) == _PEER_ID_HEX_LEN:
-        matches = db.find_peers_by_id_prefix(normalized, interface)
+        matches = db.find_peers_by_id_prefix(normalized, interface, conn=conn)
         if active_only:
             matches = [peer for peer in matches if _is_peer_active(peer)]
         exact = [peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized]
@@ -213,7 +214,7 @@ def resolve_peer_ref(
     if len(normalized) < _MIN_PEER_ID_PREFIX_LEN:
         raise PeerNotFoundError(f"Peer {ref} not found")
 
-    matches = db.find_peers_by_id_prefix(normalized, interface)
+    matches = db.find_peers_by_id_prefix(normalized, interface, conn=conn)
     if active_only:
         matches = [peer for peer in matches if _is_peer_active(peer)]
     if not matches:
@@ -221,6 +222,52 @@ def resolve_peer_ref(
     if len(matches) == 1:
         return str(matches[0]["id"])
     raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, matches))
+
+
+def _peer_actual_changed_fields(
+    before: sqlite3.Row,
+    after: sqlite3.Row,
+    candidates: list[str],
+) -> list[str]:
+    """Return candidate field names whose values actually changed."""
+    column_map = {
+        "name": "name",
+        "ip_address": "ip_address",
+        "dns": "dns",
+        "desc": "desc",
+        "mtu": "mtu",
+        "keepalive": "keepalive",
+    }
+    changed: list[str] = []
+    for field in candidates:
+        column = column_map[field]
+        if before[column] != after[column]:
+            changed.append(field)
+    return changed
+
+
+def _interface_actual_changed_fields(
+    before: sqlite3.Row,
+    after: sqlite3.Row,
+    candidates: list[str],
+) -> list[str]:
+    """Return candidate interface field names whose values actually changed."""
+    column_map = {
+        "endpoint": "endpoint",
+        "port": "port",
+        "public_key": "public_key",
+        "address_pool": "address_pool",
+        "dns": "dns",
+        "desc": "desc",
+        "mtu": "mtu",
+        "keepalive": "keepalive",
+    }
+    changed: list[str] = []
+    for field in candidates:
+        column = column_map[field]
+        if before[column] != after[column]:
+            changed.append(field)
+    return changed
 
 
 def _ambiguous_peer_message(ref: str, matches: list[sqlite3.Row]) -> str:
@@ -613,6 +660,8 @@ def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False)
                 metadata={"hard": True},
             )
             db.hard_remove_peer(canonical_peer_id, conn=conn)
+        elif peer["deleted_at"] is not None:
+            return
         else:
             _audit_peer_from_row(peer, db.AuditEventType.REMOVED, conn)
             db.remove_peer(canonical_peer_id, conn=conn)
@@ -909,17 +958,18 @@ def update_interface(
             conn=conn,
         )
 
-        if changed_fields:
+        updated = db.get_interface(name, conn=conn)
+        if not updated:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+        actual_changes = _interface_actual_changed_fields(iface, updated, changed_fields)
+        if actual_changes:
             _audit_interface_event(
                 name,
                 db.AuditEventType.UPDATED,
                 conn,
-                metadata={"fields": changed_fields},
+                metadata={"fields": actual_changes},
             )
-
-        updated = db.get_interface(name, conn=conn)
-        if not updated:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
 
     result: dict[str, str | int | list[str] | None] = dict(_interface_row_to_dict(updated))
     result["hints"] = list(dict.fromkeys(hints))
@@ -955,7 +1005,6 @@ def update_peer(
     if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive:
         raise NoUpdateFieldsError("No fields provided to update")
 
-    canonical_id = resolve_peer_ref(peer_ref, interface_name)
     hints: list[str] = []
 
     if ip_address is not None:
@@ -1011,6 +1060,7 @@ def update_peer(
         changed_fields.append("keepalive")
 
     with db.transaction() as conn:
+        canonical_id = resolve_peer_ref(peer_ref, interface_name, conn=conn)
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
@@ -1018,6 +1068,7 @@ def update_peer(
             raise PeerInterfaceMismatchError(
                 f"Peer {peer_ref} does not belong to interface {interface_name}"
             )
+        before = peer
 
         validated_ip: str | UnsetType = UNSET
         slot_ip: str | None = None
@@ -1058,12 +1109,13 @@ def update_peer(
         if not updated:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
 
-        if changed_fields:
+        actual_changes = _peer_actual_changed_fields(before, updated, changed_fields)
+        if actual_changes:
             _audit_peer_from_row(
                 updated,
                 db.AuditEventType.UPDATED,
                 conn,
-                metadata={"fields": changed_fields},
+                metadata={"fields": actual_changes},
             )
 
         iface = db.get_interface(interface_name, conn=conn)
@@ -1166,8 +1218,8 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 # --- Database Dump & Restore ---
 
 def dump_database_lines() -> Iterator[str]:
-    """Yield SQLite logical dump lines (each line includes a trailing newline)."""
-    with db.get_db() as conn:
+    """Yield SQLite logical dump lines from a consistent point-in-time snapshot."""
+    with db.exclusive_snapshot() as conn:
         for line in conn.iterdump():
             yield f"{line}\n"
 
