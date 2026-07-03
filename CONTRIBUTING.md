@@ -47,12 +47,19 @@ The message must stand on its own in `git log` for anyone who was not in the aut
 **Do not** reference internal process artifacts in the subject or body, for example:
 
 - Audit or review IDs (`V1`, `F3`, `gap V5`)
+- Technical-debt wave labels (`v1.0`, `v1.1`, `v1.2`, `ola v1.2`) — these are planning names, not released semver
+- Debt item IDs (`D3`, `D16`, `D1–D34`) from backlog plans
 - Plan or todo slugs from `.cursor/plans/`, agent sessions, or checklists
 - Intermediate analysis doc names that are not versioned in the repo
 
 Those identifiers do not exist in the codebase and become meaningless once the session ends.
+They also must not be treated as git tags or package versions unless a release step explicitly creates them.
+
+**Bad:** `fix: v1.2 integrity hardening (D3, D16, D17)`
 
 **Bad:** `fix: close invariant verification gaps (V1-V3, V5)`
+
+**Good:** `fix: consistent dump snapshots and accurate update audit events`
 
 **Good:** `fix: route interface add/remove through core and improve peer errors`
 

@@ -110,8 +110,9 @@ Run a CLI smoke test with a temporary `WGPL_DB_PATH` before opening the PR.
 ## Commit messages
 
 Follow Conventional Commits. Write subjects that make sense in `git log` without
-session context. **Never** cite internal IDs (audit items, plan todos, `.cursor/plans/`
-slugs, agent checklist steps) — they are not in the repo and mean nothing later.
+session context. **Never** cite internal control labels (audit IDs, debt wave names
+like `v1.2`, debt IDs like `D16`, plan todos, `.cursor/plans/` slugs) — they are
+not semver, not git tags, and mean nothing outside the session.
 See [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages).
 
 ## Git (AI agents)

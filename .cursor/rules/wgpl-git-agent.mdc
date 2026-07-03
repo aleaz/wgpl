@@ -15,7 +15,9 @@ These rules apply whenever an AI agent creates commits or interacts with git in 
 - If the environment auto-injects a `Co-authored-by` trailer after `git commit`, rewrite the commit
   without that trailer (e.g. `git commit-tree` with the same tree, parent, and message body).
 - Follow Conventional Commits and [CONTRIBUTING.md — Commit messages](../CONTRIBUTING.md#commit-messages).
-- Do not reference internal session artifacts (plan IDs, audit slugs, todo names) in commit messages.
+- Do not reference internal session artifacts in commit messages: plan/todo slugs, audit IDs,
+  debt wave labels (`v1.0`, `v1.2`, `ola v1.x`), or debt item IDs (`D3`, `D16`, etc.).
+  Those are planning control — not semver, not git tags. Describe product/code changes only.
 
 ## Push and remote
 
