@@ -122,6 +122,8 @@ def add_interface(
     port: int = 51820,
     dns: str | None = None,
     desc: str | None = None,
+    mtu: int | None = None,
+    keepalive: int | None = None,
 ) -> dict[str, str | int | None]:
     """Register a WireGuard interface in the database."""
     if not (1 <= port <= 65535):
@@ -133,8 +135,13 @@ def add_interface(
         raise ValueError(f"Invalid address pool '{address_pool}'") from exc
 
     normalized_dns = validate_dns(dns) if dns is not None else None
+    if mtu is not None and mtu < 576:
+        raise ValueError(f"MTU must be >= 576, got {mtu}")
+    if keepalive is not None and not (0 <= keepalive <= 65535):
+        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
+
     db.add_interface(
-        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns, desc=desc
+        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns, desc=desc, mtu=mtu, keepalive=keepalive
     )
 
     result: dict[str, str | int | None] = {
@@ -148,6 +155,10 @@ def add_interface(
         result["dns"] = normalized_dns
     if desc is not None:
         result["desc"] = desc
+    if mtu is not None:
+        result["mtu"] = mtu
+    if keepalive is not None:
+        result["keepalive"] = keepalive
     return result
 
 
@@ -164,6 +175,24 @@ def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
     iface_dns = iface["dns"]
     if iface_dns:
         return str(iface_dns)
+    return None
+
+def _effective_peer_mtu(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
+    peer_mtu = peer["mtu"]
+    if peer_mtu is not None:
+        return int(peer_mtu)
+    iface_mtu = iface["mtu"]
+    if iface_mtu is not None:
+        return int(iface_mtu)
+    return None
+
+def _effective_peer_keepalive(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
+    peer_ka = peer["keepalive"]
+    if peer_ka is not None:
+        return int(peer_ka)
+    iface_ka = iface["keepalive"]
+    if iface_ka is not None:
+        return int(iface_ka)
     return None
 
 
@@ -249,12 +278,18 @@ def add_peer(
     dns: str | None = None,
     expires: str | None = None,
     desc: str | None = None,
-) -> dict[str, str | None]:
+    mtu: int | None = None,
+    keepalive: int | None = None,
+) -> dict[str, str | int | None]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
     Returns a dictionary with the peer's essential information.
     """
     normalized_dns = validate_dns(dns) if dns is not None else None
+    if mtu is not None and mtu < 576:
+        raise ValueError(f"MTU must be >= 576, got {mtu}")
+    if keepalive is not None and not (0 <= keepalive <= 65535):
+        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
     with db.transaction() as conn:
         allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
@@ -281,6 +316,8 @@ def add_peer(
             dns=normalized_dns,
             expires_at=expires_at,
             desc=desc,
+            mtu=mtu,
+            keepalive=keepalive,
             conn=conn,
         )
 
@@ -297,6 +334,8 @@ def add_peer(
         "public_key": keypair.public_key,
         "dns": effective_dns,
         "desc": desc,
+        "mtu": mtu,
+        "keepalive": keepalive,
     }
 
 def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False) -> None:
@@ -328,7 +367,7 @@ def prune_peers(interface_name: str) -> int:
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
-def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 25) -> str:
+def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
     canonical_id = resolve_peer_ref(peer_id)
     peer = db.get_peer(canonical_id)
@@ -354,6 +393,10 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int
     if effective_dns:
         config_lines.append(f"DNS = {effective_dns}")
 
+    effective_mtu = _effective_peer_mtu(peer, iface)
+    if effective_mtu is not None:
+        config_lines.append(f"MTU = {effective_mtu}")
+
     config_lines.extend([
         "",
         "[Peer]",
@@ -366,15 +409,19 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int
     config_lines.extend([
         f"Endpoint = {iface['endpoint']}:{iface['port']}",
         f"AllowedIPs = {allowed_ips}",
-        f"PersistentKeepalive = {keepalive}",
-        ""
     ])
+
+    effective_keepalive = _effective_peer_keepalive(peer, iface)
+    if effective_keepalive is not None:
+        config_lines.append(f"PersistentKeepalive = {effective_keepalive}")
+
+    config_lines.append("")
     
     return "\n".join(config_lines)
 
-def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 25) -> str:
+def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     """Generates an ASCII-art QR code for the given peer configuration."""
-    config = get_peer_config(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+    config = get_peer_config(peer_id, allowed_ips=allowed_ips)
     qr = qrcode.QRCode()
     qr.add_data(config)
     f = io.StringIO()
@@ -382,9 +429,9 @@ def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 2
     f.seek(0)
     return f.read()
 
-def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int = 25) -> bytes:
+def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> bytes:
     """Generates a PNG QR code image for the given peer configuration."""
-    config = get_peer_config(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+    config = get_peer_config(peer_id, allowed_ips=allowed_ips)
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -407,6 +454,9 @@ def get_interface_config(interface_name: str) -> str:
     peers = db.list_peers(interface_name)
     
     conf_lines = []
+    if iface["mtu"] is not None:
+        conf_lines.append(f"MTU = {iface['mtu']}")
+        conf_lines.append("")
     
     for peer in peers:
         if not _is_peer_active(peer):
@@ -470,15 +520,23 @@ def update_interface(
     clear_dns: bool = False,
     desc: str | None = None,
     clear_desc: bool = False,
+    mtu: int | None = None,
+    clear_mtu: bool = False,
+    keepalive: int | None = None,
+    clear_keepalive: bool = False,
 ) -> dict[str, str | int | list[str] | None]:
     """Update interface fields. Returns the updated row and operational hints."""
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
         raise ValueError("Cannot set both desc and clear_desc")
+    if clear_mtu and mtu is not None:
+        raise ValueError("Cannot set both mtu and clear_mtu")
+    if clear_keepalive and keepalive is not None:
+        raise ValueError("Cannot set both keepalive and clear_keepalive")
 
-    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns, desc))
-    if not has_field and not clear_dns and not clear_desc:
+    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive))
+    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive:
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
@@ -492,9 +550,18 @@ def update_interface(
         hints.append("re_export_clients")
     if dns is not None or clear_dns:
         hints.append("re_export_clients")
+    if mtu is not None or clear_mtu:
+        hints.append("apply_server")
+        hints.append("re_export_clients")
+    if keepalive is not None or clear_keepalive:
+        hints.append("re_export_clients")
 
     if port is not None and not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
+    if mtu is not None and mtu < 576:
+        raise ValueError(f"MTU must be >= 576, got {mtu}")
+    if keepalive is not None and not (0 <= keepalive <= 65535):
+        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
     normalized_pool: str | None = None
     if address_pool is not None:
@@ -515,6 +582,18 @@ def update_interface(
     elif desc is not None:
         normalized_desc = desc
 
+    normalized_mtu: int | None | UnsetType = UNSET
+    if clear_mtu:
+        normalized_mtu = None
+    elif mtu is not None:
+        normalized_mtu = mtu
+
+    normalized_keepalive: int | None | UnsetType = UNSET
+    if clear_keepalive:
+        normalized_keepalive = None
+    elif keepalive is not None:
+        normalized_keepalive = keepalive
+
     with db.transaction() as conn:
         iface = db.get_interface(name, conn=conn)
         if not iface:
@@ -531,6 +610,8 @@ def update_interface(
             address_pool=normalized_pool if normalized_pool is not None else UNSET,
             dns=normalized_dns,
             desc=normalized_desc,
+            mtu=normalized_mtu,
+            keepalive=normalized_keepalive,
             conn=conn,
         )
 
@@ -553,15 +634,23 @@ def update_peer(
     clear_dns: bool = False,
     desc: str | None = None,
     clear_desc: bool = False,
+    mtu: int | None = None,
+    clear_mtu: bool = False,
+    keepalive: int | None = None,
+    clear_keepalive: bool = False,
 ) -> dict[str, str | list[str] | None]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
         raise ValueError("Cannot set both desc and clear_desc")
+    if clear_mtu and mtu is not None:
+        raise ValueError("Cannot set both mtu and clear_mtu")
+    if clear_keepalive and keepalive is not None:
+        raise ValueError("Cannot set both keepalive and clear_keepalive")
 
-    has_field = any(v is not None for v in (name, ip_address, dns, desc))
-    if not has_field and not clear_dns and not clear_desc:
+    has_field = any(v is not None for v in (name, ip_address, dns, desc, mtu, keepalive))
+    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive:
         raise NoUpdateFieldsError("No fields provided to update")
 
     canonical_id = resolve_peer_ref(peer_ref, interface_name)
@@ -571,6 +660,15 @@ def update_peer(
         hints.extend(["apply_server", "re_export_client"])
     if dns is not None or clear_dns:
         hints.append("re_export_client")
+    if mtu is not None or clear_mtu:
+        hints.append("re_export_client")
+    if keepalive is not None or clear_keepalive:
+        hints.append("re_export_client")
+    
+    if mtu is not None and mtu < 576:
+        raise ValueError(f"MTU must be >= 576, got {mtu}")
+    if keepalive is not None and not (0 <= keepalive <= 65535):
+        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
     normalized_dns: str | None | UnsetType = UNSET
     if clear_dns:
@@ -583,6 +681,18 @@ def update_peer(
         normalized_desc = None
     elif desc is not None:
         normalized_desc = desc
+        
+    normalized_mtu: int | None | UnsetType = UNSET
+    if clear_mtu:
+        normalized_mtu = None
+    elif mtu is not None:
+        normalized_mtu = mtu
+
+    normalized_keepalive: int | None | UnsetType = UNSET
+    if clear_keepalive:
+        normalized_keepalive = None
+    elif keepalive is not None:
+        normalized_keepalive = keepalive
 
     with db.transaction() as conn:
         peer = db.get_peer(canonical_id, conn=conn)
@@ -609,6 +719,8 @@ def update_peer(
                 ip_address=validated_ip,
                 dns=normalized_dns,
                 desc=normalized_desc,
+                mtu=normalized_mtu,
+                keepalive=normalized_keepalive,
                 conn=conn,
             )
         except PeerAlreadyExistsError:
@@ -630,6 +742,10 @@ def update_peer(
         "dns": effective_dns,
         "dns_override": updated["dns"],
         "desc": updated["desc"],
+        "mtu": _effective_peer_mtu(updated, iface),
+        "mtu_override": updated["mtu"],
+        "keepalive": _effective_peer_keepalive(updated, iface),
+        "keepalive_override": updated["keepalive"],
         "hints": list(dict.fromkeys(hints)),
     }
 

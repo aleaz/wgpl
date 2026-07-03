@@ -182,10 +182,12 @@ def interface_add(
     port: int = typer.Option(51820, help="Listen port"),
     dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs (e.g. 1.1.1.1)"),
     desc: str | None = typer.Option(None, "--desc", help="Description of the interface"),
+    mtu: int | None = typer.Option(None, "--mtu", help="Global MTU for the interface and clients"),
+    keepalive: int | None = typer.Option(None, "--keepalive", help="Global PersistentKeepalive for clients"),
 ):
     try:
         result = core.add_interface(
-            name, endpoint, public_key, address_pool, port=port, dns=dns, desc=desc
+            name, endpoint, public_key, address_pool, port=port, dns=dns, desc=desc, mtu=mtu, keepalive=keepalive
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -269,6 +271,10 @@ def interface_update(
     clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove interface default DNS"),
     desc: str | None = typer.Option(None, "--desc", help="Description of the interface"),
     clear_desc: bool = typer.Option(False, "--clear-desc", help="Remove interface description"),
+    mtu: int | None = typer.Option(None, "--mtu", help="Global MTU for the interface and clients"),
+    clear_mtu: bool = typer.Option(False, "--clear-mtu", help="Remove interface MTU"),
+    keepalive: int | None = typer.Option(None, "--keepalive", help="Global PersistentKeepalive for clients"),
+    clear_keepalive: bool = typer.Option(False, "--clear-keepalive", help="Remove interface PersistentKeepalive"),
 ):
     try:
         if clear_dns and dns is not None:
@@ -276,6 +282,12 @@ def interface_update(
             sys.exit(1)
         if clear_desc and desc is not None:
             console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
+            sys.exit(1)
+        if clear_mtu and mtu is not None:
+            console.print("[red]WGPL Error: Cannot use --mtu and --clear-mtu together.[/red]")
+            sys.exit(1)
+        if clear_keepalive and keepalive is not None:
+            console.print("[red]WGPL Error: Cannot use --keepalive and --clear-keepalive together.[/red]")
             sys.exit(1)
 
         result = core.update_interface(
@@ -288,6 +300,10 @@ def interface_update(
             clear_dns=clear_dns,
             desc=desc,
             clear_desc=clear_desc,
+            mtu=mtu,
+            clear_mtu=clear_mtu,
+            keepalive=keepalive,
+            clear_keepalive=clear_keepalive,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -309,9 +325,11 @@ def peer_add(
     dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
     expires: str | None = typer.Option(None, "--expires", help="Duration until expiration (e.g. 7d, 24h)"),
     desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
+    mtu: int | None = typer.Option(None, "--mtu", help="MTU override for this peer"),
+    keepalive: int | None = typer.Option(None, "--keepalive", help="PersistentKeepalive override for this peer"),
 ):
     try:
-        result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires, desc=desc)
+        result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires, desc=desc, mtu=mtu, keepalive=keepalive)
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
@@ -368,6 +386,10 @@ def peer_update(
     clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove peer DNS override (inherit interface default)"),
     desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
     clear_desc: bool = typer.Option(False, "--clear-desc", help="Remove peer description"),
+    mtu: int | None = typer.Option(None, "--mtu", help="MTU override for this peer"),
+    clear_mtu: bool = typer.Option(False, "--clear-mtu", help="Remove peer MTU override (inherit interface default)"),
+    keepalive: int | None = typer.Option(None, "--keepalive", help="PersistentKeepalive override for this peer"),
+    clear_keepalive: bool = typer.Option(False, "--clear-keepalive", help="Remove peer PersistentKeepalive override (inherit interface default)"),
 ):
     try:
         if clear_dns and dns is not None:
@@ -375,6 +397,12 @@ def peer_update(
             sys.exit(1)
         if clear_desc and desc is not None:
             console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
+            sys.exit(1)
+        if clear_mtu and mtu is not None:
+            console.print("[red]WGPL Error: Cannot use --mtu and --clear-mtu together.[/red]")
+            sys.exit(1)
+        if clear_keepalive and keepalive is not None:
+            console.print("[red]WGPL Error: Cannot use --keepalive and --clear-keepalive together.[/red]")
             sys.exit(1)
 
         result = core.update_peer(
@@ -386,6 +414,10 @@ def peer_update(
             clear_dns=clear_dns,
             desc=desc,
             clear_desc=clear_desc,
+            mtu=mtu,
+            clear_mtu=clear_mtu,
+            keepalive=keepalive,
+            clear_keepalive=clear_keepalive,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -463,11 +495,10 @@ def peer_config(
     ctx: typer.Context, 
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
-    keepalive: int = typer.Option(25, help="PersistentKeepalive interval")
 ):
     try:
         _validate_allowed_ips(allowed_ips)
-        config = core.get_peer_config(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+        config = core.get_peer_config(peer_id, allowed_ips=allowed_ips)
         if ctx.obj.get("json"):
             _output(ctx, {"config": config})
         else:
@@ -482,13 +513,12 @@ def peer_qr(
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write QR code as PNG to this file"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
-    keepalive: int = typer.Option(25, help="PersistentKeepalive interval"),
 ):
     try:
         _validate_allowed_ips(allowed_ips)
         if output is not None:
             png_bytes = core.get_peer_qr_png_bytes(
-                peer_id, allowed_ips=allowed_ips, keepalive=keepalive
+                peer_id, allowed_ips=allowed_ips
             )
             output.write_bytes(png_bytes)
             os.chmod(output, 0o600)
@@ -501,7 +531,7 @@ def peer_qr(
                     "[yellow](contains private keys; keep file permissions restricted)[/yellow]"
                 )
         else:
-            qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips, keepalive=keepalive)
+            qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips)
             if ctx.obj.get("json"):
                 _output(ctx, {"qr": qr})
             else:

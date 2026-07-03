@@ -113,7 +113,9 @@ def init_db(path: str | None = None) -> None:
                 public_key   TEXT NOT NULL,
                 address_pool TEXT NOT NULL UNIQUE,
                 dns          TEXT,
-                desc         TEXT
+                desc         TEXT,
+                mtu          INTEGER,
+                keepalive    INTEGER
             );
         """)
         
@@ -130,7 +132,9 @@ def init_db(path: str | None = None) -> None:
                 dns          TEXT,
                 deleted_at   TEXT,
                 expires_at   TEXT,
-                desc         TEXT
+                desc         TEXT,
+                mtu          INTEGER,
+                keepalive    INTEGER
             );
         """)
         
@@ -160,14 +164,16 @@ def add_interface(
     port: int = 51820,
     dns: str | None = None,
     desc: str | None = None,
+    mtu: int | None = None,
+    keepalive: int | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new WireGuard interface to the database."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (name, endpoint, port, public_key, address_pool, dns, desc),
+                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive),
             )
     except sqlite3.IntegrityError as exc:
         msg = str(exc).lower()
@@ -207,6 +213,8 @@ def update_interface(
     address_pool: str | _UnsetType = _UNSET,
     dns: str | None | _UnsetType = _UNSET,
     desc: str | None | _UnsetType = _UNSET,
+    mtu: int | None | _UnsetType = _UNSET,
+    keepalive: int | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the interface fields that are not _UNSET."""
@@ -231,6 +239,12 @@ def update_interface(
     if desc is not _UNSET:
         updates.append("desc = ?")
         params.append(desc)
+    if mtu is not _UNSET:
+        updates.append("mtu = ?")
+        params.append(mtu)
+    if keepalive is not _UNSET:
+        updates.append("keepalive = ?")
+        params.append(keepalive)
 
     if not updates:
         return
@@ -264,14 +278,16 @@ def add_peer(
     dns: str | None = None,
     expires_at: str | None = None,
     desc: str | None = None,
+    mtu: int | None = None,
+    keepalive: int | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new peer associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc),
+                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive),
             )
     except sqlite3.IntegrityError as exc:
         error_msg = str(exc).lower()
@@ -356,6 +372,8 @@ def update_peer(
     ip_address: str | _UnsetType = _UNSET,
     dns: str | None | _UnsetType = _UNSET,
     desc: str | None | _UnsetType = _UNSET,
+    mtu: int | None | _UnsetType = _UNSET,
+    keepalive: int | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the peer fields that are not _UNSET."""
@@ -374,6 +392,12 @@ def update_peer(
     if desc is not _UNSET:
         updates.append("desc = ?")
         params.append(desc)
+    if mtu is not _UNSET:
+        updates.append("mtu = ?")
+        params.append(mtu)
+    if keepalive is not _UNSET:
+        updates.append("keepalive = ?")
+        params.append(keepalive)
 
     if not updates:
         return
