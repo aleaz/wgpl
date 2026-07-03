@@ -128,3 +128,23 @@ def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
     
     assert result.exit_code == 1
     assert "Address pool 10.0.0.0/24 is already used" in result.output
+
+
+def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
+    import datetime
+
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "guest", expires="1h")
+    assert peer["id"] is not None
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+
+    result = runner.invoke(app, ["--json", "peer", "prune", "wg0"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload == {"status": "success", "interface": "wg0", "deleted_count": 1}
+    assert db.get_peer(peer["id"]) is None

@@ -392,16 +392,6 @@ def hard_remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
         c.execute("DELETE FROM peers WHERE id = ?", (id,))
 
 
-def prune_peers(interface: str, conn: sqlite3.Connection | None = None) -> int:
-    """Physically removes all soft-deleted or expired peers for an interface. Returns the number of deleted rows."""
-    with _ensure_conn(conn, commit=True) as c:
-        cursor = c.execute(
-            "DELETE FROM peers WHERE interface = ? AND (deleted_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at <= CURRENT_TIMESTAMP))",
-            (interface,),
-        )
-        return cursor.rowcount
-
-
 def update_peer(
     peer_id: str,
     *,

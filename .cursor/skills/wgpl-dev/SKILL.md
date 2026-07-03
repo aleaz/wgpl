@@ -72,9 +72,9 @@ wgpl db restore < backup.sql
   (peer override → interface default). Set values with `peer update` or interface defaults.
 - Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
   use `peer remove --hard` to physically delete a soft-deleted peer.
-- A peer occupies an IP in the pool only while active (not soft-deleted and not expired).
-  Expired peers release their IP for new allocations; `peer prune` removes expired or
-  soft-deleted rows from the database.
+- A peer occupies an IP and name in the pool only while active (not soft-deleted and not expired).
+  Inactive peers release IP and name on `peer add` / `peer update`; `peer prune` hard-deletes
+  all inactive rows using `_is_peer_active` in core.
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 
 ## Code map

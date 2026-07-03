@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validate` and `resolve_peer_ref` skip soft-deleted and expired peers by default
 - `peer remove` on an already soft-deleted peer returns not found instead of re-deleting silently
 - IP pool allocation no longer treats expired peers as occupying addresses (`_pool_used_ips` uses `_is_peer_active`)
+- `peer prune` removes expired peers correctly (`_is_peer_active` in core, not broken SQL timestamp comparison)
+- Expired peers no longer block reuse of the same peer name on `peer add` / `peer update`
 
 ### Changed
 

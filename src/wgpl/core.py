@@ -316,16 +316,23 @@ def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ip
         raise IpAlreadyInUseError(f"IP {ip} is already assigned in this interface")
 
 
-def _release_inactive_peer_ip(
+def _release_inactive_peer_slots(
     interface_name: str,
-    ip: str,
     conn: sqlite3.Connection,
+    *,
+    ip: str | None = None,
+    name: str | None = None,
 ) -> None:
-    """Soft-delete inactive peers so DB unique indexes allow IP reuse."""
+    """Soft-delete inactive peers blocking partial unique indexes."""
+    if ip is None and name is None:
+        return
     for peer in db.list_peers(interface_name, conn=conn):
-        if peer["ip_address"] != ip or _is_peer_active(peer):
+        if _is_peer_active(peer) or peer["deleted_at"] is not None:
             continue
-        if peer["deleted_at"] is None:
+        blocks = (ip is not None and peer["ip_address"] == ip) or (
+            name is not None and peer["name"] == name
+        )
+        if blocks:
             db.remove_peer(peer["id"], conn=conn)
 
 
@@ -370,7 +377,9 @@ def add_peer(
 
     with db.transaction() as conn:
         allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
-        _release_inactive_peer_ip(interface_name, allocated_ip, conn)
+        _release_inactive_peer_slots(
+            interface_name, conn, ip=allocated_ip, name=peer_name
+        )
 
         keypair = wireguard.generate_keypair()
         preshared_key = wireguard.generate_preshared_key()
@@ -435,13 +444,20 @@ def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False)
 
 
 def prune_peers(interface_name: str) -> int:
-    """Physically removes all soft-deleted or expired peers for an interface."""
+    """Physically removes all inactive peers (soft-deleted or expired) for an interface."""
     with db.transaction() as conn:
         iface = db.get_interface(interface_name, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {interface_name} not found")
-        
-        return db.prune_peers(interface_name, conn=conn)
+
+        to_remove = [
+            peer["id"]
+            for peer in db.list_peers(interface_name, conn=conn)
+            if not _is_peer_active(peer)
+        ]
+        for peer_id in to_remove:
+            db.hard_remove_peer(peer_id, conn=conn)
+        return len(to_remove)
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
@@ -779,6 +795,7 @@ def update_peer(
             )
 
         validated_ip: str | UnsetType = UNSET
+        slot_ip: str | None = None
         if ip_address is not None:
             validated_ip = allocate_peer_ip(
                 interface_name,
@@ -786,7 +803,13 @@ def update_peer(
                 ip_address,
                 exclude_peer_id=canonical_id,
             )
-            _release_inactive_peer_ip(interface_name, validated_ip, conn)
+            slot_ip = validated_ip
+
+        slot_name = name
+        if slot_ip is not None or slot_name is not None:
+            _release_inactive_peer_slots(
+                interface_name, conn, ip=slot_ip, name=slot_name
+            )
 
         try:
             db.update_peer(

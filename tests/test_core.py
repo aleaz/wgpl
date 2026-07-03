@@ -409,6 +409,50 @@ def test_soft_deleted_peer_releases_ip_for_allocation(wg0_interface: str) -> Non
     assert new_peer["ip_address"] == "10.0.0.4"
 
 
+def test_expired_peer_releases_name_for_allocation(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.5", expires="1h")
+    assert peer["id"] is not None
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+
+    new_peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.6")
+    assert new_peer["name"] == "phone"
+    assert new_peer["ip_address"] == "10.0.0.6"
+
+
+def test_prune_removes_expired_peer(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", expires="1h")
+    assert peer["id"] is not None
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+
+    assert core.prune_peers(wg0_interface) == 1
+    assert db.get_peer(peer["id"]) is None
+
+
+def test_prune_removes_soft_deleted_peer(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    assert core.prune_peers(wg0_interface) == 1
+    assert db.get_peer(peer["id"]) is None
+
+
+def test_prune_keeps_active_peer(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+
+    assert core.prune_peers(wg0_interface) == 0
+    assert db.get_peer(peer["id"]) is not None
+
+
 def test_get_peer_status_and_effective_dns(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", dns="1.1.1.1")
     assert peer["id"] is not None
