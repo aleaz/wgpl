@@ -121,7 +121,9 @@ def test_remove_peer_with_prefix(wg0_interface: str) -> None:
     canonical_id = core.resolve_peer_ref("55c521ad2d94")
     core.remove_peer(wg0_interface, canonical_id)
 
-    assert db.get_peer(peer_id) is None
+    peer = db.get_peer(peer_id)
+    assert peer is not None
+    assert peer["deleted_at"] is not None
 
 
 def test_get_peer_qr_png_bytes_returns_valid_png(wg0_interface: str) -> None:
@@ -171,6 +173,7 @@ def test_get_peer_config_uses_interface_dns(wg0_interface: str) -> None:
         "vpn.example.com",
         wireguard.generate_keypair().public_key,
         "10.0.1.0/24",
+        port=51821,
         dns="1.1.1.1",
     )
     peer = core.add_peer("wg_dns", "phone")
@@ -187,6 +190,7 @@ def test_get_peer_config_peer_dns_overrides_interface(wg0_interface: str) -> Non
         "vpn.example.com",
         wireguard.generate_keypair().public_key,
         "10.0.2.0/24",
+        port=51822,
         dns="1.1.1.1",
     )
     peer = core.add_peer("wg_dns2", "kids", dns="9.9.9.9")

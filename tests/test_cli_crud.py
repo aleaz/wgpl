@@ -87,3 +87,27 @@ def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
     assert "WGPL Error" in result.stderr
     assert "does not belong" in result.stderr
     assert "Unexpected Error" not in result.stderr
+
+
+def test_cli_interface_port_conflict(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    pubkey = wireguard.generate_keypair().public_key
+    
+    result = runner.invoke(app, [
+        "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.1.0/24", "--port", "51820"
+    ])
+    
+    assert result.exit_code == 1
+    assert "Port 51820 is already used" in result.output
+
+
+def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    pubkey = wireguard.generate_keypair().public_key
+    
+    result = runner.invoke(app, [
+        "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.0.0/24", "--port", "51821"
+    ])
+    
+    assert result.exit_code == 1
+    assert "Address pool 10.0.0.0/24 is already used" in result.output

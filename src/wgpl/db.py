@@ -5,9 +5,10 @@ from typing import Any, Generator
 
 from .exceptions import (
     InterfaceAlreadyExistsError,
+    InterfaceConflictError,
     InterfaceNotFoundError,
-    IpAlreadyInUseError,
     PeerAlreadyExistsError,
+    IpAlreadyInUseError,
     WgplException,
 )
 
@@ -108,9 +109,9 @@ def init_db(path: str | None = None) -> None:
             CREATE TABLE IF NOT EXISTS interfaces (
                 name         TEXT PRIMARY KEY,
                 endpoint     TEXT NOT NULL,
-                port         INTEGER NOT NULL DEFAULT 51820,
+                port         INTEGER NOT NULL DEFAULT 51820 UNIQUE,
                 public_key   TEXT NOT NULL,
-                address_pool TEXT NOT NULL,
+                address_pool TEXT NOT NULL UNIQUE,
                 dns          TEXT
             );
         """)
@@ -165,7 +166,13 @@ def add_interface(
                 "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns) VALUES (?, ?, ?, ?, ?, ?)",
                 (name, endpoint, port, public_key, address_pool, dns),
             )
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as exc:
+        msg = str(exc).lower()
+        if "interfaces.port" in msg:
+            raise InterfaceConflictError(f"Port {port} is already used by another interface.")
+        if "interfaces.address_pool" in msg:
+            raise InterfaceConflictError(f"Address pool {address_pool} is already used by another interface.")
+        
         raise InterfaceAlreadyExistsError(f"Interface {name} already exists.")
 
 def get_interface(name: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
@@ -222,11 +229,19 @@ def update_interface(
         return
 
     params.append(name)
-    with _ensure_conn(conn, commit=True) as c:
-        c.execute(
-            f"UPDATE interfaces SET {', '.join(updates)} WHERE name = ?",
-            params,
-        )
+    try:
+        with _ensure_conn(conn, commit=True) as c:
+            c.execute(
+                f"UPDATE interfaces SET {', '.join(updates)} WHERE name = ?",
+                params,
+            )
+    except sqlite3.IntegrityError as exc:
+        msg = str(exc).lower()
+        if "interfaces.port" in msg:
+            raise InterfaceConflictError(f"Port {port} is already used by another interface.")
+        if "interfaces.address_pool" in msg:
+            raise InterfaceConflictError(f"Address pool {address_pool} is already used by another interface.")
+        raise
 
 # --- Peers CRUD ---
 

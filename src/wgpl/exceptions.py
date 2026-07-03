@@ -23,7 +23,11 @@ class InterfaceNotFoundError(WgplException):
     pass
 
 class InterfaceAlreadyExistsError(WgplException):
-    """Raised when attempting to add an interface that already exists."""
+    """Raised when attempting to add an interface that already exists (name collision)."""
+    pass
+
+class InterfaceConflictError(WgplException):
+    """Raised when an interface port or address pool conflicts with an existing interface."""
     pass
 
 class PeerNotFoundError(WgplException):
