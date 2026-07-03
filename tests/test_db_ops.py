@@ -19,8 +19,11 @@ CREATE TABLE IF NOT EXISTS "peers" (
     id TEXT PRIMARY KEY, interface TEXT NOT NULL,
     name TEXT NOT NULL, ip_address TEXT NOT NULL,
     public_key TEXT NOT NULL, private_key TEXT NOT NULL,
-    preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT
+    preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
+    deleted_at TEXT, expires_at TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface, ip_address) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface, name) WHERE deleted_at IS NULL;
 INSERT INTO "interfaces" VALUES('wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL);
 COMMIT;
 """

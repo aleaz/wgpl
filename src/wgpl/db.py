@@ -126,9 +126,21 @@ def init_db(path: str | None = None) -> None:
                 preshared_key TEXT,
                 created_at   TEXT NOT NULL,
                 dns          TEXT,
-                UNIQUE(interface, ip_address),
-                UNIQUE(interface, name)
+                deleted_at   TEXT,
+                expires_at   TEXT
             );
+        """)
+        
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip 
+            ON peers(interface, ip_address) 
+            WHERE deleted_at IS NULL;
+        """)
+        
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name 
+            ON peers(interface, name) 
+            WHERE deleted_at IS NULL;
         """)
         conn.commit()
 
@@ -228,14 +240,15 @@ def add_peer(
     created_at: str,
     preshared_key: str | None = None,
     dns: str | None = None,
+    expires_at: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new peer associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns),
+                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at),
             )
     except sqlite3.IntegrityError as exc:
         error_msg = str(exc).lower()
@@ -292,9 +305,25 @@ def list_peers(interface: str | None = None, conn: sqlite3.Connection | None = N
         return cursor.fetchall()
 
 def remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
-    """Removes a peer by its unique ID."""
+    """Soft-removes a peer by its unique ID, retaining it in the database for auditing and IP management."""
+    with _ensure_conn(conn, commit=True) as c:
+        c.execute("UPDATE peers SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
+
+
+def hard_remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
+    """Physically removes a peer from the database."""
     with _ensure_conn(conn, commit=True) as c:
         c.execute("DELETE FROM peers WHERE id = ?", (id,))
+
+
+def prune_peers(interface: str, conn: sqlite3.Connection | None = None) -> int:
+    """Physically removes all soft-deleted or expired peers for an interface. Returns the number of deleted rows."""
+    with _ensure_conn(conn, commit=True) as c:
+        cursor = c.execute(
+            "DELETE FROM peers WHERE interface = ? AND (deleted_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at <= CURRENT_TIMESTAMP))",
+            (interface,),
+        )
+        return cursor.rowcount
 
 
 def update_peer(
