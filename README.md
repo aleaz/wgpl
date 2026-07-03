@@ -57,6 +57,58 @@ wgpl apply wg0
 - Complete `.conf` files ready to be consumed.
 - Native QR codes in the terminal (ASCII) or exportable as PNG images.
 
+## Deployment Architectures (BYOI)
+
+WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. It acts as a decoupled Control Plane (Single Source of Truth in SQLite), allowing you to manage peers across various topologies without forcing changes to your host's network state.
+
+### 1. Local (Air-Gapped / Offline PKI)
+
+Run WGPL on your local machine (e.g., laptop) to securely generate keys and allocate IPs without private keys ever leaving your device.
+
+```bash
+# 1. Register remote server
+wgpl interface add wg-remote vpn.example.com <SERVER_PUBKEY> 10.0.0.0/24
+
+# 2. Generate peer & QR code locally
+wgpl peer add wg-remote "Laptop CEO"
+wgpl peer qr <PEER_ID> -o ceo_qr.png
+
+# 3. Export config to provision the remote server (e.g. via Ansible/SSH)
+wgpl interface export wg-remote > wg-remote.conf
+```
+
+### 2. Native Linux Server (Zero-Downtime)
+
+Run WGPL directly on the VPN Gateway (Debian/Ubuntu). Use `wgpl apply` to hot-reload peers into the kernel without dropping active connections.
+
+```bash
+# 1. Register local interface
+wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
+
+# 2. Add peer
+wgpl peer add wg0 "New Employee"
+
+# 3. Inject configuration directly into the kernel seamlessly
+wgpl apply wg0
+```
+
+### 3. MikroTik (RouterOS v7) Control Plane
+
+Use WGPL to bring modern IPAM and QR code generation to MikroTik hardware.
+
+```bash
+# 1. Register MikroTik interface in WGPL
+wgpl interface add mk-vpn router.example.com <MIKROTIK_PUBKEY> 10.0.0.0/24
+
+# 2. Add peer in WGPL
+wgpl peer add mk-vpn "Smartphone"
+
+# 3. Generate MikroTik configuration script using JSON and jq
+wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.ip_address)/32\""' > mikrotik_sync.rsc
+```
+
+Then simply import `mikrotik_sync.rsc` into your router.
+
 ## Configuration
 
 WGPL is designed to require zero configuration, but provides robust mechanisms to adjust its behavior.
