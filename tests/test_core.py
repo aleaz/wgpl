@@ -457,7 +457,7 @@ def test_prune_keeps_active_peer(wg0_interface: str) -> None:
 def test_get_peer_status_and_effective_dns(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", dns="1.1.1.1")
     assert peer["id"] is not None
-    assert core.get_peer_status(db.get_peer(peer["id"])) == "Active"
+    assert core.get_peer_status(db.get_peer(str(peer["id"])))  # type: ignore == "Active"
     assert core.get_effective_dns(peer["dns"], "8.8.8.8") == "1.1.1.1"
     assert core.get_effective_dns(None, "8.8.8.8") == "8.8.8.8"
     assert core.get_effective_dns(None, None) is None

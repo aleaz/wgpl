@@ -40,6 +40,8 @@ wgpl apply wg0
 - Strict JSON output (`--json`) for M2M integration (Ansible, Terraform, Bash).
 - Single Source of Truth (SSOT) using a secure local SQLite database.
 - Declarative synchronization with the kernel using `wg syncconf` (without interruptions).
+- **Lifecycle & TTL**: Automatic peer expiration, soft-deletion, and IP reclamation.
+- **Audit Logging**: Immutable, append-only history of all peer and interface modifications.
 
 ### Security and Cryptography
 
@@ -157,23 +159,23 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 
 #### Interface Management (`wgpl interface`)
 
-- **`add <NAME> <ENDPOINT> <PUBKEY> <POOL_IP> [--port] [--dns]`**: Registers a new WireGuard network.
+- **`add <NAME> <ENDPOINT> <PUBKEY> <POOL_IP> [options]`**: Registers a new WireGuard network. Accepts `--port`, `--dns`, `--mtu`, `--keepalive`, and `--desc`.
 - **`list`**: Shows current interfaces.
-- **`update <NAME> [options]`**: Modifies the endpoint, pool, DNS or port.
+- **`update <NAME> [options]`**: Modifies the endpoint, pool, or any of the advanced network parameters (e.g., `--clear-dns`, `--clear-mtu`).
 - **`export <NAME>`**: Prints `[Peer]` block configurations compatible with the WireGuard server for remote sync.
 - **`remove <NAME> [--force]`**: Deletes the interface. Fails if any peers remain unless `--force` is passed (deletes interface and all peers; audited).
 - **`history <NAME> [--limit]`**: Shows append-only audit events for the interface (default limit: 100).
 
 #### Peer Management (`wgpl peer`)
 
-- **`add <INTERFACE> <NAME> [--ip] [--dns]`**: Creates a new client. Keys are auto-generated.
-- **`list`**: Shows all registered clients.
+- **`add <INTERFACE> <NAME> [options]`**: Creates a new client. Keys are auto-generated. Accepts `--ip`, `--dns`, `--expires`, `--mtu`, `--keepalive`, and `--desc`.
+- **`list [--all] [--expired]`**: Shows all registered clients.
 - **`config <ID>`**: Shows the client configuration ready to be used.
 - **`qr <ID> [-o <PNG_PATH>]`**: Generates the client's QR code.
-- **`update <INTERFACE> <ID> [options]`**: Allows changing the name, forcing a specific IP or changing DNS override.
-- **`remove <INTERFACE> <ID>`**: Soft-deletes a peer by default; `--hard` for physical deletion.
+- **`update <INTERFACE> <ID> [options]`**: Modifies properties (IP, DNS, MTU, etc.) or uses `--clear-*` to inherit from the interface.
+- **`remove <INTERFACE> <ID> [--hard]`**: Soft-deletes a peer by default, releasing its IP. Use `--hard` for physical database deletion.
 - **`prune <INTERFACE>`**: Permanently removes expired and soft-deleted peers.
-- **`history <INTERFACE> <ID> [--limit]`**: Shows append-only audit events for a peer (default limit: 100).
+- **`history <INTERFACE> <ID> [--limit]`**: Shows append-only audit events for a peer.
 
 #### General & Database Commands
 
@@ -208,7 +210,20 @@ wgpl interface remove wg0
 wgpl interface remove wg0 --force
 ```
 
-#### D. Backup and Secure Restoration
+#### D. Temporary Access (TTL) & Audit
+
+```bash
+# Add a contractor with access that expires in 48 hours
+wgpl peer add wg0 "Contractor_Laptop" --expires 48h
+
+# View the peer's history/audit trail
+wgpl peer history wg0 "Contractor_Laptop"
+
+# Clean up expired peers to free IPs
+wgpl peer prune wg0
+```
+
+#### E. Backup and Secure Restoration
 
 ```bash
 wgpl db dump > backup_2026.sql
@@ -242,7 +257,7 @@ Briefly: create a branch, develop using `uv`, run local tests, format the code, 
 
 ## Author
 
-- **aleaz** - [GitHub](https://github.com/aleaz)
+- **Alejandro Azario** - [GitHub](https://github.com/aleaz)
 
 ## License
 

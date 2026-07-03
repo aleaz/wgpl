@@ -303,7 +303,7 @@ def add_interface(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
-) -> dict[str, str | int | None]:
+) -> dict[str, Any]:
     """Register a WireGuard interface in the database."""
     if not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
@@ -339,7 +339,7 @@ def add_interface(
             metadata={"port": port, "address_pool": normalized_pool},
         )
 
-    result: dict[str, str | int | None] = {
+    result: dict[str, Any] = {
         "name": name,
         "endpoint": endpoint,
         "port": port,
@@ -562,7 +562,7 @@ def add_peer(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
-) -> dict[str, str | int | None]:
+) -> dict[str, Any]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
     Returns a dictionary with the peer's essential information.
@@ -801,7 +801,7 @@ def sync_interface(interface_name: str) -> None:
     wireguard.syncconf(interface_name, conf_content)
 
 
-def _interface_row_to_dict(iface: sqlite3.Row) -> dict[str, str | int | None]:
+def _interface_row_to_dict(iface: sqlite3.Row) -> dict[str, Any]:
     return {
         "name": iface["name"],
         "endpoint": iface["endpoint"],
@@ -990,7 +990,7 @@ def update_peer(
     clear_mtu: bool = False,
     keepalive: int | None = None,
     clear_keepalive: bool = False,
-) -> dict[str, str | list[str] | None]:
+) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")

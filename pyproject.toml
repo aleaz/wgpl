@@ -1,11 +1,11 @@
 [project]
 name = "wgpl"
-version = "0.1.0"
+version = "1.0.0"
 description = "WireGuard Peer Lite (WGPL) - Minimalist, secure, and automated WireGuard peer manager."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-authors = [{ name = "aleaz" }]
+authors = [{ name = "Alejandro Azario", email = "alejandroazario@gmail.com" }]
 keywords = ["wireguard", "vpn", "cli", "peers", "sqlite"]
 classifiers = [
     "Development Status :: 4 - Beta",
