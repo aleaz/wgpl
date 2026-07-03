@@ -320,11 +320,88 @@ def test_validate_state_detects_bad_ip(wg0_interface: str) -> None:
     assert any(issue["code"] == "ip_outside_pool" for issue in issues)
 
 
+def test_validate_state_skips_soft_deleted_peer(wg0_interface: str) -> None:
+    peer_id = "55c521ad-2d94-4689-8abc-123456789abc"
+    _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
+    core.remove_peer(wg0_interface, peer_id)
+
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id))
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+
+    assert result == {"status": "ok", "issues": []}
+
+
+def test_validate_state_skips_expired_peer(wg0_interface: str) -> None:
+    peer_id = "55c521ad-2d94-4689-8abc-123456789abc"
+    _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).isoformat()
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ?, expires_at = ? WHERE id = ?",
+            ("10.0.1.50", past, peer_id),
+        )
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+
+    assert result == {"status": "ok", "issues": []}
+
+
+def test_resolve_peer_ref_excludes_soft_deleted_by_default(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    with pytest.raises(PeerNotFoundError):
+        resolve_peer_ref(peer["id"])
+
+
+def test_resolve_peer_ref_includes_soft_deleted_when_active_only_false(
+    wg0_interface: str,
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    assert resolve_peer_ref(peer["id"], active_only=False) == peer["id"]
+
+
+def test_resolve_peer_ref_excludes_expired_by_default(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", expires="1h")
+    assert peer["id"] is not None
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+
+    with pytest.raises(PeerNotFoundError):
+        resolve_peer_ref(peer["id"])
+
+
+def test_remove_peer_hard_finds_soft_deleted_peer(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    core.remove_peer(wg0_interface, peer["id"], hard=True)
+
+    assert db.get_peer(peer["id"]) is None
+
+
 def test_remove_peer_interface_mismatch_raises_domain_error(
     wg0_interface: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     peer = core.add_peer(wg0_interface, "phone")
-    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+    monkeypatch.setattr(
+        core,
+        "resolve_peer_ref",
+        lambda ref, iface=None, active_only=True: peer["id"],
+    )
 
     assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
@@ -335,7 +412,11 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     wg0_interface: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     peer = core.add_peer(wg0_interface, "phone")
-    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+    monkeypatch.setattr(
+        core,
+        "resolve_peer_ref",
+        lambda ref, iface=None, active_only=True: peer["id"],
+    )
 
     assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):

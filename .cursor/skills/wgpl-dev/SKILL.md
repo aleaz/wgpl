@@ -17,34 +17,47 @@ truth (SSOT). See invariants in `.cursor/rules/wgpl-architecture.mdc`.
 # 1. Register the base interface and its IP pool
 wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --port 51820
 wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 --dns 1.1.1.1
+wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 \
+  --desc "Production VPN" --mtu 1420 --keepalive 25
 wgpl interface list
 
 # 2. Create peers (IP, keypair, and PSK are generated automatically)
 wgpl peer add wg0 "Johns_Phone"
 wgpl peer add wg0 "Server" --ip 10.0.0.50
 wgpl peer add wg0 "Kids" --dns 9.9.9.9
+wgpl peer add wg0 "Guest" --expires 7d
 wgpl peer list
+wgpl peer list wg0 --expired
+wgpl peer list wg0 --all
 
 # 2b. Update without rotating keys
 wgpl interface update wg0 --endpoint vpn2.example.com
 wgpl peer update wg0 <PEER_ID> --name "Work Laptop"
 wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
+wgpl peer update wg0 <PEER_ID> --desc "CEO laptop" --mtu 1280
 wgpl validate wg0
 
 # 3. Extract client configuration (full UUID or short prefix from peer list)
 wgpl peer config <PEER_ID>
 wgpl peer config 55c521ad2d94
-wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24" --keepalive=21
+wgpl peer config <PEER_ID> --allowed-ips="10.0.0.0/24"
 wgpl peer qr <PEER_ID>
 wgpl peer qr <PEER_ID> -o phone.png
-wgpl peer remove wg0 <PEER_ID>
-wgpl peer remove wg0 55c521ad2d94
 
-# 4. Sync with WireGuard
+# 3b. Remove peers (soft-delete by default)
+wgpl peer remove wg0 <PEER_ID>
+wgpl peer remove wg0 <PEER_ID> --hard
+wgpl peer prune wg0
+
+# 4. Sync with WireGuard (required after remove/prune to update the kernel)
 #   Remote (disconnected):
 wgpl interface export wg0 | ssh root@my-vpn-server "wg syncconf wg0 /dev/stdin"
 #   Local (server with wireguard-tools):
 wgpl apply wg0
+
+# 5. Database backup
+wgpl db dump > backup.sql
+wgpl db restore < backup.sql
 ```
 
 ## Automation (M2M)
@@ -52,6 +65,14 @@ wgpl apply wg0
 - Global flag `--json` / `-j`: data on stdout, logs on stderr.
 - Example: `NEW_IP=$(wgpl --json peer add wg0 "Backup" | jq -r '.ip_address')`
 - Database location: `~/.wgpl.db` by default; override with `WGPL_DB_PATH` or `--db`.
+
+## Operational notes
+
+- `peer config` / `peer qr` read DNS, MTU, and PersistentKeepalive from the database
+  (peer override → interface default). Set values with `peer update` or interface defaults.
+- Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
+  use `peer remove --hard` to physically delete a soft-deleted peer.
+- After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 
 ## Code map
 
@@ -63,10 +84,12 @@ wgpl apply wg0
 | `src/wgpl/wireguard.py` | x25519 keys, PSK, `wg syncconf` |
 | `src/wgpl/exceptions.py` | `WgplException` hierarchy |
 
-## CRUD commands
+## Commands
 
-`interface update`, `peer update`, and `validate` are implemented. Future work:
-`peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).
+Implemented: `interface` CRUD + update, `peer` CRUD + update + prune, `validate`,
+`apply`, `db dump`, `db restore`, `--json` M2M mode.
+
+Future work: `peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).
 
 ## Pre-PR checklist (repo-specific)
 

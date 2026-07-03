@@ -65,7 +65,12 @@ def _format_peer_id_short(peer_id: str) -> str:
     return _normalize_peer_ref(peer_id)[:12]
 
 
-def resolve_peer_ref(ref: str, interface: str | None = None) -> str:
+def resolve_peer_ref(
+    ref: str,
+    interface: str | None = None,
+    *,
+    active_only: bool = True,
+) -> str:
     """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
     normalized = _normalize_peer_ref(ref)
 
@@ -74,6 +79,8 @@ def resolve_peer_ref(ref: str, interface: str | None = None) -> str:
 
     if len(normalized) == _PEER_ID_HEX_LEN:
         matches = db.find_peers_by_id_prefix(normalized, interface)
+        if active_only:
+            matches = [peer for peer in matches if _is_peer_active(peer)]
         exact = [peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized]
         if len(exact) == 1:
             return str(exact[0]["id"])
@@ -84,6 +91,8 @@ def resolve_peer_ref(ref: str, interface: str | None = None) -> str:
         raise PeerNotFoundError(f"Peer {ref} not found")
 
     matches = db.find_peers_by_id_prefix(normalized, interface)
+    if active_only:
+        matches = [peer for peer in matches if _is_peer_active(peer)]
     if not matches:
         raise PeerNotFoundError(f"Peer {ref} not found")
     if len(matches) == 1:
@@ -373,9 +382,6 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     peer = db.get_peer(canonical_id)
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
-        
-    if not _is_peer_active(peer):
-        sys.stderr.write(f"Warning: Peer {peer_id} is expired or deleted.\n")
 
     iface = db.get_interface(peer['interface'])
     if not iface:
@@ -779,6 +785,8 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
                 })
 
         for peer in db.list_peers(iface_name):
+            if not _is_peer_active(peer):
+                continue
             peer_name = str(peer["name"])
             ip = str(peer["ip_address"])
             try:

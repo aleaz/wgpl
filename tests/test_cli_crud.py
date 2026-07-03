@@ -62,6 +62,19 @@ def test_cli_peer_update_ip_hints_on_stderr(wgpl_db: str) -> None:
     assert "apply" in result.stderr.lower() or "sync" in result.stderr.lower()
 
 
+def test_cli_peer_remove_already_deleted_raises_not_found(wgpl_db: str) -> None:
+    _setup_interface()
+    peer = core.add_peer("wg0", "phone")
+    assert peer["id"] is not None
+
+    first = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
+    assert first.exit_code == 0
+
+    second = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
+    assert second.exit_code == 1
+    assert "WGPL Error" in second.stderr
+
+
 def test_cli_interface_remove_not_found(wgpl_db: str) -> None:
     result = runner.invoke(app, ["interface", "remove", "missing"])
 
@@ -78,7 +91,11 @@ def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
         app,
         ["interface", "add", "wg1", "vpn2.example.com", pubkey, "10.0.1.0/24"],
     )
-    monkeypatch.setattr(core, "resolve_peer_ref", lambda ref, iface=None: peer["id"])
+    monkeypatch.setattr(
+        core,
+        "resolve_peer_ref",
+        lambda ref, iface=None, active_only=True: peer["id"],
+    )
 
     assert peer["id"] is not None
     result = runner.invoke(app, ["peer", "remove", "wg1", peer["id"]])

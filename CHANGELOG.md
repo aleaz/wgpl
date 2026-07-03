@@ -9,27 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `interface update` — change endpoint, port, public key, address pool, or DNS without removing peers
-- `peer update` — change name, IP, or DNS override without rotating keys
-- `wgpl validate [interface]` — dry-run consistency check (peer IPs in pool, valid DNS)
+- `interface update` — change endpoint, port, public key, address pool, DNS, description, MTU, or keepalive without removing peers
+- `peer update` — change name, IP, DNS override, description, MTU, or keepalive without rotating keys
+- `wgpl validate [interface]` — dry-run consistency check (active peer IPs in pool, valid DNS)
 - Docker-style peer ID prefixes: `peer config`, `peer qr`, and `peer remove` accept a unique hex prefix (as shown in `peer list`); `--json` still returns the full UUID
 - `peer qr --output` / `-o` writes a scannable PNG (ASCII remains the default)
 - Optional `--ip` on `peer add` and `--dns` on `interface add` / `peer add` (interface default, peer override; embedded in client config export)
+- Soft-delete by default on `peer remove`; `--hard` for physical deletion
+- `peer prune <interface>` — permanently removes soft-deleted and expired peers
+- `peer add --expires` — peer lifetime (`7d`, `24h`, etc.)
+- `peer list --expired`, `--all`; JSON fields `status`, `expires_at`, `deleted_at`
+- `wgpl db dump` / `wgpl db restore` — logical SQL backup with atomic restore
+- `InterfaceConflictError` — global uniqueness of interface `port` and `address_pool`
+- Optional `desc`, `mtu`, and `keepalive` on interfaces and peers (add, update, and `--clear-*` flags)
+- Effective DNS, MTU, and PersistentKeepalive cascade (peer override → interface default) in client config
+- Partial unique indexes on peers (`WHERE deleted_at IS NULL`) for IP and name
+- README deployment architectures: BYOI Local, Linux server, MikroTik RouterOS v7
+- `PeerInterfaceMismatchError` for wrong-interface peer operations
+- Interface add/remove routed through `core`
 
 ### Fixed
 
-- `peer list --json`: `dns` now reflects the effective value (interface default or peer override); added `dns_override` for the peer-stored value
+- `peer list --json`: `dns` reflects the effective value; added `dns_override` for the peer-stored value
 - `peer remove --json`: returns canonical UUID in `id` plus the user-supplied ref in `input`
+- `interface remove` reports an error when the interface does not exist
+- `syncconf` temp file is created with `chmod 600` before writing peer config
+- Atomic database restore with schema validation, `.bak.*` backup at `chmod 600`, and WAL/SHM cleanup
+- Double peer ID resolution bug in `peer remove`
+- `validate` interface issues use `peer: null` instead of an empty string
+- `db.add_peer` distinguishes IP vs name uniqueness conflicts
+- `validate` and `resolve_peer_ref` skip soft-deleted and expired peers by default
+- `peer remove` on an already soft-deleted peer returns not found instead of re-deleting silently
 
 ### Changed
 
-- README: document `--json` flag position (before subcommand) and JSON output shapes per command
-- `interface remove` reports an error when the interface does not exist
-- `syncconf` temp file is created with `chmod 600` before writing peer config
+- README rewritten for upcoming 1.0 release
+- `peer config` / `peer qr`: PersistentKeepalive and MTU come from the database (interface → peer cascade), not CLI flags
+- CONTRIBUTING: self-contained Conventional Commit messages (no internal process IDs)
 
 ### Security
 
 - SECURITY.md: clarify `peer update` vs key rotation via remove/add
+- Database dump/restore hints for `chmod 600`; restore backups created with restrictive permissions
 
 ## [0.1.0] - 2026-07-02
 

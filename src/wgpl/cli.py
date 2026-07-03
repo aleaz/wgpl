@@ -350,7 +350,7 @@ def peer_remove(
     hard: bool = typer.Option(False, "--hard", help="Physically delete the peer instead of soft-deleting"),
 ):
     try:
-        canonical_id = core.resolve_peer_ref(peer_id, interface)
+        canonical_id = core.resolve_peer_ref(peer_id, interface, active_only=not hard)
         core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
