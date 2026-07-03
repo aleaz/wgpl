@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treat naive `expires_at` timestamps as UTC in lifecycle checks (no crash on legacy rows)
 - `peer history` / `interface history` `--limit` returns the most recent events (not the oldest)
 - `db restore`: validate row integrity before swap; rotate backups (keep 3); clean tmp on init failure
+- `peer add` exits cleanly on invalid MTU/keepalive (ValueError)
 
 ### Added
 
+- Regression tests: audit rollback on failure, concurrent `add_peer`, dump/restore roundtrip, CLI `db restore`, peer update reclaim, audit metadata `preshared_key` guard
 - Append-only `audit_events` table; `peer history` and `interface history` commands (`--json` supported)
 - Audit events for peer create/remove/prune/reclaim and interface create/update/remove (including cascade on `--force`)
 - `interface remove --force` — required when any peers remain on the interface

@@ -199,6 +199,16 @@ def test_cli_interface_history_json(wgpl_db: str) -> None:
     assert events[0]["event_type"] == "created"
 
 
+def test_cli_peer_add_invalid_mtu_exits_cleanly(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+
+    result = runner.invoke(app, ["peer", "add", "wg0", "bad", "--mtu", "100"])
+
+    assert result.exit_code == 1
+    assert "WGPL Error" in result.stderr
+    assert "576" in result.stderr
+
+
 def test_cli_peer_history_respects_limit(wgpl_db: str) -> None:
     from wgpl.db import AuditEntityType, AuditEventType
 

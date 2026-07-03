@@ -198,3 +198,24 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
     phone_id = json.loads(inherited.stdout)["id"]
     inherited_config = runner.invoke(app, ["peer", "config", phone_id])
     assert "DNS = 1.1.1.1" in inherited_config.stdout
+
+
+def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
+    from wgpl import wireguard
+
+    pubkey = wireguard.generate_keypair().public_key
+    core.add_interface("wg0", "vpn.example.com", pubkey, "10.0.0.0/24", 51820)
+    peer = core.add_peer("wg0", "phone", ip_address="10.0.0.3")
+    peer_id = str(peer["id"])
+    sql_script = "".join(core.dump_database_lines())
+
+    result = runner.invoke(app, ["--json", "db", "restore", "-"], input=sql_script)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "success"
+    assert payload["action"] == "restore"
+    assert isinstance(payload["warnings"], list)
+    restored = db.get_peer(peer_id)
+    assert restored is not None
+    assert restored["name"] == "phone"

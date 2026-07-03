@@ -313,7 +313,7 @@ def peer_add(
             console.print(f"[green]Added peer {name} ({result['ip_address']}{dns_note})[/green]")
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
-    except WgplException as e:
+    except (WgplException, ValueError) as e:
         _exit_error(ctx, str(e))
 
 @interface_app.command("history")

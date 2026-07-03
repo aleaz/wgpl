@@ -5,7 +5,7 @@ import stat
 
 import pytest
 
-from wgpl import core
+from wgpl import core, db
 from wgpl.exceptions import WgplException
 
 _VALID_RESTORE_SQL = """
@@ -112,6 +112,23 @@ def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str) -> None:
 def test_restore_returns_warnings_list(wg0_interface: str) -> None:
     warnings = core.restore_database(_VALID_RESTORE_SQL)
     assert isinstance(warnings, list)
+
+
+def test_dump_restore_roundtrip_preserves_peers_and_audit(wg0_interface: str, wgpl_db: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3")
+    peer_id = str(peer["id"])
+    audit_before = len(db.list_audit_events(limit=1000))
+    sql_script = "".join(core.dump_database_lines())
+
+    core.restore_database(sql_script)
+
+    restored_peer = db.get_peer(peer_id)
+    assert restored_peer is not None
+    assert restored_peer["name"] == "phone"
+    assert restored_peer["ip_address"] == "10.0.0.3"
+    assert len(db.list_audit_events(limit=1000)) == audit_before
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    assert any(e["event_type"] == "created" for e in events)
 
 _DUPLICATE_ACTIVE_PEER_SQL = """
 BEGIN TRANSACTION;

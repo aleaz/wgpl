@@ -208,6 +208,75 @@ def test_list_peer_audit_history_limit(wg0_interface: str) -> None:
     assert len(limited) == 5
 
 
+def test_add_peer_rolls_back_when_audit_fails_on_second_event(
+    wg0_interface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expired = core.add_peer(wg0_interface, "old", ip_address="10.0.0.3", expires="1h")
+    old_id = str(expired["id"])
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
+        conn.commit()
+
+    audit_calls = 0
+    original = core._audit_peer_from_row
+
+    def failing_audit(*args, **kwargs):
+        nonlocal audit_calls
+        audit_calls += 1
+        if audit_calls >= 2:
+            raise WgplException("audit failed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(core, "_audit_peer_from_row", failing_audit)
+
+    with pytest.raises(WgplException, match="audit failed"):
+        core.add_peer(wg0_interface, "new", ip_address="10.0.0.3")
+
+    assert db.get_peer(old_id) is not None
+    assert audit_calls == 2
+    peers = db.list_peers(wg0_interface)
+    assert len([p for p in peers if p["ip_address"] == "10.0.0.3" and core.get_peer_status(p) == "Active"]) == 0
+
+
+def test_reclaim_via_peer_update_logs_reclaimed(wg0_interface: str) -> None:
+    expired = core.add_peer(wg0_interface, "old", ip_address="10.0.0.3", expires="1h")
+    old_id = str(expired["id"])
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
+        conn.commit()
+
+    active = core.add_peer(wg0_interface, "active", ip_address="10.0.0.4")
+    active_id = str(active["id"])
+
+    core.update_peer(wg0_interface, active_id, ip_address="10.0.0.3")
+
+    assert db.get_peer(old_id) is None
+    updated = db.get_peer(active_id)
+    assert updated is not None
+    assert updated["ip_address"] == "10.0.0.3"
+
+    old_events = core.list_peer_audit_history(old_id, wg0_interface)
+    reclaimed = [e for e in old_events if e["event_type"] == AuditEventType.RECLAIMED]
+    assert len(reclaimed) == 1
+    assert reclaimed[0]["metadata"]["replaced_by_peer_id"] == active_id
+
+
+def test_audit_metadata_rejects_preshared_key(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    with pytest.raises(WgplException, match="secret field"):
+        with db.transaction() as conn:
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=str(peer["id"]),
+                event_type=AuditEventType.UPDATED,
+                interface=wg0_interface,
+                metadata={"preshared_key": "leak"},
+                conn=conn,
+            )
+
+
 def test_list_peer_audit_history_limit_returns_most_recent(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])
