@@ -30,6 +30,31 @@ _MIN_PEER_ID_PREFIX_LEN = 4
 _PEER_ID_HEX_LEN = 32
 
 
+def _parse_duration(duration: str) -> datetime.datetime:
+    """Parses a duration string (e.g. '7d', '24h') and returns a future datetime."""
+    import re
+    match = re.match(r"^(\d+)([dh])$", duration)
+    if not match:
+        raise WgplException(f"Invalid duration format: '{duration}'. Expected format like '7d' or '24h'.")
+    
+    value = int(match.group(1))
+    unit = match.group(2)
+    
+    delta = datetime.timedelta(days=value) if unit == 'd' else datetime.timedelta(hours=value)
+    return datetime.datetime.now(datetime.timezone.utc) + delta
+
+
+def _is_peer_active(peer: sqlite3.Row) -> bool:
+    """Returns True if the peer is not soft-deleted and not expired."""
+    if peer["deleted_at"] is not None:
+        return False
+    if peer["expires_at"] is not None:
+        expires_at = datetime.datetime.fromisoformat(peer["expires_at"])
+        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
+            return False
+    return True
+
+
 def _normalize_peer_ref(ref: str) -> str:
     """Return lowercase hex ID without hyphens."""
     return ref.replace("-", "").lower()
@@ -150,7 +175,11 @@ def _pool_used_ips(
         raise InterfaceNotFoundError(f"Interface {interface_name} not found")
 
     network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
-    used_ips = {peer["ip_address"] for peer in db.list_peers(interface_name, conn=conn)}
+    used_ips = {
+        peer["ip_address"]
+        for peer in db.list_peers(interface_name, conn=conn)
+        if peer["deleted_at"] is None
+    }
 
     if exclude_peer_id:
         peer = db.get_peer(exclude_peer_id, conn=conn)
@@ -215,6 +244,7 @@ def add_peer(
     peer_name: str,
     ip_address: str | None = None,
     dns: str | None = None,
+    expires: str | None = None,
 ) -> dict[str, str | None]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
@@ -231,6 +261,10 @@ def add_peer(
         peer_id = str(uuid.uuid4())
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+        expires_at = None
+        if expires:
+            expires_at = _parse_duration(expires).isoformat()
+
         db.add_peer(
             id=peer_id,
             interface=interface_name,
@@ -241,6 +275,7 @@ def add_peer(
             preshared_key=preshared_key,
             created_at=created_at,
             dns=normalized_dns,
+            expires_at=expires_at,
             conn=conn,
         )
 
@@ -258,8 +293,8 @@ def add_peer(
         "dns": effective_dns,
     }
 
-def remove_peer(interface_name: str, canonical_peer_id: str) -> None:
-    """Removes a peer from the database. Expects a resolved canonical UUID."""
+def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False) -> None:
+    """Removes a peer from the database. Does a soft-delete by default."""
     with db.transaction() as conn:
         peer = db.get_peer(canonical_peer_id, conn=conn)
         if not peer:
@@ -270,7 +305,20 @@ def remove_peer(interface_name: str, canonical_peer_id: str) -> None:
                 f"Peer {canonical_peer_id} does not belong to interface {interface_name}"
             )
 
-        db.remove_peer(canonical_peer_id, conn=conn)
+        if hard:
+            db.hard_remove_peer(canonical_peer_id, conn=conn)
+        else:
+            db.remove_peer(canonical_peer_id, conn=conn)
+
+
+def prune_peers(interface_name: str) -> int:
+    """Physically removes all soft-deleted or expired peers for an interface."""
+    with db.transaction() as conn:
+        iface = db.get_interface(interface_name, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+        
+        return db.prune_peers(interface_name, conn=conn)
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
@@ -281,6 +329,9 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0", keepalive: int
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
         
+    if not _is_peer_active(peer):
+        sys.stderr.write(f"Warning: Peer {peer_id} is expired or deleted.\n")
+
     iface = db.get_interface(peer['interface'])
     if not iface:
         raise InterfaceNotFoundError(f"Interface {peer['interface']} not found")
@@ -352,6 +403,8 @@ def get_interface_config(interface_name: str) -> str:
     conf_lines = []
     
     for peer in peers:
+        if not _is_peer_active(peer):
+            continue
         conf_lines.append("[Peer]")
         conf_lines.append(f"PublicKey = {peer['public_key']}")
         if peer['preshared_key']:
@@ -388,6 +441,8 @@ def validate_peers_in_pool(
     conflicts: list[dict[str, str]] = []
 
     for peer in db.list_peers(interface_name, conn=conn):
+        if peer["deleted_at"] is not None:
+            continue
         ip = str(peer["ip_address"])
         try:
             _validate_peer_ip_in_pool(ip, network)

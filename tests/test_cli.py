@@ -41,6 +41,9 @@ def test_public_peer_rows_redact_secrets() -> None:
             "created_at": "2026-01-01T00:00:00+00:00",
             "dns": "1.1.1.1",
             "dns_override": None,
+            "status": "Active",
+            "expires_at": None,
+            "deleted_at": None,
         }
     ]
     assert "private_key" not in public[0]
@@ -91,7 +94,9 @@ def test_peer_remove_accepts_short_prefix(wg0_interface: str) -> None:
     remove_result = runner.invoke(app, ["peer", "remove", wg0_interface, short_id])
 
     assert remove_result.exit_code == 0
-    assert db.get_peer(peer_id) is None
+    peer = db.get_peer(peer_id)
+    assert peer is not None
+    assert peer["deleted_at"] is not None
 
 
 def test_peer_list_json_returns_full_uuid(wg0_interface: str) -> None:

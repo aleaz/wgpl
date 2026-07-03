@@ -57,6 +57,21 @@ def _resolve_effective_dns(
         return str(iface_dns)
     return None
 
+def _get_peer_status(peer: dict | sqlite3.Row) -> str:
+    import datetime
+    
+    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
+    if deleted_at is not None:
+        return "Deleted"
+        
+    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
+    if expires_at_str is not None:
+        expires_at = datetime.datetime.fromisoformat(expires_at_str)
+        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
+            return "Expired"
+    return "Active"
+
+
 def _public_peer_rows(
     peers: list[sqlite3.Row],
     iface_dns: dict[str, str | None] | None = None,
@@ -69,6 +84,9 @@ def _public_peer_rows(
         row = {field: peer[field] for field in _BASE_PUBLIC_PEER_FIELDS}
         row["dns"] = _resolve_effective_dns(peer_dns, iface_dns_map.get(peer["interface"]))
         row["dns_override"] = peer_dns
+        row["status"] = _get_peer_status(peer)
+        row["expires_at"] = peer["expires_at"] if "expires_at" in peer.keys() else None
+        row["deleted_at"] = peer["deleted_at"] if "deleted_at" in peer.keys() else None
         rows.append(row)
     return rows
 
@@ -281,9 +299,10 @@ def peer_add(
     name: str = typer.Argument(..., help="Peer name/description"),
     ip: str | None = typer.Option(None, "--ip", help="Peer IP from the interface pool (auto if omitted)"),
     dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
+    expires: str | None = typer.Option(None, "--expires", help="Duration until expiration (e.g. 7d, 24h)"),
 ):
     try:
-        result = core.add_peer(interface, name, ip_address=ip, dns=dns)
+        result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires)
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
@@ -300,15 +319,31 @@ def peer_add(
 def peer_remove(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
-    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)")
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
+    hard: bool = typer.Option(False, "--hard", help="Physically delete the peer instead of soft-deleting"),
 ):
     try:
         canonical_id = core.resolve_peer_ref(peer_id, interface)
-        core.remove_peer(interface, canonical_id)
+        core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
         else:
             console.print(f"[green]Removed peer {peer_id}[/green]")
+    except WgplException as e:
+        console.print(f"[red]WGPL Error: {e}[/red]")
+        sys.exit(1)
+
+@peer_app.command("prune")
+def peer_prune(
+    ctx: typer.Context,
+    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+):
+    try:
+        deleted = core.prune_peers(interface)
+        if ctx.obj.get("json"):
+            _output(ctx, {"status": "success", "interface": interface, "deleted_count": deleted})
+        else:
+            console.print(f"[green]Pruned {deleted} expired or soft-deleted peers from {interface}[/green]")
     except WgplException as e:
         console.print(f"[red]WGPL Error: {e}[/red]")
         sys.exit(1)
@@ -349,9 +384,27 @@ def peer_update(
         sys.exit(1)
 
 @peer_app.command("list")
-def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, help="Filter by interface")):
+def peer_list(
+    ctx: typer.Context, 
+    interface: str | None = typer.Option(None, help="Filter by interface"),
+    expired: bool = typer.Option(False, "--expired", help="Show only expired peers"),
+    all: bool = typer.Option(False, "--all", help="Show all peers including deleted ones"),
+):
     try:
-        peers = db.list_peers(interface)
+        raw_peers = db.list_peers(interface)
+        
+        peers = []
+        for p in raw_peers:
+            status = _get_peer_status(p)
+            if all:
+                peers.append(p)
+            elif expired:
+                if status == "Expired":
+                    peers.append(p)
+            else:
+                if status == "Active":
+                    peers.append(p)
+
         iface_dns = _interface_dns_map()
         if ctx.obj.get("json"):
             _output(ctx, _public_peer_rows(peers, iface_dns))
@@ -364,11 +417,11 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
                     _styled(p["interface"], ""),
                     _styled(p["name"], _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
+                    _styled(_get_peer_status(p), _STYLE_META),
                     _styled(
                         _display_dns(_resolve_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
                         _STYLE_META,
                     ),
-                    _styled(p["created_at"], _STYLE_META),
                 ]
                 for p in data
             ]
@@ -377,11 +430,11 @@ def peer_list(ctx: typer.Context, interface: str | None = typer.Option(None, hel
                 "peers",
                 [
                     ("ID", {"overflow": "fold"}),
-                    ("Interface", {"overflow": "fold"}),
+                    ("Interface", {}),
                     ("Name", {"overflow": "fold"}),
-                    ("IP Address", {}),
+                    ("IP", {"overflow": "fold"}),
+                    ("Status", {}),
                     ("DNS", {"overflow": "fold"}),
-                    ("Created At", {"overflow": "fold"}),
                 ],
                 rows,
             )
