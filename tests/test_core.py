@@ -400,6 +400,15 @@ def test_expired_peer_releases_ip_for_allocation(wg0_interface: str) -> None:
     assert new_peer["ip_address"] == "10.0.0.3"
 
 
+def test_soft_deleted_peer_releases_ip_for_allocation(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.4")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    new_peer = core.add_peer(wg0_interface, "phone2", ip_address="10.0.0.4")
+    assert new_peer["ip_address"] == "10.0.0.4"
+
+
 def test_get_peer_status_and_effective_dns(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", dns="1.1.1.1")
     assert peer["id"] is not None

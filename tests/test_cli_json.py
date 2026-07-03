@@ -129,6 +129,34 @@ def test_json_peer_list_dns_fields(wgpl_db: str) -> None:
     assert "private_key" not in peers["inherited"]
 
 
+def test_json_peer_list_dns_matches_peer_config(wgpl_db: str) -> None:
+    _add_test_interface("wg0", dns="1.1.1.1")
+    inherited = json.loads(
+        runner.invoke(app, ["--json", "peer", "add", "wg0", "inherited"]).stdout
+    )
+    override = json.loads(
+        runner.invoke(
+            app, ["--json", "peer", "add", "wg0", "override", "--dns", "9.9.9.9"]
+        ).stdout
+    )
+
+    list_result = runner.invoke(app, ["--json", "peer", "list"])
+    assert list_result.exit_code == 0
+    peers = {p["name"]: p for p in json.loads(list_result.stdout)}
+
+    assert peers["inherited"]["status"] == "Active"
+    assert peers["override"]["status"] == "Active"
+    assert peers["inherited"]["dns"] == "1.1.1.1"
+    assert peers["override"]["dns"] == "9.9.9.9"
+
+    inherited_config = runner.invoke(app, ["peer", "config", inherited["id"]])
+    override_config = runner.invoke(app, ["peer", "config", override["id"]])
+    assert inherited_config.exit_code == 0
+    assert override_config.exit_code == 0
+    assert "DNS = 1.1.1.1" in inherited_config.stdout
+    assert "DNS = 9.9.9.9" in override_config.stdout
+
+
 def test_json_peer_remove_canonical_id(wgpl_db: str) -> None:
     _add_test_interface("wg0")
     peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "rm"]).stdout)

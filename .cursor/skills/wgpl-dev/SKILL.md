@@ -72,14 +72,17 @@ wgpl db restore < backup.sql
   (peer override → interface default). Set values with `peer update` or interface defaults.
 - Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
   use `peer remove --hard` to physically delete a soft-deleted peer.
+- A peer occupies an IP in the pool only while active (not soft-deleted and not expired).
+  Expired peers release their IP for new allocations; `peer prune` removes expired or
+  soft-deleted rows from the database.
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 
 ## Code map
 
 | File | Responsibility |
 |---|---|
-| `src/wgpl/cli.py` | Typer commands, input validation, Rich/JSON output |
-| `src/wgpl/core.py` | IP allocation, orchestration, config and QR generation |
+| `src/wgpl/cli.py` | Typer commands, Rich/JSON formatting; no direct `db` access |
+| `src/wgpl/core.py` | IP allocation, lifecycle rules, list reads, config and QR generation |
 | `src/wgpl/db.py` | Secure connection, transactions, SQLite CRUD |
 | `src/wgpl/wireguard.py` | x25519 keys, PSK, `wg syncconf` |
 | `src/wgpl/exceptions.py` | `WgplException` hierarchy |

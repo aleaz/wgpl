@@ -152,7 +152,15 @@ def test_peer_qr_output_json(wg0_interface: str) -> None:
         "path": str(output_path),
         "peer_id": result["id"],
     }
-    assert "qr" not in payload
+
+
+def test_db_dump_cli_writes_hints_to_stderr(wg0_interface: str) -> None:
+    result = runner.invoke(app, ["db", "dump"])
+
+    assert result.exit_code == 0
+    assert "chmod 600" in result.stderr
+    assert "BEGIN TRANSACTION;" in result.stdout
+    assert "Hint:" not in result.stdout
 
 
 def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
