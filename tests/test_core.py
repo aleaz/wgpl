@@ -21,7 +21,7 @@ from wgpl.exceptions import (
 def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "test_peer")
 
-    assert set(result.keys()) == {"id", "name", "ip_address", "public_key", "dns"}
+    assert set(result.keys()) == {"id", "name", "ip_address", "public_key", "dns", "desc"}
     assert result["dns"] is None
     assert "private_key" not in result
     assert "preshared_key" not in result

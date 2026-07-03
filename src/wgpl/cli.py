@@ -181,10 +181,11 @@ def interface_add(
     address_pool: str = typer.Argument(..., help="Address pool (e.g. 10.0.0.0/24)"),
     port: int = typer.Option(51820, help="Listen port"),
     dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs (e.g. 1.1.1.1)"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the interface"),
 ):
     try:
         result = core.add_interface(
-            name, endpoint, public_key, address_pool, port=port, dns=dns
+            name, endpoint, public_key, address_pool, port=port, dns=dns, desc=desc
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -266,10 +267,15 @@ def interface_update(
     address_pool: str | None = typer.Option(None, "--address-pool", help="Address pool CIDR"),
     dns: str | None = typer.Option(None, "--dns", help="Default DNS for client configs"),
     clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove interface default DNS"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the interface"),
+    clear_desc: bool = typer.Option(False, "--clear-desc", help="Remove interface description"),
 ):
     try:
         if clear_dns and dns is not None:
             console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
+            sys.exit(1)
+        if clear_desc and desc is not None:
+            console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
             sys.exit(1)
 
         result = core.update_interface(
@@ -280,6 +286,8 @@ def interface_update(
             address_pool=address_pool,
             dns=dns,
             clear_dns=clear_dns,
+            desc=desc,
+            clear_desc=clear_desc,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -300,9 +308,10 @@ def peer_add(
     ip: str | None = typer.Option(None, "--ip", help="Peer IP from the interface pool (auto if omitted)"),
     dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
     expires: str | None = typer.Option(None, "--expires", help="Duration until expiration (e.g. 7d, 24h)"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
 ):
     try:
-        result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires)
+        result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires, desc=desc)
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
@@ -357,10 +366,15 @@ def peer_update(
     ip: str | None = typer.Option(None, "--ip", help="New peer IP from the interface pool"),
     dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
     clear_dns: bool = typer.Option(False, "--clear-dns", help="Remove peer DNS override (inherit interface default)"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
+    clear_desc: bool = typer.Option(False, "--clear-desc", help="Remove peer description"),
 ):
     try:
         if clear_dns and dns is not None:
             console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
+            sys.exit(1)
+        if clear_desc and desc is not None:
+            console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
             sys.exit(1)
 
         result = core.update_peer(
@@ -370,6 +384,8 @@ def peer_update(
             ip_address=ip,
             dns=dns,
             clear_dns=clear_dns,
+            desc=desc,
+            clear_desc=clear_desc,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)

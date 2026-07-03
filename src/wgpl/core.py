@@ -121,6 +121,7 @@ def add_interface(
     address_pool: str,
     port: int = 51820,
     dns: str | None = None,
+    desc: str | None = None,
 ) -> dict[str, str | int | None]:
     """Register a WireGuard interface in the database."""
     if not (1 <= port <= 65535):
@@ -133,7 +134,7 @@ def add_interface(
 
     normalized_dns = validate_dns(dns) if dns is not None else None
     db.add_interface(
-        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns
+        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns, desc=desc
     )
 
     result: dict[str, str | int | None] = {
@@ -145,6 +146,8 @@ def add_interface(
     }
     if normalized_dns is not None:
         result["dns"] = normalized_dns
+    if desc is not None:
+        result["desc"] = desc
     return result
 
 
@@ -245,6 +248,7 @@ def add_peer(
     ip_address: str | None = None,
     dns: str | None = None,
     expires: str | None = None,
+    desc: str | None = None,
 ) -> dict[str, str | None]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
@@ -276,6 +280,7 @@ def add_peer(
             created_at=created_at,
             dns=normalized_dns,
             expires_at=expires_at,
+            desc=desc,
             conn=conn,
         )
 
@@ -291,6 +296,7 @@ def add_peer(
         "ip_address": allocated_ip,
         "public_key": keypair.public_key,
         "dns": effective_dns,
+        "desc": desc,
     }
 
 def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False) -> None:
@@ -462,13 +468,17 @@ def update_interface(
     address_pool: str | None = None,
     dns: str | None = None,
     clear_dns: bool = False,
+    desc: str | None = None,
+    clear_desc: bool = False,
 ) -> dict[str, str | int | list[str] | None]:
     """Update interface fields. Returns the updated row and operational hints."""
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
+    if clear_desc and desc is not None:
+        raise ValueError("Cannot set both desc and clear_desc")
 
-    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns))
-    if not has_field and not clear_dns:
+    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns, desc))
+    if not has_field and not clear_dns and not clear_desc:
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
@@ -499,6 +509,12 @@ def update_interface(
     elif dns is not None:
         normalized_dns = validate_dns(dns)
 
+    normalized_desc: str | None | UnsetType = UNSET
+    if clear_desc:
+        normalized_desc = None
+    elif desc is not None:
+        normalized_desc = desc
+
     with db.transaction() as conn:
         iface = db.get_interface(name, conn=conn)
         if not iface:
@@ -514,6 +530,7 @@ def update_interface(
             public_key=public_key if public_key is not None else UNSET,
             address_pool=normalized_pool if normalized_pool is not None else UNSET,
             dns=normalized_dns,
+            desc=normalized_desc,
             conn=conn,
         )
 
@@ -534,13 +551,17 @@ def update_peer(
     ip_address: str | None = None,
     dns: str | None = None,
     clear_dns: bool = False,
+    desc: str | None = None,
+    clear_desc: bool = False,
 ) -> dict[str, str | list[str] | None]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
+    if clear_desc and desc is not None:
+        raise ValueError("Cannot set both desc and clear_desc")
 
-    has_field = any(v is not None for v in (name, ip_address, dns))
-    if not has_field and not clear_dns:
+    has_field = any(v is not None for v in (name, ip_address, dns, desc))
+    if not has_field and not clear_dns and not clear_desc:
         raise NoUpdateFieldsError("No fields provided to update")
 
     canonical_id = resolve_peer_ref(peer_ref, interface_name)
@@ -556,6 +577,12 @@ def update_peer(
         normalized_dns = None
     elif dns is not None:
         normalized_dns = validate_dns(dns)
+
+    normalized_desc: str | None | UnsetType = UNSET
+    if clear_desc:
+        normalized_desc = None
+    elif desc is not None:
+        normalized_desc = desc
 
     with db.transaction() as conn:
         peer = db.get_peer(canonical_id, conn=conn)
@@ -581,6 +608,7 @@ def update_peer(
                 name=name if name is not None else UNSET,
                 ip_address=validated_ip,
                 dns=normalized_dns,
+                desc=normalized_desc,
                 conn=conn,
             )
         except PeerAlreadyExistsError:
@@ -601,6 +629,7 @@ def update_peer(
         "ip_address": str(updated["ip_address"]),
         "dns": effective_dns,
         "dns_override": updated["dns"],
+        "desc": updated["desc"],
         "hints": list(dict.fromkeys(hints)),
     }
 

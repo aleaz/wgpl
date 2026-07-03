@@ -112,7 +112,8 @@ def init_db(path: str | None = None) -> None:
                 port         INTEGER NOT NULL DEFAULT 51820 UNIQUE,
                 public_key   TEXT NOT NULL,
                 address_pool TEXT NOT NULL UNIQUE,
-                dns          TEXT
+                dns          TEXT,
+                desc         TEXT
             );
         """)
         
@@ -128,7 +129,8 @@ def init_db(path: str | None = None) -> None:
                 created_at   TEXT NOT NULL,
                 dns          TEXT,
                 deleted_at   TEXT,
-                expires_at   TEXT
+                expires_at   TEXT,
+                desc         TEXT
             );
         """)
         
@@ -157,14 +159,15 @@ def add_interface(
     address_pool: str,
     port: int = 51820,
     dns: str | None = None,
+    desc: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new WireGuard interface to the database."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns) VALUES (?, ?, ?, ?, ?, ?)",
-                (name, endpoint, port, public_key, address_pool, dns),
+                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (name, endpoint, port, public_key, address_pool, dns, desc),
             )
     except sqlite3.IntegrityError as exc:
         msg = str(exc).lower()
@@ -203,6 +206,7 @@ def update_interface(
     public_key: str | _UnsetType = _UNSET,
     address_pool: str | _UnsetType = _UNSET,
     dns: str | None | _UnsetType = _UNSET,
+    desc: str | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the interface fields that are not _UNSET."""
@@ -224,6 +228,9 @@ def update_interface(
     if dns is not _UNSET:
         updates.append("dns = ?")
         params.append(dns)
+    if desc is not _UNSET:
+        updates.append("desc = ?")
+        params.append(desc)
 
     if not updates:
         return
@@ -256,14 +263,15 @@ def add_peer(
     preshared_key: str | None = None,
     dns: str | None = None,
     expires_at: str | None = None,
+    desc: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new peer associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at),
+                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc),
             )
     except sqlite3.IntegrityError as exc:
         error_msg = str(exc).lower()
@@ -347,6 +355,7 @@ def update_peer(
     name: str | _UnsetType = _UNSET,
     ip_address: str | _UnsetType = _UNSET,
     dns: str | None | _UnsetType = _UNSET,
+    desc: str | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the peer fields that are not _UNSET."""
@@ -362,6 +371,9 @@ def update_peer(
     if dns is not _UNSET:
         updates.append("dns = ?")
         params.append(dns)
+    if desc is not _UNSET:
+        updates.append("desc = ?")
+        params.append(desc)
 
     if not updates:
         return
