@@ -23,6 +23,10 @@ uv run pytest
 Read [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) before making changes. Key rules:
 
 - SQLite is the SSOT; no auto-sync on `add_peer` / `remove_peer`
+- Strict layers: `cli.py` → `core.py` → `db.py` / `wireguard.py` (CLI must not import `db`)
+- Peer lifecycle and IP allocation logic live in `core.py` (`_is_peer_active`, `get_peer_status`, `get_effective_dns`)
+- Expired peers release IPs for allocation; use `peer prune` to remove rows physically
+- IPv4-only pools and peer addresses
 - Multi-step writes use `db.transaction()` (`BEGIN EXCLUSIVE`)
 - Never expose `private_key` or `preshared_key` in JSON list output
 - `subprocess` without `shell=True`; SQL always parameterized

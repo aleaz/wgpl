@@ -387,6 +387,28 @@ def test_resolve_peer_ref_excludes_expired_by_default(wg0_interface: str) -> Non
         resolve_peer_ref(peer["id"])
 
 
+def test_expired_peer_releases_ip_for_allocation(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3", expires="1h")
+    assert peer["id"] is not None
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+
+    new_peer = core.add_peer(wg0_interface, "phone2", ip_address="10.0.0.3")
+    assert new_peer["ip_address"] == "10.0.0.3"
+
+
+def test_get_peer_status_and_effective_dns(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", dns="1.1.1.1")
+    assert peer["id"] is not None
+    assert core.get_peer_status(db.get_peer(peer["id"])) == "Active"
+    assert core.get_effective_dns(peer["dns"], "8.8.8.8") == "1.1.1.1"
+    assert core.get_effective_dns(None, "8.8.8.8") == "8.8.8.8"
+    assert core.get_effective_dns(None, None) is None
+
+
 def test_remove_peer_hard_finds_soft_deleted_peer(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     assert peer["id"] is not None

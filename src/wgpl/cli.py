@@ -12,7 +12,6 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from . import db
 from . import core
 from .exceptions import WgplException, InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgBinaryNotFoundError
 
@@ -47,31 +46,6 @@ def _styled(text: str, style: str = "") -> str:
         return text
     return f"[{style}]{text}[/{style}]"
 
-def _resolve_effective_dns(
-    peer_dns: str | None,
-    iface_dns: str | None,
-) -> str | None:
-    if peer_dns:
-        return str(peer_dns)
-    if iface_dns:
-        return str(iface_dns)
-    return None
-
-def _get_peer_status(peer: dict | sqlite3.Row) -> str:
-    import datetime
-    
-    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
-    if deleted_at is not None:
-        return "Deleted"
-        
-    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
-    if expires_at_str is not None:
-        expires_at = datetime.datetime.fromisoformat(expires_at_str)
-        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
-            return "Expired"
-    return "Active"
-
-
 def _public_peer_rows(
     peers: list[sqlite3.Row],
     iface_dns: dict[str, str | None] | None = None,
@@ -82,9 +56,9 @@ def _public_peer_rows(
     for peer in peers:
         peer_dns = peer["dns"]
         row = {field: peer[field] for field in _BASE_PUBLIC_PEER_FIELDS}
-        row["dns"] = _resolve_effective_dns(peer_dns, iface_dns_map.get(peer["interface"]))
+        row["dns"] = core.get_effective_dns(peer_dns, iface_dns_map.get(peer["interface"]))
         row["dns_override"] = peer_dns
-        row["status"] = _get_peer_status(peer)
+        row["status"] = core.get_peer_status(peer)
         row["expires_at"] = peer["expires_at"] if "expires_at" in peer.keys() else None
         row["deleted_at"] = peer["deleted_at"] if "deleted_at" in peer.keys() else None
         rows.append(row)
@@ -92,9 +66,6 @@ def _public_peer_rows(
 
 def _display_dns(value: str | None) -> str:
     return value if value else "—"
-
-def _interface_dns_map() -> dict[str, str | None]:
-    return {row["name"]: row["dns"] for row in db.list_interfaces()}
 
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
     """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
@@ -144,7 +115,7 @@ def main(
         os.environ["WGPL_DB_PATH"] = db_path
 
     try:
-        db.init_db()
+        core.ensure_database()
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -223,8 +194,7 @@ def interface_remove(
 @interface_app.command("list")
 def interface_list(ctx: typer.Context) -> None:
     try:
-        ifaces = db.list_interfaces()
-        data = [dict(row) for row in ifaces]
+        data = core.list_interfaces()
         if ctx.obj.get("json"):
             _output(ctx, data)
         else:
@@ -427,21 +397,9 @@ def peer_list(
     all: bool = typer.Option(False, "--all", help="Show all peers including deleted ones"),
 ):
     try:
-        raw_peers = db.list_peers(interface)
-        
-        peers = []
-        for p in raw_peers:
-            status = _get_peer_status(p)
-            if all:
-                peers.append(p)
-            elif expired:
-                if status == "Expired":
-                    peers.append(p)
-            else:
-                if status == "Active":
-                    peers.append(p)
+        peers = core.list_peers(interface, expired_only=expired, show_all=all)
 
-        iface_dns = _interface_dns_map()
+        iface_dns = core.interface_dns_map()
         if ctx.obj.get("json"):
             _output(ctx, _public_peer_rows(peers, iface_dns))
         else:
@@ -453,9 +411,9 @@ def peer_list(
                     _styled(p["interface"], ""),
                     _styled(p["name"], _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
-                    _styled(_get_peer_status(p), _STYLE_META),
+                    _styled(core.get_peer_status(p), _STYLE_META),
                     _styled(
-                        _display_dns(_resolve_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
+                        _display_dns(core.get_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
                         _STYLE_META,
                     ),
                 ]
@@ -560,7 +518,17 @@ def validate_cmd(
 def db_dump(ctx: typer.Context) -> None:
     """Export the database as a logical SQL script to standard output."""
     try:
-        core.dump_database()
+        console.print(
+            "[yellow]Hint: Redirect this output to a file "
+            "(e.g. wgpl db dump > backup.sql).[/yellow]"
+        )
+        console.print(
+            "[yellow]      Ensure the resulting file has secure permissions "
+            "(chmod 600) or encrypt it.[/yellow]"
+        )
+        console.print()
+        for line in core.dump_database_lines():
+            print(line, end="")
     except WgplException as e:
         _exit_error(ctx, str(e))
 

@@ -40,10 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `db.add_peer` distinguishes IP vs name uniqueness conflicts
 - `validate` and `resolve_peer_ref` skip soft-deleted and expired peers by default
 - `peer remove` on an already soft-deleted peer returns not found instead of re-deleting silently
+- IP pool allocation no longer treats expired peers as occupying addresses (`_pool_used_ips` uses `_is_peer_active`)
 
 ### Changed
 
 - README rewritten for upcoming 1.0 release
+- Strict layer boundaries: CLI reads go through `core` (`list_interfaces`, `list_peers`, `ensure_database`); no direct `db` imports in `cli.py`
+- Peer lifecycle SSOT in `core`: `get_peer_status`, `get_effective_dns`; expired peers release IPs for allocation
+- `wgpl db dump` hints on stderr; SQL script lines come from `core.dump_database_lines()` (no I/O in core)
 - `peer config` / `peer qr`: PersistentKeepalive and MTU come from the database (interface → peer cascade), not CLI flags
 - CONTRIBUTING: self-contained Conventional Commit messages (no internal process IDs)
 

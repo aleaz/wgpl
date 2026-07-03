@@ -12,8 +12,21 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 
 `cli.py` (Typer / presentation) → `core.py` (business) → `db.py` / `wireguard.py` (infra).
 
-- `core.py` MUST NOT import Typer or format output.
+- `cli.py` MUST NOT import `db.py`; use `core.ensure_database()`, `core.list_interfaces()`, `core.list_peers()`, etc.
+- `core.py` MUST NOT import Typer or format output (no stdout/stderr writes; use iterators such as `dump_database_lines()`).
 - `db.py` / `wireguard.py` MUST NOT contain business logic.
+
+## Peer lifecycle and IP allocation
+
+- `_is_peer_active()` is the SSOT for whether a peer occupies resources (not soft-deleted and not expired).
+- IP pool reservation (`_pool_used_ips`, `allocate_peer_ip`) MUST use `_is_peer_active()`, not `deleted_at IS NULL` alone.
+- Expired peers release their IP for new allocations; `peer prune` removes expired/soft-deleted rows physically.
+- When reusing an IP held by an expired peer, `add_peer` / `peer update` soft-delete the inactive row so partial unique indexes allow the INSERT/UPDATE.
+- `get_peer_status()` and `get_effective_dns()` live in `core.py`; the CLI must not duplicate lifecycle or DNS cascade logic.
+
+## Scope
+
+- IPv4-only address pools and peer IPs. Document this limitation; do not add IPv6 support without an explicit design change.
 
 ## SSOT and synchronization
 

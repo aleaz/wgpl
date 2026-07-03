@@ -7,6 +7,8 @@ import sqlite3
 import sys
 import os
 import shutil
+from collections.abc import Iterator, Mapping
+from typing import Any
 
 from . import db
 from .db import UNSET, UnsetType
@@ -53,6 +55,29 @@ def _is_peer_active(peer: sqlite3.Row) -> bool:
         if expires_at <= datetime.datetime.now(datetime.timezone.utc):
             return False
     return True
+
+
+def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
+    """Return lifecycle label: Active, Expired, or Deleted."""
+    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
+    if deleted_at is not None:
+        return "Deleted"
+
+    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
+    if expires_at_str is not None:
+        expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
+        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
+            return "Expired"
+    return "Active"
+
+
+def get_effective_dns(peer_dns: str | None, iface_dns: str | None) -> str | None:
+    """Return peer DNS override or interface default."""
+    if peer_dns:
+        return str(peer_dns)
+    if iface_dns:
+        return str(iface_dns)
+    return None
 
 
 def _normalize_peer_ref(ref: str) -> str:
@@ -176,15 +201,45 @@ def remove_interface(name: str) -> None:
     db.remove_interface(name)
 
 
+def ensure_database() -> None:
+    """Initialize the database connection and schema."""
+    db.init_db()
+
+
+def list_interfaces() -> list[dict[str, Any]]:
+    """Return all interfaces as plain dicts."""
+    return [dict(row) for row in db.list_interfaces()]
+
+
+def interface_dns_map() -> dict[str, str | None]:
+    """Return interface name to default DNS."""
+    return {row["name"]: row["dns"] for row in db.list_interfaces()}
+
+
+def list_peers(
+    interface: str | None = None,
+    *,
+    expired_only: bool = False,
+    show_all: bool = False,
+) -> list[sqlite3.Row]:
+    """Return peers filtered by lifecycle status for display."""
+    raw_peers = db.list_peers(interface)
+    peers: list[sqlite3.Row] = []
+    for peer in raw_peers:
+        status = get_peer_status(peer)
+        if show_all:
+            peers.append(peer)
+        elif expired_only:
+            if status == "Expired":
+                peers.append(peer)
+        elif status == "Active":
+            peers.append(peer)
+    return peers
+
+
 def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
     """Return peer DNS override or interface default."""
-    peer_dns = peer["dns"]
-    if peer_dns:
-        return str(peer_dns)
-    iface_dns = iface["dns"]
-    if iface_dns:
-        return str(iface_dns)
-    return None
+    return get_effective_dns(peer["dns"], iface["dns"])
 
 def _effective_peer_mtu(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
     peer_mtu = peer["mtu"]
@@ -219,7 +274,7 @@ def _pool_used_ips(
     used_ips = {
         peer["ip_address"]
         for peer in db.list_peers(interface_name, conn=conn)
-        if peer["deleted_at"] is None
+        if _is_peer_active(peer)
     }
 
     if exclude_peer_id:
@@ -259,6 +314,19 @@ def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ip
 
     if ip in used_ips:
         raise IpAlreadyInUseError(f"IP {ip} is already assigned in this interface")
+
+
+def _release_inactive_peer_ip(
+    interface_name: str,
+    ip: str,
+    conn: sqlite3.Connection,
+) -> None:
+    """Soft-delete inactive peers so DB unique indexes allow IP reuse."""
+    for peer in db.list_peers(interface_name, conn=conn):
+        if peer["ip_address"] != ip or _is_peer_active(peer):
+            continue
+        if peer["deleted_at"] is None:
+            db.remove_peer(peer["id"], conn=conn)
 
 
 def allocate_peer_ip(
@@ -302,6 +370,7 @@ def add_peer(
 
     with db.transaction() as conn:
         allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
+        _release_inactive_peer_ip(interface_name, allocated_ip, conn)
 
         keypair = wireguard.generate_keypair()
         preshared_key = wireguard.generate_preshared_key()
@@ -503,7 +572,7 @@ def validate_peers_in_pool(
     conflicts: list[dict[str, str]] = []
 
     for peer in db.list_peers(interface_name, conn=conn):
-        if peer["deleted_at"] is not None:
+        if not _is_peer_active(peer):
             continue
         ip = str(peer["ip_address"])
         try:
@@ -717,6 +786,7 @@ def update_peer(
                 ip_address,
                 exclude_peer_id=canonical_id,
             )
+            _release_inactive_peer_ip(interface_name, validated_ip, conn)
 
         try:
             db.update_peer(
@@ -815,15 +885,11 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 
 # --- Database Dump & Restore ---
 
-def dump_database() -> None:
-    """Dumps the SQLite database to stdout as a logical SQL script."""
-    sys.stderr.write("Hint: Redirect this output to a file (e.g. wgpl db dump > backup.sql).\n")
-    sys.stderr.write("      Ensure the resulting file has secure permissions (chmod 600) or encrypt it.\n\n")
-    sys.stderr.flush()
+def dump_database_lines() -> Iterator[str]:
+    """Yield SQLite logical dump lines (each line includes a trailing newline)."""
     with db.get_db() as conn:
         for line in conn.iterdump():
-            sys.stdout.write(f"{line}\n")
-    sys.stdout.flush()
+            yield f"{line}\n"
 
 
 def _cleanup_tmp_files(tmp_path: str) -> None:

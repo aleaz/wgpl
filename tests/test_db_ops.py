@@ -29,17 +29,14 @@ COMMIT;
 """
 
 
-def test_dump_database(capsys: pytest.CaptureFixture[str], wg0_interface: str) -> None:
-    core.dump_database()
+def test_dump_database_lines(wg0_interface: str) -> None:
+    lines = list(core.dump_database_lines())
+    output = "".join(lines)
 
-    captured = capsys.readouterr()
-
-    assert "Hint: Redirect this output" in captured.err
-    assert "chmod 600" in captured.err
-    assert "BEGIN TRANSACTION;" in captured.out
-    assert "CREATE TABLE interfaces" in captured.out
-    assert "INSERT INTO \"interfaces\" VALUES('wg0'" in captured.out
-    assert "COMMIT;" in captured.out
+    assert "BEGIN TRANSACTION;" in output
+    assert "CREATE TABLE interfaces" in output
+    assert "INSERT INTO \"interfaces\" VALUES('wg0'" in output
+    assert "COMMIT;" in output
 
 
 def test_restore_database_success(wgpl_db: str) -> None:

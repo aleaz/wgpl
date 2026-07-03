@@ -119,6 +119,8 @@ WGPL is designed to require zero configuration, but provides robust mechanisms t
 
 *Note: WGPL will always force `0600` permissions on the database file to protect your private keys.*
 
+Address pools and peer IPs are **IPv4-only** (e.g. `10.0.0.0/24`). Expired peers release their IP for new allocations; run `peer prune` to remove expired or soft-deleted rows from the database.
+
 ## Documentation
 
 - [Architecture & Principles](.cursor/rules/wgpl-architecture.mdc)
