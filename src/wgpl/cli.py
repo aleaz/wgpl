@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import core
-from .exceptions import WgplException, InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgBinaryNotFoundError
+from .exceptions import WgplException, InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgBinaryNotFoundError, InterfaceNotFoundError, PeerNotFoundError
 
 _HINT_MESSAGES = {
     "re_export_clients": "Re-export client configs (peer config / qr) for peers on this interface.",
@@ -67,11 +67,54 @@ def _public_peer_rows(
 def _display_dns(value: str | None) -> str:
     return value if value else "—"
 
+def _truncate_desc(desc: str | None, max_len: int = 25) -> str:
+    if not desc:
+        return "—"
+    if len(desc) > max_len:
+        return desc[: max_len - 3] + "..."
+    return desc
+
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
     """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
     if total_peers == 1:
         return peer_id
     return peer_id.replace("-", "")[:12]
+
+def _create_base_table(
+    expand: bool = True,
+    show_header: bool = True,
+    header_style: str | None = None,
+) -> Table:
+    """Create a Table instance with the standard CLI design tokens."""
+    return Table(
+        box=box.ROUNDED,
+        expand=expand,
+        border_style=_STYLE_BORDER,
+        show_edge=True,
+        pad_edge=True,
+        show_header=show_header,
+        header_style=header_style,
+    )
+
+def _print_titled_table(title: str, table: Table) -> None:
+    """Print a Rich table centered and formatted with standard spacing."""
+    out_console.print()
+    out_console.print(f"[bold]{title}[/bold]", justify="center")
+    out_console.print()
+    out_console.print(table)
+    out_console.print()
+
+def _print_show_table(
+    title: str,
+    rows: list[tuple[str, str]],
+) -> None:
+    """Print a vertical Rich table for detailed inspection aligned with Typer help styling."""
+    table = _create_base_table(show_header=False)
+    table.add_column("Field", style=_STYLE_ID)
+    table.add_column("Value")
+    for k, v in rows:
+        table.add_row(k, v)
+    _print_titled_table(title, table)
 
 def _print_list_table(
     title: str,
@@ -84,23 +127,12 @@ def _print_list_table(
         console.print(f"[{typer_styles.STYLE_USAGE}]No {empty_label} found.[/{typer_styles.STYLE_USAGE}]")
         return
 
-    table = Table(
-        box=box.ROUNDED,
-        expand=True,
-        header_style=_STYLE_ID,
-        border_style=_STYLE_BORDER,
-        show_edge=True,
-        pad_edge=True,
-    )
+    table = _create_base_table(header_style=_STYLE_ID)
     for header, kwargs in columns:
         table.add_column(header, **kwargs)
     for row in rows:
         table.add_row(*row)
-    out_console.print()
-    out_console.print(f"[bold]{title}[/bold]", justify="center")
-    out_console.print()
-    out_console.print(table)
-    out_console.print()
+    _print_titled_table(title, table)
 
 @app.callback()
 def main(
@@ -212,6 +244,9 @@ def interface_list(ctx: typer.Context) -> None:
                     _styled(f"{i['endpoint']}:{i['port']}", ""),
                     _styled(i["address_pool"], _STYLE_META),
                     _styled(_display_dns(i.get("dns")), _STYLE_META),
+                    _styled(str(i.get("mtu") or "—"), _STYLE_META),
+                    _styled(str(i.get("keepalive") or "—"), _STYLE_META),
+                    _styled(_truncate_desc(i.get("desc")), ""),
                 ]
                 for i in data
             ]
@@ -223,6 +258,9 @@ def interface_list(ctx: typer.Context) -> None:
                     ("Endpoint", {"overflow": "fold"}),
                     ("Pool", {"overflow": "fold"}),
                     ("DNS", {"overflow": "fold"}),
+                    ("MTU", {"overflow": "fold"}),
+                    ("Keepalive", {"overflow": "fold"}),
+                    ("Desc", {"overflow": "fold"}),
                 ],
                 rows,
             )
@@ -237,6 +275,73 @@ def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="I
             _output(ctx, {"config": conf})
         else:
             print(conf)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+@peer_app.command("show")
+def peer_show(
+    ctx: typer.Context,
+    interface: str | None = typer.Option(None, help="Interface name (e.g. wg0)"),
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+):
+    try:
+        # Fetching peer data
+        peers = core.list_peers(interface, expired_only=False, show_all=True)
+        # Resolve ID correctly
+        resolved_id = core.resolve_peer_ref(peer_id, interface, active_only=False)
+        peer = next((p for p in peers if p["id"] == resolved_id), None)
+        if not peer:
+            raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+        iface_dns = core.interface_dns_map()
+
+        if ctx.obj.get("json"):
+            _output(ctx, dict(peer))
+        else:
+            rows = [
+                ("ID", str(peer["id"])),
+                ("Name", str(peer["name"])),
+                ("Interface", str(peer["interface"])),
+                ("Status", str(core.get_peer_status(dict(peer)))),
+                ("IP Address", str(peer["ip_address"])),
+                ("Public Key", str(peer["public_key"])),
+                ("Preshared Key", str(dict(peer).get("preshared_key") or "—")),
+                ("DNS (Effective)", str(core.get_effective_dns(dict(peer).get("dns"), iface_dns.get(peer["interface"])) or "—")),
+                ("DNS (Override)", str(dict(peer).get("dns") or "—")),
+                ("MTU", str(dict(peer).get("mtu") or "—")),
+                ("Keepalive", str(dict(peer).get("keepalive") or "—")),
+                ("Expires At", str(dict(peer).get("expires_at") or "—")),
+                ("Deleted At", str(dict(peer).get("deleted_at") or "—")),
+                ("Description", str(dict(peer).get("desc") or "—")),
+            ]
+            _print_show_table(f"Peer Details: {peer['name']}", rows)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+@interface_app.command("show")
+def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name (e.g. wg0)")):
+    try:
+        # Assuming list_interfaces provides all data. Otherwise we could add get_interface to core
+        interfaces = core.list_interfaces()
+        interface = next((i for i in interfaces if i["name"] == name), None)
+        if not interface:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+        if ctx.obj.get("json"):
+            _output(ctx, interface)
+        else:
+            rows = [
+                ("Name", str(interface["name"])),
+                ("Endpoint", str(interface["endpoint"])),
+                ("Port", str(interface["port"])),
+                ("Public Key", str(interface["public_key"])),
+                ("Address Pool", str(interface["address_pool"])),
+                ("DNS", str(dict(interface).get("dns") or "—")),
+                ("MTU", str(dict(interface).get("mtu") or "—")),
+                ("Keepalive", str(dict(interface).get("keepalive") or "—")),
+                ("Description", str(dict(interface).get("desc") or "—")),
+            ]
+            _print_show_table(f"Interface Details: {name}", rows)
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -497,6 +602,9 @@ def peer_list(
                         _display_dns(core.get_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
                         _STYLE_META,
                     ),
+                    _styled(str(p.get("mtu") or "—"), _STYLE_META),
+                    _styled(str(p.get("keepalive") or "—"), _STYLE_META),
+                    _styled(_truncate_desc(p.get("desc")), ""),
                 ]
                 for p in data
             ]
@@ -510,6 +618,9 @@ def peer_list(
                     ("IP", {"overflow": "fold"}),
                     ("Status", {}),
                     ("DNS", {"overflow": "fold"}),
+                    ("MTU", {"overflow": "fold"}),
+                    ("Keepalive", {"overflow": "fold"}),
+                    ("Desc", {"overflow": "fold"}),
                 ],
                 rows,
             )
