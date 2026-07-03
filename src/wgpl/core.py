@@ -1,3 +1,4 @@
+import glob
 import ipaddress
 import uuid
 import datetime
@@ -7,7 +8,7 @@ import sqlite3
 import os
 import shutil
 from collections.abc import Iterator, Mapping
-from typing import Any
+from typing import Any, cast
 
 from . import db
 from .db import UNSET, UnsetType
@@ -46,6 +47,14 @@ def _parse_duration(duration: str) -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc) + delta
 
 
+def _parse_expires_at(value: str) -> datetime.datetime:
+    """Parse expires_at from DB; treat naive timestamps as UTC."""
+    parsed = datetime.datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
 def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
     """Returns True if the peer is not soft-deleted and not expired."""
     deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
@@ -53,7 +62,7 @@ def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
         return False
     expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
     if expires_at_str is not None:
-        expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
+        expires_at = _parse_expires_at(str(expires_at_str))
         if expires_at <= datetime.datetime.now(datetime.timezone.utc):
             return False
     return True
@@ -1105,11 +1114,31 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
                     "detail": f"Interface DNS: {exc}",
                 })
 
+        seen_ips: dict[str, str] = {}
+        seen_names: dict[str, str] = {}
         for peer in db.list_peers(iface_name):
             if not _is_peer_active(peer):
                 continue
             peer_name = str(peer["name"])
             ip = str(peer["ip_address"])
+            if ip in seen_ips:
+                issues.append({
+                    "interface": iface_name,
+                    "peer": peer_name,
+                    "code": "duplicate_ip",
+                    "detail": f"IP {ip} also used by active peer {seen_ips[ip]}",
+                })
+            else:
+                seen_ips[ip] = peer_name
+            if peer_name in seen_names:
+                issues.append({
+                    "interface": iface_name,
+                    "peer": peer_name,
+                    "code": "duplicate_name",
+                    "detail": f"Name {peer_name} also used by peer {seen_names[peer_name]}",
+                })
+            else:
+                seen_names[peer_name] = str(peer["id"])
             try:
                 _validate_peer_ip_in_pool(ip, network)
             except InvalidPeerIpError as exc:
@@ -1152,6 +1181,35 @@ def _cleanup_tmp_files(tmp_path: str) -> None:
                 os.remove(path)
             except OSError:
                 pass
+
+
+
+def _rotate_backups(db_path: str, keep: int = 3) -> None:
+    """Keep only the newest ``keep`` backup files matching ``{db_path}.bak.*``."""
+    backups = sorted(
+        glob.glob(f"{db_path}.bak.*"),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    for old_backup in backups[keep:]:
+        try:
+            os.remove(old_backup)
+        except OSError:
+            pass
+
+
+def _validate_restored_data() -> None:
+    """Run validate_state on the current WGPL_DB_PATH; raise if inconsistent."""
+    result = validate_state()
+    if result["status"] == "ok":
+        return
+    issues = cast(list[dict[str, str | None]], result["issues"])
+    details = "; ".join(
+        f"{issue.get('interface')}/{issue.get('peer')}: "
+        f"{issue.get('code')} — {issue.get('detail')}"
+        for issue in issues
+    )
+    raise WgplException(f"Restored database failed validation: {details}")
 
 
 def _validate_restored_schema(path: str) -> None:
@@ -1218,7 +1276,12 @@ def restore_database(sql_script: str) -> list[str]:
     saved_db_path = os.environ.get("WGPL_DB_PATH")
     try:
         os.environ["WGPL_DB_PATH"] = tmp_path
-        db.init_db()
+        try:
+            _validate_restored_data()
+            db.init_db()
+        except BaseException:
+            _cleanup_tmp_files(tmp_path)
+            raise
     finally:
         if saved_db_path is None:
             os.environ.pop("WGPL_DB_PATH", None)
@@ -1243,6 +1306,7 @@ def restore_database(sql_script: str) -> list[str]:
 
             shutil.copy2(db_path, backup_path)
             os.chmod(backup_path, 0o600)
+            _rotate_backups(db_path, keep=3)
     except Exception:
         _cleanup_tmp_files(tmp_path)
         raise

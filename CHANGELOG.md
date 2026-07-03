@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat naive `expires_at` timestamps as UTC in lifecycle checks (no crash on legacy rows)
+- `peer history` / `interface history` `--limit` returns the most recent events (not the oldest)
+- `db restore`: validate row integrity before swap; rotate backups (keep 3); clean tmp on init failure
+
 ### Added
 
 - Append-only `audit_events` table; `peer history` and `interface history` commands (`--json` supported)

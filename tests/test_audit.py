@@ -206,3 +206,24 @@ def test_list_peer_audit_history_limit(wg0_interface: str) -> None:
     limited = core.list_peer_audit_history(peer_id, wg0_interface, limit=5)
     assert len(all_events) == 11  # created + 10 updated
     assert len(limited) == 5
+
+
+def test_list_peer_audit_history_limit_returns_most_recent(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.transaction() as conn:
+        for _ in range(10):
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=peer_id,
+                event_type=AuditEventType.UPDATED,
+                interface=wg0_interface,
+                metadata={"fields": ["name"]},
+                conn=conn,
+            )
+
+    limited = core.list_peer_audit_history(peer_id, wg0_interface, limit=5)
+    assert len(limited) == 5
+    assert all(e["event_type"] == AuditEventType.UPDATED for e in limited)
+    assert limited[0]["event_type"] == AuditEventType.UPDATED

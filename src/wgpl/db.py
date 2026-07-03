@@ -550,7 +550,7 @@ def list_audit_events(
     limit: int = 100,
     conn: sqlite3.Connection | None = None,
 ) -> list[sqlite3.Row]:
-    """Return audit events ordered by occurred_at ascending."""
+    """Return the most recent audit events first (occurred_at descending)."""
     clauses: list[str] = []
     params: list[Any] = []
     if entity_type is not None:
@@ -564,6 +564,6 @@ def list_audit_events(
         params.append(interface)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
-    sql = f"SELECT * FROM audit_events {where} ORDER BY occurred_at ASC LIMIT ?"
+    sql = f"SELECT * FROM audit_events {where} ORDER BY occurred_at DESC, id DESC LIMIT ?"
     with _ensure_conn(conn) as c:
         return _run_query(c, sql, tuple(params)).fetchall()

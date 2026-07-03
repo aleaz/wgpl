@@ -5,6 +5,7 @@
 | Version | Supported |
 | ------- | --------- |
 | 0.1.x   | Yes       |
+| 1.0.x   | Yes       |
 
 ## Reporting a vulnerability
 
@@ -47,3 +48,8 @@ Out of scope:
 - If a private key or PSK may have been exposed, remove the peer and add a new one
   (key rotation is not available via `peer update`).
 - Run `wgpl validate` after bulk changes to confirm peer IPs still fit their pools.
+
+- `wgpl db dump` output contains **private keys** for all peers. Treat SQL backups like the database file (`chmod 600`, never commit to git).
+- `wgpl db restore` replaces the live database atomically after validation; it is destructive. Warnings (e.g. WAL checkpoint blocked) go to stderr.
+- `peer history` and `interface history` store **public keys** only; `private_key` and `preshared_key` are blocked from audit metadata.
+- Append-only `audit_events` grows without automatic retention; plan disk usage on long-lived hosts.

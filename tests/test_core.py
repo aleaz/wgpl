@@ -599,3 +599,53 @@ def test_run_wg_command_raises_wireguard_config_error(mock_run: object) -> None:
 
     with pytest.raises(WireguardConfigError, match="wg command failed"):
         wireguard.run_wg_command("syncconf", "wg0", "/tmp/fake.conf")
+
+
+def test_naive_expires_at_does_not_crash_status(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3")
+    naive_future = "2099-01-01 00:00:00"
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (naive_future, peer["id"]))
+        conn.commit()
+
+    row = db.get_peer(str(peer["id"]))
+    assert row is not None
+    assert core.get_peer_status(row) == "Active"
+
+
+def test_naive_expires_at_past_is_expired(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.4")
+    naive_past = "2020-01-01 00:00:00"
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (naive_past, peer["id"]))
+        conn.commit()
+
+    row = db.get_peer(str(peer["id"]))
+    assert row is not None
+    assert core.get_peer_status(row) == "Expired"
+
+
+def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
+    _insert_peer("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", wg0_interface, "a", "10.0.0.2")
+    with db.get_db() as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_peers_active_ip")
+        conn.execute(
+            "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                wg0_interface,
+                "b",
+                "10.0.0.2",
+                "pub2",
+                "priv2",
+                "2020-01-01T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+
+    assert result["status"] == "error"
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "duplicate_ip" in codes

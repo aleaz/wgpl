@@ -336,7 +336,7 @@ def interface_history(
                     _styled(str(e["event_type"]), _STYLE_ID),
                     _styled(str(e.get("metadata") or ""), ""),
                 ]
-                for e in events
+                for e in reversed(events)
             ]
             _print_list_table(
                 f"Audit history: {name}",
@@ -373,7 +373,7 @@ def peer_history(
                     _styled(str(e.get("name") or ""), _STYLE_VALUE),
                     _styled(str(e.get("ip_address") or ""), _STYLE_META),
                 ]
-                for e in events
+                for e in reversed(events)
             ]
             _print_list_table(
                 f"Audit history: {peer_id}",
