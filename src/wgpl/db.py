@@ -26,17 +26,44 @@ def get_db_path() -> str:
     default_path = os.path.expanduser("~/.wgpl.db")
     return os.environ.get("WGPL_DB_PATH", default_path)
 
+_SCHEMA_CORRUPT_MSG = (
+    "Database schema is invalid or corrupted. "
+    "Run 'wgpl db restore' from a backup or remove the file and re-init."
+)
+
+def _run_query(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple[Any, ...] = (),
+) -> sqlite3.Cursor:
+    """Execute a read query, mapping sqlite errors to WgplException."""
+    try:
+        return conn.execute(sql, params)
+    except sqlite3.DatabaseError as e:
+        raise WgplException(f"{_SCHEMA_CORRUPT_MSG} ({e})") from e
+
 def _create_connection() -> sqlite3.Connection:
     """Creates a secure, atomic connection to the SQLite database."""
     db_path = get_db_path()
-    
+
+    if os.path.isdir(db_path):
+        raise WgplException(f"Database path is a directory: {db_path}")
+
     try:
         fd = os.open(db_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
         os.close(fd)
     except FileExistsError:
         pass
+    except FileNotFoundError:
+        parent = os.path.dirname(db_path) or "."
+        raise WgplException(f"Database directory does not exist: {parent}") from None
+    except IsADirectoryError:
+        raise WgplException(f"Database path is a directory: {db_path}") from None
     except PermissionError:
-        raise WgplException(f"Permission denied to access database at {db_path}. Try running with sudo or check file permissions.")
+        raise WgplException(
+            f"Permission denied to access database at {db_path}. "
+            "Try running with sudo or check file permissions."
+        ) from None
         
     # INVARIANT FIX: Always enforce 0o600, even if the file pre-existed.
     try:
@@ -46,12 +73,16 @@ def _create_connection() -> sqlite3.Connection:
             
     try:
         conn = sqlite3.connect(db_path)
-    except sqlite3.OperationalError as e:
-        raise WgplException(f"Failed to connect to database at {db_path}: {e}")
+    except sqlite3.Error as e:
+        raise WgplException(f"Failed to connect to database at {db_path}: {e}") from e
     # PRAGMAs for safety and performance
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+    except sqlite3.Error as e:
+        conn.close()
+        raise WgplException(f"Failed to connect to database at {db_path}: {e}") from e
     
     # We want dictionary-like rows
     conn.row_factory = sqlite3.Row
@@ -105,51 +136,51 @@ def init_db(path: str | None = None) -> None:
     db_path = get_db_path()
     
     with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS interfaces (
-                name         TEXT PRIMARY KEY,
-                endpoint     TEXT NOT NULL,
-                port         INTEGER NOT NULL DEFAULT 51820 UNIQUE,
-                public_key   TEXT NOT NULL,
-                address_pool TEXT NOT NULL UNIQUE,
-                dns          TEXT,
-                desc         TEXT,
-                mtu          INTEGER,
-                keepalive    INTEGER
-            );
-        """)
-        
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS peers (
-                id           TEXT PRIMARY KEY,
-                interface    TEXT NOT NULL REFERENCES interfaces(name) ON DELETE CASCADE,
-                name         TEXT NOT NULL,
-                ip_address   TEXT NOT NULL,
-                public_key   TEXT NOT NULL,
-                private_key  TEXT NOT NULL,
-                preshared_key TEXT,
-                created_at   TEXT NOT NULL,
-                dns          TEXT,
-                deleted_at   TEXT,
-                expires_at   TEXT,
-                desc         TEXT,
-                mtu          INTEGER,
-                keepalive    INTEGER
-            );
-        """)
-        
-        conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip 
-            ON peers(interface, ip_address) 
-            WHERE deleted_at IS NULL;
-        """)
-        
-        conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name 
-            ON peers(interface, name) 
-            WHERE deleted_at IS NULL;
-        """)
-        conn.commit()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS interfaces (
+                    name         TEXT PRIMARY KEY,
+                    endpoint     TEXT NOT NULL,
+                    port         INTEGER NOT NULL DEFAULT 51820 UNIQUE,
+                    public_key   TEXT NOT NULL,
+                    address_pool TEXT NOT NULL UNIQUE,
+                    dns          TEXT,
+                    desc         TEXT,
+                    mtu          INTEGER,
+                    keepalive    INTEGER
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS peers (
+                    id           TEXT PRIMARY KEY,
+                    interface    TEXT NOT NULL REFERENCES interfaces(name) ON DELETE CASCADE,
+                    name         TEXT NOT NULL,
+                    ip_address   TEXT NOT NULL,
+                    public_key   TEXT NOT NULL,
+                    private_key  TEXT NOT NULL,
+                    preshared_key TEXT,
+                    created_at   TEXT NOT NULL,
+                    dns          TEXT,
+                    deleted_at   TEXT,
+                    expires_at   TEXT,
+                    desc         TEXT,
+                    mtu          INTEGER,
+                    keepalive    INTEGER
+                );
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip
+                ON peers(interface, ip_address)
+                WHERE deleted_at IS NULL;
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name
+                ON peers(interface, name)
+                WHERE deleted_at IS NULL;
+            """)
+            conn.commit()
+        except sqlite3.Error as e:
+            raise WgplException(f"Failed to initialize database at {db_path}: {e}") from e
 
     if os.path.exists(db_path):
         os.chmod(db_path, 0o600)
@@ -187,13 +218,13 @@ def add_interface(
 def get_interface(name: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
     """Retrieves an interface by its name."""
     with _ensure_conn(conn) as c:
-        cursor = c.execute("SELECT * FROM interfaces WHERE name = ?", (name,))
+        cursor = _run_query(c, "SELECT * FROM interfaces WHERE name = ?", (name,))
         return cursor.fetchone()
 
 def list_interfaces(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
     """Lists all configured interfaces."""
     with _ensure_conn(conn) as c:
-        cursor = c.execute("SELECT * FROM interfaces ORDER BY name")
+        cursor = _run_query(c, "SELECT * FROM interfaces ORDER BY name")
         return cursor.fetchall()
 
 def remove_interface(name: str, conn: sqlite3.Connection | None = None) -> None:
@@ -302,7 +333,7 @@ def add_peer(
 def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
     """Retrieves a peer by its unique ID."""
     with _ensure_conn(conn) as c:
-        cursor = c.execute("SELECT * FROM peers WHERE id = ?", (id,))
+        cursor = _run_query(c, "SELECT * FROM peers WHERE id = ?", (id,))
         return cursor.fetchone()
 
 def find_peers_by_id_prefix(
@@ -314,7 +345,8 @@ def find_peers_by_id_prefix(
     like_pattern = f"{prefix}%"
     with _ensure_conn(conn) as c:
         if interface:
-            cursor = c.execute(
+            cursor = _run_query(
+                c,
                 """
                 SELECT * FROM peers
                 WHERE REPLACE(LOWER(id), '-', '') LIKE ?
@@ -324,7 +356,8 @@ def find_peers_by_id_prefix(
                 (like_pattern, interface),
             )
         else:
-            cursor = c.execute(
+            cursor = _run_query(
+                c,
                 """
                 SELECT * FROM peers
                 WHERE REPLACE(LOWER(id), '-', '') LIKE ?
@@ -338,9 +371,13 @@ def list_peers(interface: str | None = None, conn: sqlite3.Connection | None = N
     """Lists all peers, optionally filtered by a specific interface."""
     with _ensure_conn(conn) as c:
         if interface:
-            cursor = c.execute("SELECT * FROM peers WHERE interface = ? ORDER BY ip_address", (interface,))
+            cursor = _run_query(
+                c,
+                "SELECT * FROM peers WHERE interface = ? ORDER BY ip_address",
+                (interface,),
+            )
         else:
-            cursor = c.execute("SELECT * FROM peers ORDER BY interface, ip_address")
+            cursor = _run_query(c, "SELECT * FROM peers ORDER BY interface, ip_address")
         return cursor.fetchall()
 
 def remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:

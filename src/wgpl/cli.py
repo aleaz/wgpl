@@ -141,10 +141,19 @@ def main(
     ctx.ensure_object(dict)
     ctx.obj["json"] = output_json
     if db_path:
-        import os
         os.environ["WGPL_DB_PATH"] = db_path
-        
-    db.init_db()
+
+    try:
+        db.init_db()
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+def _exit_error(ctx: typer.Context | None, message: str, code: int = 1) -> None:
+    """Print a user-facing error and exit (JSON on stdout when --json is set)."""
+    console.print(f"[red]WGPL Error: {message}[/red]")
+    if ctx is not None and ctx.obj.get("json"):
+        print(json.dumps({"status": "error", "message": message}))
+    sys.exit(code)
 
 def _output(ctx: typer.Context, data: dict[str, Any] | list[Any]) -> None:
     """Output data as JSON to stdout if the --json flag was provided."""
@@ -162,13 +171,12 @@ def _print_hints(hints: list[str]) -> None:
         message = _HINT_MESSAGES.get(hint, hint)
         console.print(f"[yellow]Hint: {message}[/yellow]")
 
-def _validate_allowed_ips(allowed_ips: str) -> None:
+def _validate_allowed_ips(ctx: typer.Context, allowed_ips: str) -> None:
     for ip in allowed_ips.split(","):
         try:
             ipaddress.ip_network(ip.strip(), strict=False)
         except ValueError:
-            console.print(f"[red]WGPL Error: Invalid AllowedIPs format '{ip.strip()}'[/red]")
-            sys.exit(1)
+            _exit_error(ctx, f"Invalid AllowedIPs format '{ip.strip()}'")
 
 # --- Interfaces ---
 
@@ -194,11 +202,9 @@ def interface_add(
         else:
             console.print(f"[green]Added interface {name}[/green]")
     except InterfaceAlreadyExistsError:
-        console.print(f"[red]WGPL Error: Interface {name} already exists.[/red]")
-        sys.exit(1)
+        _exit_error(ctx, f"Interface {name} already exists.")
     except (WgplException, ValueError) as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @interface_app.command("remove")
 def interface_remove(
@@ -212,8 +218,7 @@ def interface_remove(
         else:
             console.print(f"[green]Removed interface {name} and all its associated peers.[/green]")
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @interface_app.command("list")
 def interface_list(ctx: typer.Context) -> None:
@@ -244,8 +249,7 @@ def interface_list(ctx: typer.Context) -> None:
                 rows,
             )
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @interface_app.command("export")
 def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name to export (e.g. wg0)")):
@@ -256,8 +260,7 @@ def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="I
         else:
             print(conf)
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @interface_app.command("update")
 def interface_update(
@@ -278,17 +281,13 @@ def interface_update(
 ):
     try:
         if clear_dns and dns is not None:
-            console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
         if clear_desc and desc is not None:
-            console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --desc and --clear-desc together.")
         if clear_mtu and mtu is not None:
-            console.print("[red]WGPL Error: Cannot use --mtu and --clear-mtu together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --mtu and --clear-mtu together.")
         if clear_keepalive and keepalive is not None:
-            console.print("[red]WGPL Error: Cannot use --keepalive and --clear-keepalive together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --keepalive and --clear-keepalive together.")
 
         result = core.update_interface(
             name,
@@ -311,8 +310,7 @@ def interface_update(
             console.print(f"[green]Updated interface {name}[/green]")
             _print_hints(_extract_hints(result))
     except (WgplException, ValueError) as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 # --- Peers ---
 
@@ -336,11 +334,9 @@ def peer_add(
             dns_note = f", DNS {result['dns']}" if result.get("dns") else ""
             console.print(f"[green]Added peer {name} ({result['ip_address']}{dns_note})[/green]")
     except PeerAlreadyExistsError as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("remove")
 def peer_remove(
@@ -357,8 +353,7 @@ def peer_remove(
         else:
             console.print(f"[green]Removed peer {peer_id}[/green]")
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("prune")
 def peer_prune(
@@ -372,8 +367,7 @@ def peer_prune(
         else:
             console.print(f"[green]Pruned {deleted} expired or soft-deleted peers from {interface}[/green]")
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("update")
 def peer_update(
@@ -393,17 +387,13 @@ def peer_update(
 ):
     try:
         if clear_dns and dns is not None:
-            console.print("[red]WGPL Error: Cannot use --dns and --clear-dns together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
         if clear_desc and desc is not None:
-            console.print("[red]WGPL Error: Cannot use --desc and --clear-desc together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --desc and --clear-desc together.")
         if clear_mtu and mtu is not None:
-            console.print("[red]WGPL Error: Cannot use --mtu and --clear-mtu together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --mtu and --clear-mtu together.")
         if clear_keepalive and keepalive is not None:
-            console.print("[red]WGPL Error: Cannot use --keepalive and --clear-keepalive together.[/red]")
-            sys.exit(1)
+            _exit_error(ctx, "Cannot use --keepalive and --clear-keepalive together.")
 
         result = core.update_peer(
             interface,
@@ -425,11 +415,9 @@ def peer_update(
             console.print(f"[green]Updated peer {peer_id}[/green]")
             _print_hints(_extract_hints(result))
     except PeerAlreadyExistsError as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
     except (WgplException, ValueError) as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("list")
 def peer_list(
@@ -487,8 +475,7 @@ def peer_list(
                 rows,
             )
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("config")
 def peer_config(
@@ -497,15 +484,14 @@ def peer_config(
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
 ):
     try:
-        _validate_allowed_ips(allowed_ips)
+        _validate_allowed_ips(ctx, allowed_ips)
         config = core.get_peer_config(peer_id, allowed_ips=allowed_ips)
         if ctx.obj.get("json"):
             _output(ctx, {"config": config})
         else:
             print(config) # print to stdout
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @peer_app.command("qr")
 def peer_qr(
@@ -515,7 +501,7 @@ def peer_qr(
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
 ):
     try:
-        _validate_allowed_ips(allowed_ips)
+        _validate_allowed_ips(ctx, allowed_ips)
         if output is not None:
             png_bytes = core.get_peer_qr_png_bytes(
                 peer_id, allowed_ips=allowed_ips
@@ -537,8 +523,7 @@ def peer_qr(
             else:
                 print(qr)
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 # --- Validate ---
 
@@ -567,8 +552,7 @@ def validate_cmd(
         if result["status"] != "ok":
             sys.exit(1)
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 # --- Database ---
 
@@ -578,8 +562,7 @@ def db_dump(ctx: typer.Context) -> None:
     try:
         core.dump_database()
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 @db_app.command("restore")
 def db_restore(
@@ -598,8 +581,7 @@ def db_restore(
         else:
             console.print("[green]Database successfully restored.[/green]")
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 # --- Apply ---
 
@@ -617,8 +599,7 @@ def apply(ctx: typer.Context, interface: str = typer.Argument(..., help="Interfa
         console.print("[blue]If you are running WGPL remotely, use `wgpl interface export <name>` instead to extract the config and pipe it via SSH.[/blue]")
         sys.exit(1)
     except WgplException as e:
-        console.print(f"[red]WGPL Error: {e}[/red]")
-        sys.exit(1)
+        _exit_error(ctx, str(e))
 
 if __name__ == "__main__":
     app()
