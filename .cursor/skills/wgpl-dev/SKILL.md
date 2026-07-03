@@ -107,3 +107,11 @@ Follow Conventional Commits. Write subjects that make sense in `git log` without
 session context. **Never** cite internal IDs (audit items, plan todos, `.cursor/plans/`
 slugs, agent checklist steps) — they are not in the repo and mean nothing later.
 See [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages).
+
+## Git (AI agents)
+
+Follow [`.cursor/rules/wgpl-git-agent.mdc`](.cursor/rules/wgpl-git-agent.mdc):
+
+- Commit only when the user explicitly asks.
+- **Never** add `Co-authored-by` trailers (rewrite with `git commit-tree` if auto-injected).
+- **Never** push to remote unless the user explicitly asks.

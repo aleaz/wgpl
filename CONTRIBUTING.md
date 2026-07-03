@@ -69,6 +69,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting. Do not include real 
 | Tool | Location | Purpose |
 |---|---|---|
 | **Cursor** | [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) | Architecture and security invariants (always apply) |
+| **Cursor** | [`.cursor/rules/wgpl-git-agent.mdc`](.cursor/rules/wgpl-git-agent.mdc) | Git for agents: no co-author trailers, no push unless asked |
 | **Cursor** | [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) | CLI workflows and pre-PR checklist |
 
 Use `.cursor/` as the single source of truth for Cursor and for human onboarding.
@@ -85,9 +86,10 @@ Do not rely on gitignored local paths (for example `.agents/`) for architecture 
 When architecture, security, or CI validation commands change, update sources in this order:
 
 1. Edit [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) — canonical source for agents and humans.
-2. Update [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) only if it mentions the changed behavior explicitly.
-3. Update this file (Validation / Architecture invariants sections) and the PR template if the human checklist changes.
-4. If you use Antigravity locally, sync [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) from step 1.
+2. Keep [`.cursor/rules/wgpl-git-agent.mdc`](.cursor/rules/wgpl-git-agent.mdc) aligned if git agent policy changes.
+3. Update [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) only if it mentions the changed behavior explicitly.
+4. Update this file (Validation / Architecture invariants sections) and the PR template if the human checklist changes.
+5. If you use Antigravity locally, sync [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) from step 1.
 
 Do not add duplicate checklists to the skill — link to this file instead.
 Do not add generic always-on Cursor rules (benchmark prompts, web-app templates); they contradict WGPL invariants.

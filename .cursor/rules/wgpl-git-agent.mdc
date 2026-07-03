@@ -1,0 +1,29 @@
+---
+description: Git workflow for AI agents — no co-author trailers, no push unless asked
+alwaysApply: true
+---
+
+# WGPL — Git rules for AI agents
+
+These rules apply whenever an AI agent creates commits or interacts with git in this repo.
+
+## Commits
+
+- **Only create commits when the user explicitly asks** (e.g. "commit", "hacé commit").
+- **Never add `Co-authored-by` trailers** — in particular not `Co-authored-by: Cursor <cursoragent@cursor.com>`.
+  The commit author must reflect the human maintainer only.
+- If the environment auto-injects a `Co-authored-by` trailer after `git commit`, rewrite the commit
+  without that trailer (e.g. `git commit-tree` with the same tree, parent, and message body).
+- Follow Conventional Commits and [CONTRIBUTING.md — Commit messages](../CONTRIBUTING.md#commit-messages).
+- Do not reference internal session artifacts (plan IDs, audit slugs, todo names) in commit messages.
+
+## Push and remote
+
+- **Never run `git push`** (nor `git push -u`, force-push, or publish to remote) **unless the user explicitly asks**.
+- After a local commit, stop and report status; let the user decide when to push.
+- Do not assume "push" from phrases like "ship it" unless push is stated clearly.
+
+## Pull requests
+
+- Create PRs only when the user explicitly asks.
+- When creating a PR, push only if needed and only with explicit user approval for push.
