@@ -63,6 +63,13 @@ venv.bak/
 *.db
 *.sqlite3
 
+# WGPL runtime artifacts (may contain private keys)
+*.sql
+*.bak.*
+*.bak
+*.pem
+*.key
+
 # Agent IDE metadata (local AG Kit / Antigravity — not versioned; do not commit)
 .agents/
 .gemini/

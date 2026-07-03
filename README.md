@@ -116,6 +116,7 @@ WGPL is designed to require zero configuration, but provides robust mechanisms t
 | Variable/Argument       | Description                                                          | Default      |
 |-------------------------|----------------------------------------------------------------------|--------------|
 | `WGPL_DB_PATH` / `--db` | Path to the local SQLite database used to store cryptographic state. | `~/.wgpl.db` |
+| `WGPL_WG_BIN`           | Path to the `wg` binary used by `apply` and `syncconf`.              | `wg` (PATH)  |
 
 *Note: WGPL will always force `0600` permissions on the database file to protect your private keys.*
 
