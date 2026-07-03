@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit events for peer create/remove/prune/reclaim and interface create/update/remove (including cascade on `--force`)
 - `interface remove --force` — required when any peers remain on the interface
 - `InterfaceHasPeersError` when removing an interface that still has peers without `--force`
-- `restore_database()` returns warning strings; CLI prints them on stderr; legacy SQL backups get `audit_events` via `init_db` after restore
+- `peer update` logs an `updated` audit event with changed field names
+- Gitleaks secret scan in CI
 - `interface update` — change endpoint, port, public key, address pool, DNS, description, MTU, or keepalive without removing peers
 - `peer update` — change name, IP, DNS override, description, MTU, or keepalive without rotating keys
 - `wgpl validate [interface]` — dry-run consistency check (active peer IPs in pool, valid DNS)
@@ -54,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `interface remove` fails if the interface has any peers unless `--force` is passed
 - Reclaiming an expired peer's IP or name logs `reclaimed` and hard-deletes the old row (audit preserved in `audit_events`)
 - `get_peer_status()` delegates expiration checks to `_is_peer_active()`
+- `peer update` logs an `updated` audit event with changed field names
+- `peer history` / `interface history` accept `--limit` (default 100)
 - README rewritten for upcoming 1.0 release
 - Strict layer boundaries: CLI reads go through `core` (`list_interfaces`, `list_peers`, `ensure_database`); no direct `db` imports in `cli.py`
 - Peer lifecycle SSOT in `core`: `get_peer_status`, `get_effective_dns`; expired peers release IPs for allocation

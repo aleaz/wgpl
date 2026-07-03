@@ -46,12 +46,14 @@ def _parse_duration(duration: str) -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc) + delta
 
 
-def _is_peer_active(peer: sqlite3.Row) -> bool:
+def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
     """Returns True if the peer is not soft-deleted and not expired."""
-    if peer["deleted_at"] is not None:
+    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
+    if deleted_at is not None:
         return False
-    if peer["expires_at"] is not None:
-        expires_at = datetime.datetime.fromisoformat(peer["expires_at"])
+    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
+    if expires_at_str is not None:
+        expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
         if expires_at <= datetime.datetime.now(datetime.timezone.utc):
             return False
     return True
@@ -62,15 +64,8 @@ def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
     deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
     if deleted_at is not None:
         return "Deleted"
-    if isinstance(peer, sqlite3.Row):
-        if not _is_peer_active(peer):
-            return "Expired"
-    else:
-        expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
-        if expires_at_str is not None:
-            expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
-            if expires_at <= datetime.datetime.now(datetime.timezone.utc):
-                return "Expired"
+    if not _is_peer_active(peer):
+        return "Expired"
     return "Active"
 
 
@@ -133,7 +128,12 @@ def audit_event_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def list_peer_audit_history(peer_ref: str, interface: str | None = None) -> list[dict[str, Any]]:
+def list_peer_audit_history(
+    peer_ref: str,
+    interface: str | None = None,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
     """Return audit events for a peer (full UUID or unique prefix)."""
     try:
         canonical_id = resolve_peer_ref(peer_ref, interface, active_only=False)
@@ -145,15 +145,17 @@ def list_peer_audit_history(peer_ref: str, interface: str | None = None) -> list
     rows = db.list_audit_events(
         entity_type=db.AuditEntityType.PEER,
         entity_id=canonical_id,
+        limit=limit,
     )
     return [audit_event_to_dict(row) for row in rows]
 
 
-def list_interface_audit_history(name: str) -> list[dict[str, Any]]:
+def list_interface_audit_history(name: str, *, limit: int = 100) -> list[dict[str, Any]]:
     """Return audit events for an interface (including after it was removed)."""
     rows = db.list_audit_events(
         entity_type=db.AuditEntityType.INTERFACE,
         entity_id=name,
+        limit=limit,
     )
     return [audit_event_to_dict(row) for row in rows]
 
@@ -985,6 +987,20 @@ def update_peer(
     elif keepalive is not None:
         normalized_keepalive = keepalive
 
+    changed_fields: list[str] = []
+    if name is not None:
+        changed_fields.append("name")
+    if ip_address is not None:
+        changed_fields.append("ip_address")
+    if dns is not None or clear_dns:
+        changed_fields.append("dns")
+    if desc is not None or clear_desc:
+        changed_fields.append("desc")
+    if mtu is not None or clear_mtu:
+        changed_fields.append("mtu")
+    if keepalive is not None or clear_keepalive:
+        changed_fields.append("keepalive")
+
     with db.transaction() as conn:
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
@@ -1032,6 +1048,14 @@ def update_peer(
         updated = db.get_peer(canonical_id, conn=conn)
         if not updated:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
+
+        if changed_fields:
+            _audit_peer_from_row(
+                updated,
+                db.AuditEventType.UPDATED,
+                conn,
+                metadata={"fields": changed_fields},
+            )
 
         iface = db.get_interface(interface_name, conn=conn)
         if not iface:

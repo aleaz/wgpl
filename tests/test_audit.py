@@ -10,6 +10,7 @@ from wgpl.exceptions import (
     InterfaceHasPeersError,
     IpAlreadyInUseError,
     PeerAlreadyExistsError,
+    WgplException,
 )
 
 
@@ -149,3 +150,59 @@ def test_dump_includes_audit_events(wg0_interface: str) -> None:
     core.add_peer(wg0_interface, "phone")
     output = "".join(core.dump_database_lines())
     assert "audit_events" in output
+
+
+def test_peer_update_logs_updated_event(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    core.update_peer(wg0_interface, peer_id, name="renamed")
+
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
+    assert len(updated) == 1
+    assert updated[0]["metadata"] == {"fields": ["name"]}
+
+
+def test_interface_update_logs_updated_event(wg0_interface: str) -> None:
+    core.update_interface(wg0_interface, endpoint="vpn2.example.com")
+
+    events = core.list_interface_audit_history(wg0_interface)
+    updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
+    assert len(updated) == 1
+    assert updated[0]["metadata"] == {"fields": ["endpoint"]}
+
+
+def test_audit_metadata_rejects_private_key(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    with pytest.raises(WgplException, match="secret field"):
+        with db.transaction() as conn:
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=str(peer["id"]),
+                event_type=AuditEventType.UPDATED,
+                interface=wg0_interface,
+                metadata={"private_key": "leak"},
+                conn=conn,
+            )
+
+
+def test_list_peer_audit_history_limit(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.transaction() as conn:
+        for _ in range(10):
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=peer_id,
+                event_type=AuditEventType.UPDATED,
+                interface=wg0_interface,
+                metadata={"fields": ["name"]},
+                conn=conn,
+            )
+
+    all_events = core.list_peer_audit_history(peer_id, wg0_interface, limit=100)
+    limited = core.list_peer_audit_history(peer_id, wg0_interface, limit=5)
+    assert len(all_events) == 11  # created + 10 updated
+    assert len(limited) == 5

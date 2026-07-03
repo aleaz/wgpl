@@ -148,3 +148,80 @@ def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
     payload = json.loads(result.stdout)
     assert payload == {"status": "success", "interface": "wg0", "deleted_count": 1}
     assert db.get_peer(peer["id"]) is None
+
+
+def test_cli_interface_remove_blocked_when_peers_exist(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    core.add_peer("wg0", "phone")
+
+    result = runner.invoke(app, ["interface", "remove", "wg0"])
+
+    assert result.exit_code == 1
+    assert "WGPL Error" in result.stderr
+    assert "peer" in result.stderr.lower()
+    assert db.get_interface("wg0") is not None
+
+
+def test_cli_interface_remove_force_with_peers(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    core.add_peer("wg0", "phone")
+
+    result = runner.invoke(app, ["interface", "remove", "wg0", "--force"])
+
+    assert result.exit_code == 0
+    assert db.get_interface("wg0") is None
+
+
+def test_cli_peer_history_json(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+
+    result = runner.invoke(
+        app, ["--json", "peer", "history", "wg0", str(peer["id"])]
+    )
+
+    assert result.exit_code == 0
+    events = json.loads(result.stdout)
+    assert isinstance(events, list)
+    assert len(events) >= 1
+    assert events[0]["event_type"] == "created"
+
+
+def test_cli_interface_history_json(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+
+    result = runner.invoke(app, ["--json", "interface", "history", "wg0"])
+
+    assert result.exit_code == 0
+    events = json.loads(result.stdout)
+    assert isinstance(events, list)
+    assert len(events) >= 1
+    assert events[0]["event_type"] == "created"
+
+
+def test_cli_peer_history_respects_limit(wgpl_db: str) -> None:
+    from wgpl.db import AuditEntityType, AuditEventType
+
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+    peer_id = str(peer["id"])
+
+    with db.transaction() as conn:
+        for _ in range(5):
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=peer_id,
+                event_type=AuditEventType.UPDATED,
+                interface="wg0",
+                name="phone",
+                metadata={"fields": ["name"]},
+                conn=conn,
+            )
+
+    result = runner.invoke(
+        app, ["--json", "peer", "history", "wg0", peer_id, "--limit", "3"]
+    )
+
+    assert result.exit_code == 0
+    events = json.loads(result.stdout)
+    assert len(events) == 3

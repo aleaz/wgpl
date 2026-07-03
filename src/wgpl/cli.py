@@ -320,9 +320,10 @@ def peer_add(
 def interface_history(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
 ):
     try:
-        events = core.list_interface_audit_history(name)
+        events = core.list_interface_audit_history(name, limit=limit)
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:
@@ -355,9 +356,10 @@ def peer_history(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+    limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
 ):
     try:
-        events = core.list_peer_audit_history(peer_id, interface)
+        events = core.list_peer_audit_history(peer_id, interface, limit=limit)
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:

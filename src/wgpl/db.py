@@ -202,7 +202,9 @@ def init_db(path: str | None = None) -> None:
                     entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
                     entity_id    TEXT NOT NULL,
                     interface    TEXT,
-                    event_type   TEXT NOT NULL,
+                    event_type   TEXT NOT NULL CHECK(event_type IN (
+                        'created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed'
+                    )),
                     occurred_at  TEXT NOT NULL,
                     name         TEXT,
                     ip_address   TEXT,

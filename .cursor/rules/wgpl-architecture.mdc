@@ -31,6 +31,8 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 - `audit_events` is append-only; NEVER store `private_key` or `preshared_key` in audit rows or metadata.
 - Append audit events in the SAME `db.transaction()` as the operational mutation (before destructive deletes).
 - Event types: `created`, `updated`, `removed`, `reclaimed`, `pruned`, `cascade_removed` (use `db.AuditEventType` / `AuditEntityType`).
+- `peer update` and `interface update` append `updated` events with `metadata.fields` listing changed columns.
+- `list_audit_events` / history commands default to `limit=100`; expose `--limit` in CLI.
 
 ## Interface remove guard
 

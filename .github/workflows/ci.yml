@@ -34,5 +34,10 @@ jobs:
     - name: Run Tests
       run: uv run pytest
 
+    - name: Run Gitleaks (secret scan)
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build package
       run: uv build

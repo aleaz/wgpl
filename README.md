@@ -162,7 +162,7 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 - **`update <NAME> [options]`**: Modifies the endpoint, pool, DNS or port.
 - **`export <NAME>`**: Prints `[Peer]` block configurations compatible with the WireGuard server for remote sync.
 - **`remove <NAME> [--force]`**: Deletes the interface. Fails if any peers remain unless `--force` is passed (deletes interface and all peers; audited).
-- **`history <NAME>`**: Shows append-only audit events for the interface (including after removal).
+- **`history <NAME> [--limit]`**: Shows append-only audit events for the interface (default limit: 100).
 
 #### Peer Management (`wgpl peer`)
 
@@ -173,7 +173,7 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 - **`update <INTERFACE> <ID> [options]`**: Allows changing the name, forcing a specific IP or changing DNS override.
 - **`remove <INTERFACE> <ID>`**: Soft-deletes a peer by default; `--hard` for physical deletion.
 - **`prune <INTERFACE>`**: Permanently removes expired and soft-deleted peers.
-- **`history <INTERFACE> <ID>`**: Shows append-only audit events for a peer (including after reclaim or hard-delete).
+- **`history <INTERFACE> <ID> [--limit]`**: Shows append-only audit events for a peer (default limit: 100).
 
 #### General & Database Commands
 
