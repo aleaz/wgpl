@@ -1,5 +1,7 @@
 import datetime
+import subprocess
 import uuid
+from unittest.mock import patch
 
 import pytest
 
@@ -10,11 +12,13 @@ from wgpl.exceptions import (
     InvalidDnsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
+    NoAvailableIpsError,
     NoUpdateFieldsError,
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
     PeersOutsidePoolError,
+    WireguardConfigError,
 )
 
 
@@ -500,3 +504,23 @@ def test_validate_state_interface_dns_issue_peer_is_none(wg0_interface: str) -> 
     assert isinstance(issues, list)
     assert len(issues) >= 1
     assert issues[0]["peer"] is None
+
+
+def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
+    pubkey = wireguard.generate_keypair().public_key
+    db.add_interface("wg_tiny", "vpn.example.com", pubkey, "10.0.0.0/30", 51825)
+    core.add_peer("wg_tiny", "only")
+
+    with db.transaction() as conn:
+        with pytest.raises(NoAvailableIpsError, match="No available IPs"):
+            allocate_peer_ip("wg_tiny", conn)
+
+
+@patch("wgpl.wireguard.subprocess.run")
+def test_run_wg_command_raises_wireguard_config_error(mock_run: object) -> None:
+    mock_run.side_effect = subprocess.CalledProcessError(
+        1, ["wg", "syncconf"], stderr="invalid configuration"
+    )
+
+    with pytest.raises(WireguardConfigError, match="wg command failed"):
+        wireguard.run_wg_command("syncconf", "wg0", "/tmp/fake.conf")

@@ -44,9 +44,9 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 
 ## Validation (same as CI)
 
-- `uv run ruff check src/`
+- `uv run ruff check src/ tests/`
 - `uv run mypy src/`
-- `uv run pytest` (once `tests/` exists).
+- `uv run pytest`
 
 ## Documentation language
 
