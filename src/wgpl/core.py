@@ -4,7 +4,6 @@ import datetime
 import qrcode
 import io
 import sqlite3
-import sys
 import os
 import shutil
 from collections.abc import Iterator, Mapping
@@ -15,6 +14,7 @@ from .db import UNSET, UnsetType
 from . import wireguard
 from .exceptions import (
     AmbiguousPeerIdError,
+    InterfaceHasPeersError,
     InterfaceNotFoundError,
     InvalidDnsError,
     InvalidPeerIpError,
@@ -62,13 +62,100 @@ def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
     deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
     if deleted_at is not None:
         return "Deleted"
-
-    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
-    if expires_at_str is not None:
-        expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
-        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
+    if isinstance(peer, sqlite3.Row):
+        if not _is_peer_active(peer):
             return "Expired"
+    else:
+        expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
+        if expires_at_str is not None:
+            expires_at = datetime.datetime.fromisoformat(str(expires_at_str))
+            if expires_at <= datetime.datetime.now(datetime.timezone.utc):
+                return "Expired"
     return "Active"
+
+
+def _audit_peer_from_row(
+    peer: sqlite3.Row,
+    event_type: db.AuditEventType,
+    conn: sqlite3.Connection,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    db.append_audit_event(
+        entity_type=db.AuditEntityType.PEER,
+        entity_id=str(peer["id"]),
+        event_type=event_type,
+        interface=str(peer["interface"]),
+        name=str(peer["name"]),
+        ip_address=str(peer["ip_address"]),
+        public_key=str(peer["public_key"]),
+        metadata=metadata,
+        conn=conn,
+    )
+
+
+def _audit_interface_event(
+    name: str,
+    event_type: db.AuditEventType,
+    conn: sqlite3.Connection,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    db.append_audit_event(
+        entity_type=db.AuditEntityType.INTERFACE,
+        entity_id=name,
+        event_type=event_type,
+        interface=name,
+        name=name,
+        metadata=metadata,
+        conn=conn,
+    )
+
+
+def audit_event_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """Return a JSON-safe audit event record."""
+    import json as json_module
+
+    metadata: Any = row["metadata"]
+    if isinstance(metadata, str) and metadata:
+        metadata = json_module.loads(metadata)
+    return {
+        "id": row["id"],
+        "entity_type": row["entity_type"],
+        "entity_id": row["entity_id"],
+        "interface": row["interface"],
+        "event_type": row["event_type"],
+        "occurred_at": row["occurred_at"],
+        "name": row["name"],
+        "ip_address": row["ip_address"],
+        "public_key": row["public_key"],
+        "metadata": metadata,
+    }
+
+
+def list_peer_audit_history(peer_ref: str, interface: str | None = None) -> list[dict[str, Any]]:
+    """Return audit events for a peer (full UUID or unique prefix)."""
+    try:
+        canonical_id = resolve_peer_ref(peer_ref, interface, active_only=False)
+    except PeerNotFoundError:
+        normalized = _normalize_peer_ref(peer_ref)
+        if len(normalized) != _PEER_ID_HEX_LEN:
+            raise
+        canonical_id = str(uuid.UUID(hex=normalized))
+    rows = db.list_audit_events(
+        entity_type=db.AuditEntityType.PEER,
+        entity_id=canonical_id,
+    )
+    return [audit_event_to_dict(row) for row in rows]
+
+
+def list_interface_audit_history(name: str) -> list[dict[str, Any]]:
+    """Return audit events for an interface (including after it was removed)."""
+    rows = db.list_audit_events(
+        entity_type=db.AuditEntityType.INTERFACE,
+        entity_id=name,
+    )
+    return [audit_event_to_dict(row) for row in rows]
 
 
 def get_effective_dns(peer_dns: str | None, iface_dns: str | None) -> str | None:
@@ -174,9 +261,25 @@ def add_interface(
     if keepalive is not None and not (0 <= keepalive <= 65535):
         raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
-    db.add_interface(
-        name, endpoint, public_key, normalized_pool, port, dns=normalized_dns, desc=desc, mtu=mtu, keepalive=keepalive
-    )
+    with db.transaction() as conn:
+        db.add_interface(
+            name,
+            endpoint,
+            public_key,
+            normalized_pool,
+            port,
+            dns=normalized_dns,
+            desc=desc,
+            mtu=mtu,
+            keepalive=keepalive,
+            conn=conn,
+        )
+        _audit_interface_event(
+            name,
+            db.AuditEventType.CREATED,
+            conn,
+            metadata={"port": port, "address_pool": normalized_pool},
+        )
 
     result: dict[str, str | int | None] = {
         "name": name,
@@ -196,9 +299,34 @@ def add_interface(
     return result
 
 
-def remove_interface(name: str) -> None:
-    """Remove an interface and all associated peers from the database."""
-    db.remove_interface(name)
+def remove_interface(name: str, *, force: bool = False) -> None:
+    """Remove an interface and optionally all associated peers (requires --force if peers exist)."""
+    with db.transaction() as conn:
+        iface = db.get_interface(name, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface {name} not found")
+
+        peers = db.list_peers(name, conn=conn)
+        if peers and not force:
+            raise InterfaceHasPeersError(
+                f"Interface {name} has {len(peers)} peer(s). "
+                "Remove or prune peers first, or use --force."
+            )
+
+        for peer in peers:
+            _audit_peer_from_row(
+                peer,
+                db.AuditEventType.CASCADE_REMOVED,
+                conn,
+                metadata={"trigger": "interface_removed", "interface": name},
+            )
+        _audit_interface_event(
+            name,
+            db.AuditEventType.REMOVED,
+            conn,
+            metadata={"peer_count": len(peers), "forced": bool(peers and force)},
+        )
+        db.remove_interface(name, conn=conn)
 
 
 def ensure_database() -> None:
@@ -316,24 +444,36 @@ def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ip
         raise IpAlreadyInUseError(f"IP {ip} is already assigned in this interface")
 
 
-def _release_inactive_peer_slots(
+def _reclaim_inactive_peer_slots(
     interface_name: str,
     conn: sqlite3.Connection,
     *,
     ip: str | None = None,
     name: str | None = None,
+    replaced_by_peer_id: str,
 ) -> None:
-    """Soft-delete inactive peers blocking partial unique indexes."""
+    """Hard-delete inactive peers blocking partial unique indexes; log reclaimed events."""
     if ip is None and name is None:
         return
     for peer in db.list_peers(interface_name, conn=conn):
         if _is_peer_active(peer) or peer["deleted_at"] is not None:
             continue
-        blocks = (ip is not None and peer["ip_address"] == ip) or (
-            name is not None and peer["name"] == name
+        blocks_ip = ip is not None and peer["ip_address"] == ip
+        blocks_name = name is not None and peer["name"] == name
+        if not blocks_ip and not blocks_name:
+            continue
+        slots: list[str] = []
+        if blocks_ip:
+            slots.append("ip")
+        if blocks_name:
+            slots.append("name")
+        _audit_peer_from_row(
+            peer,
+            db.AuditEventType.RECLAIMED,
+            conn,
+            metadata={"replaced_by_peer_id": replaced_by_peer_id, "slot": slots},
         )
-        if blocks:
-            db.remove_peer(peer["id"], conn=conn)
+        db.hard_remove_peer(peer["id"], conn=conn)
 
 
 def allocate_peer_ip(
@@ -377,14 +517,19 @@ def add_peer(
 
     with db.transaction() as conn:
         allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
-        _release_inactive_peer_slots(
-            interface_name, conn, ip=allocated_ip, name=peer_name
-        )
 
         keypair = wireguard.generate_keypair()
         preshared_key = wireguard.generate_preshared_key()
 
         peer_id = str(uuid.uuid4())
+        _reclaim_inactive_peer_slots(
+            interface_name,
+            conn,
+            ip=allocated_ip,
+            name=peer_name,
+            replaced_by_peer_id=peer_id,
+        )
+
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         expires_at = None
@@ -407,6 +552,18 @@ def add_peer(
             keepalive=keepalive,
             conn=conn,
         )
+
+        created_peer = db.get_peer(peer_id, conn=conn)
+        if created_peer:
+            meta: dict[str, Any] = {}
+            if expires_at:
+                meta["expires_at"] = expires_at
+            _audit_peer_from_row(
+                created_peer,
+                db.AuditEventType.CREATED,
+                conn,
+                metadata=meta or None,
+            )
 
         iface = db.get_interface(interface_name, conn=conn)
         if not iface:
@@ -438,8 +595,15 @@ def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False)
             )
 
         if hard:
+            _audit_peer_from_row(
+                peer,
+                db.AuditEventType.REMOVED,
+                conn,
+                metadata={"hard": True},
+            )
             db.hard_remove_peer(canonical_peer_id, conn=conn)
         else:
+            _audit_peer_from_row(peer, db.AuditEventType.REMOVED, conn)
             db.remove_peer(canonical_peer_id, conn=conn)
 
 
@@ -451,12 +615,22 @@ def prune_peers(interface_name: str) -> int:
             raise InterfaceNotFoundError(f"Interface {interface_name} not found")
 
         to_remove = [
-            peer["id"]
+            peer
             for peer in db.list_peers(interface_name, conn=conn)
             if not _is_peer_active(peer)
         ]
-        for peer_id in to_remove:
-            db.hard_remove_peer(peer_id, conn=conn)
+        for peer in to_remove:
+            was_expired = get_peer_status(peer) == "Expired"
+            _audit_peer_from_row(
+                peer,
+                db.AuditEventType.PRUNED,
+                conn,
+                metadata={
+                    "was_expired": was_expired,
+                    "was_soft_deleted": not was_expired,
+                },
+            )
+            db.hard_remove_peer(peer["id"], conn=conn)
         return len(to_remove)
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
@@ -685,6 +859,24 @@ def update_interface(
     elif keepalive is not None:
         normalized_keepalive = keepalive
 
+    changed_fields: list[str] = []
+    if endpoint is not None:
+        changed_fields.append("endpoint")
+    if port is not None:
+        changed_fields.append("port")
+    if public_key is not None:
+        changed_fields.append("public_key")
+    if address_pool is not None:
+        changed_fields.append("address_pool")
+    if dns is not None or clear_dns:
+        changed_fields.append("dns")
+    if desc is not None or clear_desc:
+        changed_fields.append("desc")
+    if mtu is not None or clear_mtu:
+        changed_fields.append("mtu")
+    if keepalive is not None or clear_keepalive:
+        changed_fields.append("keepalive")
+
     with db.transaction() as conn:
         iface = db.get_interface(name, conn=conn)
         if not iface:
@@ -705,6 +897,14 @@ def update_interface(
             keepalive=normalized_keepalive,
             conn=conn,
         )
+
+        if changed_fields:
+            _audit_interface_event(
+                name,
+                db.AuditEventType.UPDATED,
+                conn,
+                metadata={"fields": changed_fields},
+            )
 
         updated = db.get_interface(name, conn=conn)
         if not updated:
@@ -807,8 +1007,12 @@ def update_peer(
 
         slot_name = name
         if slot_ip is not None or slot_name is not None:
-            _release_inactive_peer_slots(
-                interface_name, conn, ip=slot_ip, name=slot_name
+            _reclaim_inactive_peer_slots(
+                interface_name,
+                conn,
+                ip=slot_ip,
+                name=slot_name,
+                replaced_by_peer_id=canonical_id,
             )
 
         try:
@@ -946,16 +1150,20 @@ def _validate_restored_schema(path: str) -> None:
 
 
 
-def restore_database(sql_script: str) -> None:
+def restore_database(sql_script: str) -> list[str]:
     """Safely restores the database from a SQL script.
+
+    Returns warning messages (e.g. WAL checkpoint). CLI prints them on stderr.
 
     Guarantees:
     - Original DB is not modified until the new one is fully validated.
     - Backup file (if created) has 0o600 permissions.
     - All temporary files are cleaned up on any failure path.
     - Restored schema is validated before replacing the live DB.
+    - Missing tables (e.g. audit_events) are created on the tmp DB before swap.
     - Old backups are rotated (keeps last 3).
     """
+    warnings: list[str] = []
     db_path = db.get_db_path()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_path = f"{db_path}.bak.{timestamp}"
@@ -981,7 +1189,17 @@ def restore_database(sql_script: str) -> None:
         raise
     except Exception as e:
         _cleanup_tmp_files(tmp_path)
-        raise WgplException(f"Failed to restore database from script: {e}")
+        raise WgplException(f"Failed to restore database from script: {e}") from e
+
+    saved_db_path = os.environ.get("WGPL_DB_PATH")
+    try:
+        os.environ["WGPL_DB_PATH"] = tmp_path
+        db.init_db()
+    finally:
+        if saved_db_path is None:
+            os.environ.pop("WGPL_DB_PATH", None)
+        else:
+            os.environ["WGPL_DB_PATH"] = saved_db_path
 
     # 4. Backup current db with WAL checkpoint for consistency
     try:
@@ -992,9 +1210,9 @@ def restore_database(sql_script: str) -> None:
                     "PRAGMA wal_checkpoint(TRUNCATE)"
                 ).fetchone()
                 if result and result[0] != 0:
-                    sys.stderr.write(
+                    warnings.append(
                         "Warning: WAL checkpoint was blocked. "
-                        "Backup may not include uncommitted WAL data.\n"
+                        "Backup may not include uncommitted WAL data."
                     )
             finally:
                 checkpoint_conn.close()
@@ -1022,3 +1240,4 @@ def restore_database(sql_script: str) -> None:
         _cleanup_tmp_files(tmp_path)
         raise
 
+    return warnings

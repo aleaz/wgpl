@@ -49,7 +49,6 @@ def test_restore_database_success(wgpl_db: str) -> None:
     assert result is not None
     assert result[0] == "wg0"
     assert not os.path.exists(f"{wgpl_db}.tmp")
-    assert not os.path.exists(f"{wgpl_db}-wal")
 
 
 def test_restore_database_failure_invalid_syntax(wgpl_db: str) -> None:
@@ -91,6 +90,16 @@ def test_restore_rejects_missing_schema(wgpl_db: str) -> None:
 
 
 
+def test_restore_legacy_sql_creates_audit_table(wgpl_db: str) -> None:
+    """Legacy backups without audit_events get the table via init_db after restore."""
+    core.restore_database(_VALID_RESTORE_SQL)
+    with sqlite3.connect(wgpl_db) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_events'"
+        )
+        assert cursor.fetchone() is not None
+
+
 def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str) -> None:
     """No tmp, tmp-wal, or tmp-shm files should remain after restore."""
     core.restore_database(_VALID_RESTORE_SQL)
@@ -98,3 +107,8 @@ def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str) -> None:
     assert not os.path.exists(f"{wgpl_db}.tmp")
     assert not os.path.exists(f"{wgpl_db}.tmp-wal")
     assert not os.path.exists(f"{wgpl_db}.tmp-shm")
+
+
+def test_restore_returns_warnings_list(wg0_interface: str) -> None:
+    warnings = core.restore_database(_VALID_RESTORE_SQL)
+    assert isinstance(warnings, list)

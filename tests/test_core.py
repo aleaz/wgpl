@@ -557,7 +557,7 @@ def test_add_interface_registers_row(wgpl_db: str) -> None:
 
 def test_remove_interface_deletes_peers(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "p")
-    core.remove_interface(wg0_interface)
+    core.remove_interface(wg0_interface, force=True)
 
     assert db.get_interface(wg0_interface) is None
     assert peer["id"] is not None

@@ -30,6 +30,10 @@ class InterfaceConflictError(WgplException):
     """Raised when an interface port or address pool conflicts with an existing interface."""
     pass
 
+class InterfaceHasPeersError(WgplException):
+    """Raised when removing an interface that still has peers without --force."""
+    pass
+
 class PeerNotFoundError(WgplException):
     """Raised when a peer is not found in the database."""
     pass

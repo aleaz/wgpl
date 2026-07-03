@@ -82,7 +82,7 @@ def test_json_interface_remove(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "remove", "wg0"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"status": "success", "interface": "wg0"}
+    assert json.loads(result.stdout) == {"status": "success", "interface": "wg0", "force": False}
 
 
 def test_json_interface_export(wgpl_db: str, iface_pubkey: str) -> None:

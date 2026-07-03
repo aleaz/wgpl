@@ -48,6 +48,11 @@ wgpl peer qr <PEER_ID> -o phone.png
 wgpl peer remove wg0 <PEER_ID>
 wgpl peer remove wg0 <PEER_ID> --hard
 wgpl peer prune wg0
+wgpl peer history wg0 <PEER_ID>
+
+# 3c. Remove interface (blocked if peers remain unless --force)
+wgpl interface remove wg0 --force
+wgpl interface history wg0
 
 # 4. Sync with WireGuard (required after remove/prune to update the kernel)
 #   Remote (disconnected):
@@ -73,8 +78,9 @@ wgpl db restore < backup.sql
 - Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
   use `peer remove --hard` to physically delete a soft-deleted peer.
 - A peer occupies an IP and name in the pool only while active (not soft-deleted and not expired).
-  Inactive peers release IP and name on `peer add` / `peer update`; `peer prune` hard-deletes
-  all inactive rows using `_is_peer_active` in core.
+  Reclaiming an expired peer's slot logs `reclaimed` and hard-deletes the old row; history remains in `audit_events`.
+  `peer prune` hard-deletes inactive rows with a `pruned` audit event each.
+- `interface remove` fails if any peer rows exist; use `peer prune` / `peer remove` first, or `--force` (audited cascade).
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 
 ## Code map

@@ -180,14 +180,22 @@ def interface_add(
 @interface_app.command("remove")
 def interface_remove(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Interface name (e.g. wg0)")
+    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Delete the interface and all peers (required when peers remain)",
+    ),
 ):
     try:
-        core.remove_interface(name)
+        core.remove_interface(name, force=force)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "interface": name})
+            _output(ctx, {"status": "success", "interface": name, "force": force})
         else:
-            console.print(f"[green]Removed interface {name} and all its associated peers.[/green]")
+            if force:
+                console.print(f"[green]Removed interface {name} and all its associated peers.[/green]")
+            else:
+                console.print(f"[green]Removed interface {name}.[/green]")
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -305,6 +313,77 @@ def peer_add(
             console.print(f"[green]Added peer {name} ({result['ip_address']}{dns_note})[/green]")
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+@interface_app.command("history")
+def interface_history(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+):
+    try:
+        events = core.list_interface_audit_history(name)
+        if ctx.obj.get("json"):
+            _output(ctx, events)
+        else:
+            if not events:
+                console.print(f"[yellow]No audit history for interface {name}.[/yellow]")
+                return
+            rows = [
+                [
+                    _styled(str(e["occurred_at"]), _STYLE_META),
+                    _styled(str(e["event_type"]), _STYLE_ID),
+                    _styled(str(e.get("metadata") or ""), ""),
+                ]
+                for e in events
+            ]
+            _print_list_table(
+                f"Audit history: {name}",
+                "events",
+                [
+                    ("When", {"overflow": "fold"}),
+                    ("Event", {"overflow": "fold"}),
+                    ("Metadata", {"overflow": "fold"}),
+                ],
+                rows,
+            )
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+@peer_app.command("history")
+def peer_history(
+    ctx: typer.Context,
+    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+):
+    try:
+        events = core.list_peer_audit_history(peer_id, interface)
+        if ctx.obj.get("json"):
+            _output(ctx, events)
+        else:
+            if not events:
+                console.print(f"[yellow]No audit history for peer {peer_id}.[/yellow]")
+                return
+            rows = [
+                [
+                    _styled(str(e["occurred_at"]), _STYLE_META),
+                    _styled(str(e["event_type"]), _STYLE_ID),
+                    _styled(str(e.get("name") or ""), _STYLE_VALUE),
+                    _styled(str(e.get("ip_address") or ""), _STYLE_META),
+                ]
+                for e in events
+            ]
+            _print_list_table(
+                f"Audit history: {peer_id}",
+                "events",
+                [
+                    ("When", {"overflow": "fold"}),
+                    ("Event", {"overflow": "fold"}),
+                    ("Name", {"overflow": "fold"}),
+                    ("IP", {"overflow": "fold"}),
+                ],
+                rows,
+            )
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -543,9 +622,11 @@ def db_restore(
     """Restore the database from a logical SQL script (destructive)."""
     try:
         sql_script = file.read()
-        core.restore_database(sql_script)
+        warnings = core.restore_database(sql_script)
+        for warning in warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "action": "restore"})
+            _output(ctx, {"status": "success", "action": "restore", "warnings": warnings})
         else:
             console.print("[green]Database successfully restored.[/green]")
     except WgplException as e:

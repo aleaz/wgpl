@@ -161,7 +161,8 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 - **`list`**: Shows current interfaces.
 - **`update <NAME> [options]`**: Modifies the endpoint, pool, DNS or port.
 - **`export <NAME>`**: Prints `[Peer]` block configurations compatible with the WireGuard server for remote sync.
-- **`remove <NAME>`**: Deletes the interface and **all** its peers in cascade.
+- **`remove <NAME> [--force]`**: Deletes the interface. Fails if any peers remain unless `--force` is passed (deletes interface and all peers; audited).
+- **`history <NAME>`**: Shows append-only audit events for the interface (including after removal).
 
 #### Peer Management (`wgpl peer`)
 
@@ -170,7 +171,9 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 - **`config <ID>`**: Shows the client configuration ready to be used.
 - **`qr <ID> [-o <PNG_PATH>]`**: Generates the client's QR code.
 - **`update <INTERFACE> <ID> [options]`**: Allows changing the name, forcing a specific IP or changing DNS override.
-- **`remove <INTERFACE> <ID>`**: Permanently deletes a peer.
+- **`remove <INTERFACE> <ID>`**: Soft-deletes a peer by default; `--hard` for physical deletion.
+- **`prune <INTERFACE>`**: Permanently removes expired and soft-deleted peers.
+- **`history <INTERFACE> <ID>`**: Shows append-only audit events for a peer (including after reclaim or hard-delete).
 
 #### General & Database Commands
 
@@ -194,7 +197,18 @@ All commands support the global `--json` or `-j` parameter **before** the subcom
 wgpl interface export wg0 | ssh root@my-vpn-server "wg syncconf wg0 /dev/stdin"
 ```
 
-#### C. Backup and Secure Restoration
+#### C. Removing an interface that still has peers
+
+```bash
+# Option A: clean up peers first, then remove
+wgpl peer prune wg0
+wgpl interface remove wg0
+
+# Option B: explicit destructive remove (audited)
+wgpl interface remove wg0 --force
+```
+
+#### D. Backup and Secure Restoration
 
 ```bash
 wgpl db dump > backup_2026.sql

@@ -1,0 +1,151 @@
+"""Audit log and interface remove guard tests."""
+
+import datetime
+
+import pytest
+
+from wgpl import core, db
+from wgpl.db import AuditEntityType, AuditEventType
+from wgpl.exceptions import (
+    InterfaceHasPeersError,
+    IpAlreadyInUseError,
+    PeerAlreadyExistsError,
+)
+
+
+def _count_audit(
+    *,
+    entity_type: AuditEntityType | None = None,
+    entity_id: str | None = None,
+) -> int:
+    return len(
+        db.list_audit_events(entity_type=entity_type, entity_id=entity_id, limit=1000)
+    )
+
+
+def test_add_peer_logs_created_event(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.2")
+    assert peer["id"] is not None
+    events = core.list_peer_audit_history(str(peer["id"]), wg0_interface)
+    assert len(events) == 1
+    assert events[0]["event_type"] == AuditEventType.CREATED
+    assert events[0]["metadata"] is None or "private_key" not in str(events[0]["metadata"])
+
+
+def test_remove_peer_soft_and_hard_audit(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+    core.remove_peer(wg0_interface, peer_id)
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    assert any(e["event_type"] == AuditEventType.REMOVED for e in events)
+    assert not any(e.get("metadata") == {"hard": True} for e in events)
+
+    core.remove_peer(wg0_interface, peer_id, hard=True)
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    hard_events = [e for e in events if e["event_type"] == AuditEventType.REMOVED]
+    assert any(e.get("metadata") == {"hard": True} for e in hard_events)
+
+
+def test_reclaim_expired_logs_reclaimed_and_old_row_gone(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3", expires="1h")
+    old_id = str(peer["id"])
+
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
+        conn.commit()
+
+    assert core.get_peer_status(db.get_peer(old_id)) == "Expired"
+
+    new_peer = core.add_peer(wg0_interface, "phone2", ip_address="10.0.0.3")
+    assert db.get_peer(old_id) is None
+
+    old_events = core.list_peer_audit_history(old_id, wg0_interface)
+    assert any(e["event_type"] == AuditEventType.CREATED for e in old_events)
+    reclaimed = [e for e in old_events if e["event_type"] == AuditEventType.RECLAIMED]
+    assert len(reclaimed) == 1
+    assert reclaimed[0]["metadata"]["replaced_by_peer_id"] == new_peer["id"]
+
+    new_events = core.list_peer_audit_history(str(new_peer["id"]), wg0_interface)
+    assert any(e["event_type"] == AuditEventType.CREATED for e in new_events)
+
+
+def test_add_peer_active_collision_ip(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "first", ip_address="10.0.0.4")
+    with pytest.raises(IpAlreadyInUseError):
+        core.add_peer(wg0_interface, "second", ip_address="10.0.0.4")
+
+
+def test_add_peer_active_collision_name(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "taken", ip_address="10.0.0.5")
+    with pytest.raises(PeerAlreadyExistsError):
+        core.add_peer(wg0_interface, "taken", ip_address="10.0.0.6")
+
+
+def test_prune_logs_one_event_per_peer(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    core.remove_peer(wg0_interface, str(peer["id"]))
+    before = _count_audit(entity_type=AuditEntityType.PEER, entity_id=str(peer["id"]))
+    assert core.prune_peers(wg0_interface) == 1
+    events = core.list_peer_audit_history(str(peer["id"]), wg0_interface)
+    pruned = [e for e in events if e["event_type"] == AuditEventType.PRUNED]
+    assert len(pruned) == 1
+    assert before >= 2
+
+
+def test_interface_remove_blocked_with_peers(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "phone")
+    with pytest.raises(InterfaceHasPeersError):
+        core.remove_interface(wg0_interface)
+    assert db.get_interface(wg0_interface) is not None
+
+
+def test_interface_remove_blocked_with_expired_peer_only(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone", expires="1h")
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+    with pytest.raises(InterfaceHasPeersError):
+        core.remove_interface(wg0_interface)
+
+
+def test_interface_remove_force_audit_cascade(wg0_interface: str) -> None:
+    p1 = core.add_peer(wg0_interface, "a", ip_address="10.0.0.2")
+    p2 = core.add_peer(wg0_interface, "b", ip_address="10.0.0.3")
+    core.remove_interface(wg0_interface, force=True)
+    assert db.get_interface(wg0_interface) is None
+    assert db.get_peer(p1["id"]) is None
+    assert db.get_peer(p2["id"]) is None
+
+    iface_events = core.list_interface_audit_history(wg0_interface)
+    assert any(e["event_type"] == AuditEventType.REMOVED for e in iface_events)
+
+    for pid in (str(p1["id"]), str(p2["id"])):
+        events = core.list_peer_audit_history(pid, wg0_interface)
+        assert any(e["event_type"] == AuditEventType.CASCADE_REMOVED for e in events)
+
+
+def test_interface_remove_empty_no_force(wg0_interface: str) -> None:
+    core.remove_interface(wg0_interface)
+    assert db.get_interface(wg0_interface) is None
+    events = core.list_interface_audit_history(wg0_interface)
+    assert len(events) == 1
+    assert events[0]["event_type"] == AuditEventType.REMOVED
+    assert events[0]["metadata"]["peer_count"] == 0
+
+
+def test_interface_add_logs_created(wgpl_db: str) -> None:
+    from wgpl import wireguard
+
+    pubkey = wireguard.generate_keypair().public_key
+    core.add_interface("wg1", "vpn.example.com", pubkey, "10.0.1.0/24", port=51821)
+    events = core.list_interface_audit_history("wg1")
+    assert len(events) == 1
+    assert events[0]["event_type"] == AuditEventType.CREATED
+
+
+def test_dump_includes_audit_events(wg0_interface: str) -> None:
+    core.add_peer(wg0_interface, "phone")
+    output = "".join(core.dump_database_lines())
+    assert "audit_events" in output

@@ -1,6 +1,8 @@
+import json
 import sqlite3
 import os
 from contextlib import contextmanager
+from enum import StrEnum
 from typing import Any, Generator
 
 from .exceptions import (
@@ -20,6 +22,22 @@ class _UnsetType:
 _UNSET = _UnsetType()
 UNSET = _UNSET
 UnsetType = _UnsetType
+
+_FORBIDDEN_AUDIT_METADATA_KEYS = frozenset({"private_key", "preshared_key"})
+
+
+class AuditEntityType(StrEnum):
+    PEER = "peer"
+    INTERFACE = "interface"
+
+
+class AuditEventType(StrEnum):
+    CREATED = "created"
+    UPDATED = "updated"
+    REMOVED = "removed"
+    RECLAIMED = "reclaimed"
+    PRUNED = "pruned"
+    CASCADE_REMOVED = "cascade_removed"
 
 def get_db_path() -> str:
     """Returns the absolute path to the SQLite database file."""
@@ -177,6 +195,28 @@ def init_db(path: str | None = None) -> None:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name
                 ON peers(interface, name)
                 WHERE deleted_at IS NULL;
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+                    entity_id    TEXT NOT NULL,
+                    interface    TEXT,
+                    event_type   TEXT NOT NULL,
+                    occurred_at  TEXT NOT NULL,
+                    name         TEXT,
+                    ip_address   TEXT,
+                    public_key   TEXT,
+                    metadata     TEXT
+                );
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_entity
+                ON audit_events(entity_type, entity_id);
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_interface
+                ON audit_events(interface, occurred_at);
             """)
             conn.commit()
         except sqlite3.Error as e:
@@ -446,3 +486,82 @@ def update_peer(
                 f"IP {ip_address} is already assigned in this interface"
             ) from exc
         raise
+
+
+# --- Audit log (append-only) ---
+
+
+def _validate_audit_metadata(metadata: dict[str, Any] | None) -> None:
+    if not metadata:
+        return
+    for key in metadata:
+        if key.lower() in _FORBIDDEN_AUDIT_METADATA_KEYS:
+            raise WgplException(f"Audit metadata must not contain secret field '{key}'")
+
+
+def append_audit_event(
+    *,
+    entity_type: AuditEntityType,
+    entity_id: str,
+    event_type: AuditEventType,
+    interface: str | None = None,
+    name: str | None = None,
+    ip_address: str | None = None,
+    public_key: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    occurred_at: str | None = None,
+    conn: sqlite3.Connection,
+) -> None:
+    """Insert an append-only audit row. Caller must own the transaction."""
+    _validate_audit_metadata(metadata)
+    if occurred_at is None:
+        from datetime import datetime, timezone
+
+        occurred_at = datetime.now(timezone.utc).isoformat()
+    metadata_json = json.dumps(metadata) if metadata is not None else None
+    conn.execute(
+        """
+        INSERT INTO audit_events (
+            entity_type, entity_id, interface, event_type, occurred_at,
+            name, ip_address, public_key, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            entity_type.value,
+            entity_id,
+            interface,
+            event_type.value,
+            occurred_at,
+            name,
+            ip_address,
+            public_key,
+            metadata_json,
+        ),
+    )
+
+
+def list_audit_events(
+    *,
+    entity_type: AuditEntityType | None = None,
+    entity_id: str | None = None,
+    interface: str | None = None,
+    limit: int = 100,
+    conn: sqlite3.Connection | None = None,
+) -> list[sqlite3.Row]:
+    """Return audit events ordered by occurred_at ascending."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if entity_type is not None:
+        clauses.append("entity_type = ?")
+        params.append(entity_type.value)
+    if entity_id is not None:
+        clauses.append("entity_id = ?")
+        params.append(entity_id)
+    if interface is not None:
+        clauses.append("interface = ?")
+        params.append(interface)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    sql = f"SELECT * FROM audit_events {where} ORDER BY occurred_at ASC LIMIT ?"
+    with _ensure_conn(conn) as c:
+        return _run_query(c, sql, tuple(params)).fetchall()
