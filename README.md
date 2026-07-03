@@ -121,7 +121,7 @@ WGPL is designed to require zero configuration, but provides robust mechanisms t
 
 ## Documentation
 
-- [Architecture & Principles](.agents/memory/wgpm-decisions.md)
+- [Architecture & Principles](.cursor/rules/wgpl-architecture.mdc)
 - [Contributing Guidelines](CONTRIBUTING.md)
 
 ### Installation

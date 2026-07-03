@@ -60,8 +60,36 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting. Do not include real 
 
 ## Optional: AI assistant setup
 
-- **Cursor** — project rules live in `.cursor/rules/`
-- **Antigravity** — run `npx @vudovn/ag-kit@2026.6.29 init` locally (not versioned in this repo)
+**Canonical AI context for this repo (versioned in git):**
+
+| Tool | Location | Purpose |
+|---|---|---|
+| **Cursor** | [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) | Architecture and security invariants (always apply) |
+| **Cursor** | [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) | CLI workflows and pre-PR checklist |
+
+Use `.cursor/` as the single source of truth for Cursor and for human onboarding.
+Do not rely on gitignored local paths (for example `.agents/`) for architecture rules.
+
+**Optional — Antigravity / AG Kit (local only, not in git):**
+
+- Run `npx @vudovn/ag-kit@2026.6.29 init` to create `.agents/` on your machine.
+- Generic AG Kit skills and workflows are not curated for WGPL; prefer `.cursor/` above.
+- If you use Antigravity memory, keep [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) aligned with `wgpl-architecture.mdc`.
+
+### Maintaining AI context (anti-drift)
+
+When architecture, security, or CI validation commands change, update sources in this order:
+
+1. Edit [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) — canonical source for agents and humans.
+2. Update [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) only if it mentions the changed behavior explicitly.
+3. Update this file (Validation / Architecture invariants sections) and the PR template if the human checklist changes.
+4. If you use Antigravity locally, sync [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) from step 1.
+
+Do not add duplicate checklists to the skill — link to this file instead.
+Do not add generic always-on Cursor rules (benchmark prompts, web-app templates); they contradict WGPL invariants.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) is the objective final check; keep it aligned with the Validation section above.
+
+If you do **not** use Antigravity, you can remove local AG Kit with `rm -rf .agents/ .temp_ag_kit` to reduce editor noise.
 
 ## GitHub settings (after making the repo public)
 

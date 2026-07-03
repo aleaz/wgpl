@@ -62,7 +62,7 @@ venv.bak/
 *.db
 *.sqlite3
 
-# Agent IDE metadata
+# Agent IDE metadata (local AG Kit / Antigravity — not versioned; do not commit)
 .agents/
 .gemini/
 .temp_ag_kit

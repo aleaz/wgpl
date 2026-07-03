@@ -91,16 +91,12 @@ Implemented: `interface` CRUD + update, `peer` CRUD + update + prune, `validate`
 
 Future work: `peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).
 
-## Pre-PR checklist (repo-specific)
+## Pre-PR checklist
 
-1. `uv run ruff check src/ tests/` passes with no findings.
-2. `uv run mypy src/` passes with no type errors.
-3. `uv run pytest` passes.
-4. Invariants in `.cursor/rules/wgpl-architecture.mdc` respected
-   (SSOT, no auto-sync, exclusive transactions, `chmod 600`, no `shell=True`).
-5. New commands support `--json` and send logs to stderr.
-6. New domain errors inherit from `WgplException`.
-7. CLI smoke test with a temporary `WGPL_DB_PATH` before opening the PR.
+Follow [CONTRIBUTING.md — Validation and Pull requests](CONTRIBUTING.md#validation-required-before-opening-a-pr).
+Respect invariants in [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc)
+(SSOT, no auto-sync, exclusive transactions, `chmod 600`, no `shell=True`).
+Run a CLI smoke test with a temporary `WGPL_DB_PATH` before opening the PR.
 
 ## Commit messages
 
