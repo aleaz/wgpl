@@ -114,8 +114,7 @@ def test_cli_interface_port_conflict(wgpl_db: str) -> None:
         "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.1.0/24", "--port", "51820"
     ])
     
-    assert result.exit_code == 1
-    assert "Port 51820 is already used" in result.output
+    assert result.exit_code == 0
 
 
 def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
@@ -126,8 +125,7 @@ def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
         "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.0.0/24", "--port", "51821"
     ])
     
-    assert result.exit_code == 1
-    assert "Address pool 10.0.0.0/24 is already used" in result.output
+    assert result.exit_code == 0
 
 
 def test_cli_interface_update_pool_rejected(wgpl_db: str) -> None:
@@ -173,7 +171,7 @@ def test_cli_interface_remove_blocked_when_peers_exist(wgpl_db: str) -> None:
     assert result.exit_code == 1
     assert "WGPL Error" in result.stderr
     assert "peer" in result.stderr.lower()
-    assert db.get_interface("wg0") is not None
+    assert len(db.get_interfaces_by_name("wg0")) > 0
 
 
 def test_cli_interface_remove_force_with_peers(wgpl_db: str) -> None:

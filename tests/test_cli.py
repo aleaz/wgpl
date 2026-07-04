@@ -17,14 +17,14 @@ def test_public_peer_rows_redact_secrets() -> None:
     rows = [
         {
             "id": "peer-id",
-            "interface": "wg0",
+            "interface_id": 1,
             "name": "phone",
             "ip_address": "10.0.0.2",
             "public_key": "pub",
             "private_key": "secret-private",
             "preshared_key": "secret-psk",
             "created_at": "2026-01-01T00:00:00+00:00",
-            "dns": None,
+            "dns": "1.1.1.1",
         }
     ]
 
@@ -34,13 +34,13 @@ def test_public_peer_rows_redact_secrets() -> None:
     assert public == [
         {
             "id": "peer-id",
-            "interface": "wg0",
+            "interface_id": "1",
             "name": "phone",
             "ip_address": "10.0.0.2",
             "public_key": "pub",
             "created_at": "2026-01-01T00:00:00+00:00",
             "dns": "1.1.1.1",
-            "dns_override": None,
+            "dns_override": "1.1.1.1",
             "status": "Active",
             "expires_at": None,
             "deleted_at": None,

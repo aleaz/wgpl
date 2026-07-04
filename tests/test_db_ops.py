@@ -11,20 +11,34 @@ from wgpl.exceptions import WgplException
 _VALID_RESTORE_SQL = """
 BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS "interfaces" (
-    name TEXT PRIMARY KEY, endpoint TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 51820 UNIQUE, public_key TEXT NOT NULL,
-    address_pool TEXT NOT NULL UNIQUE, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, endpoint TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
+    address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
 );
 CREATE TABLE IF NOT EXISTS "peers" (
-    id TEXT PRIMARY KEY, interface TEXT NOT NULL,
+    id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
     name TEXT NOT NULL, ip_address TEXT NOT NULL,
     public_key TEXT NOT NULL, private_key TEXT NOT NULL,
     preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
-    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
+    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+    FOREIGN KEY(interface_id) REFERENCES interfaces(id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface, ip_address) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface, name) WHERE deleted_at IS NULL;
-INSERT INTO "interfaces" VALUES('wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;
+CREATE TABLE audit_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+    entity_id    TEXT NOT NULL,
+    interface    TEXT,
+    event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),
+    occurred_at  TEXT NOT NULL,
+    name         TEXT,
+    ip_address   TEXT,
+    public_key   TEXT,
+    metadata     TEXT
+);
+INSERT INTO "interfaces" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
 COMMIT;
 """
 
@@ -35,7 +49,7 @@ def test_dump_database_lines(wg0_interface: str) -> None:
 
     assert "BEGIN TRANSACTION;" in output
     assert "CREATE TABLE interfaces" in output
-    assert "INSERT INTO \"interfaces\" VALUES('wg0'" in output
+    assert "INSERT INTO \"interfaces\" VALUES(1,'wg0'" in output
     assert "COMMIT;" in output
 
 
@@ -133,24 +147,40 @@ def test_dump_restore_roundtrip_preserves_peers_and_audit(wg0_interface: str, wg
 _DUPLICATE_ACTIVE_PEER_SQL = """
 BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS "interfaces" (
-    name TEXT PRIMARY KEY, endpoint TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 51820 UNIQUE, public_key TEXT NOT NULL,
-    address_pool TEXT NOT NULL UNIQUE, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, endpoint TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
+    address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
 );
 CREATE TABLE IF NOT EXISTS "peers" (
-    id TEXT PRIMARY KEY, interface TEXT NOT NULL,
+    id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
     name TEXT NOT NULL, ip_address TEXT NOT NULL,
     public_key TEXT NOT NULL, private_key TEXT NOT NULL,
     preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
-    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
+    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+    FOREIGN KEY(interface_id) REFERENCES interfaces(id)
 );
-INSERT INTO "interfaces" VALUES('wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;
+CREATE TABLE audit_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+    entity_id    TEXT NOT NULL,
+    interface    TEXT,
+    event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),
+    occurred_at  TEXT NOT NULL,
+    name         TEXT,
+    ip_address   TEXT,
+    public_key   TEXT,
+    metadata     TEXT
+);
+INSERT INTO "interfaces" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
 INSERT INTO "peers" VALUES(
-    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','wg0','a','10.0.0.2',
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',1,'a','10.0.0.2',
     'pub1','priv1',NULL,'2020-01-01T00:00:00+00:00',NULL,NULL,NULL,NULL,NULL,NULL
 );
 INSERT INTO "peers" VALUES(
-    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','wg0','b','10.0.0.2',
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',1,'b','10.0.0.2',
     'pub2','priv2',NULL,'2020-01-01T00:00:00+00:00',NULL,NULL,NULL,NULL,NULL,NULL
 );
 COMMIT;
@@ -162,7 +192,7 @@ def test_restore_rejects_duplicate_active_peers(wgpl_db: str) -> None:
         conn.execute("CREATE TABLE marker (id INT)")
         conn.commit()
 
-    with pytest.raises(WgplException, match="failed validation"):
+    with pytest.raises(WgplException, match="UNIQUE constraint failed"):
         core.restore_database(_DUPLICATE_ACTIVE_PEER_SQL)
 
     with sqlite3.connect(wgpl_db) as conn:
@@ -198,7 +228,7 @@ def test_restore_retry_after_leftover_tmp(wgpl_db: str) -> None:
 
     core.restore_database(_VALID_RESTORE_SQL)
 
-    assert db.get_interface("wg0") is not None
+    assert db.get_interfaces_by_name("wg0")[0] is not None
     assert not os.path.exists(tmp_path)
 
 

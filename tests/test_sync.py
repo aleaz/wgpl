@@ -17,6 +17,6 @@ def test_sync_interface_passes_db_peer_set_only(
 
     mock_syncconf.assert_called_once()
     interface_name, config = mock_syncconf.call_args[0]
-    assert interface_name == wg0_interface
+    assert interface_name == "wg0"
     assert str(kept["public_key"]) in config
     assert str(removed["public_key"]) not in config

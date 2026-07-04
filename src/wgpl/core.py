@@ -1,3 +1,5 @@
+import re
+import base64
 import glob
 import ipaddress
 import uuid
@@ -7,6 +9,7 @@ import io
 import sqlite3
 import os
 import shutil
+import json
 from collections.abc import Iterator, Mapping
 from typing import Any, cast
 
@@ -14,6 +17,7 @@ from . import db
 from .db import UNSET, UnsetType
 from . import wireguard
 from .exceptions import (
+    AmbiguousInterfaceError,
     AmbiguousPeerIdError,
     InterfaceHasPeersError,
     InterfaceNotFoundError,
@@ -35,7 +39,6 @@ _PEER_ID_HEX_LEN = 32
 
 def _parse_duration(duration: str) -> datetime.datetime:
     """Parses a duration string (e.g. '7d', '24h') and returns a future datetime."""
-    import re
     match = re.match(r"^(\d+)([dh])$", duration)
     if not match:
         raise WgplException(f"Invalid duration format: '{duration}'. Expected format like '7d' or '24h'.")
@@ -89,7 +92,7 @@ def _audit_peer_from_row(
         entity_type=db.AuditEntityType.PEER,
         entity_id=str(peer["id"]),
         event_type=event_type,
-        interface=str(peer["interface"]),
+        interface=str(peer["interface_id"]),
         name=str(peer["name"]),
         ip_address=str(peer["ip_address"]),
         public_key=str(peer["public_key"]),
@@ -99,15 +102,18 @@ def _audit_peer_from_row(
 
 
 def _audit_interface_event(
-    name: str,
+    interface_id: int,
     event_type: db.AuditEventType,
     conn: sqlite3.Connection,
     *,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    """Create an audit trail event for an interface action."""
+    iface = db.get_interface(interface_id, conn=conn)
+    name = iface["name"] if iface else str(interface_id)
     db.append_audit_event(
         entity_type=db.AuditEntityType.INTERFACE,
-        entity_id=name,
+        entity_id=str(interface_id),
         event_type=event_type,
         interface=name,
         name=name,
@@ -118,11 +124,10 @@ def _audit_interface_event(
 
 def audit_event_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     """Return a JSON-safe audit event record."""
-    import json as json_module
 
     metadata: Any = row["metadata"]
     if isinstance(metadata, str) and metadata:
-        metadata = json_module.loads(metadata)
+        metadata = json.loads(metadata)
     return {
         "id": row["id"],
         "entity_type": row["entity_type"],
@@ -159,13 +164,32 @@ def list_peer_audit_history(
     return [audit_event_to_dict(row) for row in rows]
 
 
-def list_interface_audit_history(name: str, *, limit: int = 100) -> list[dict[str, Any]]:
+def list_interface_audit_history(ref: str, *, limit: int = 100, conn: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
     """Return audit events for an interface (including after it was removed)."""
-    rows = db.list_audit_events(
-        entity_type=db.AuditEntityType.INTERFACE,
-        entity_id=name,
-        limit=limit,
-    )
+    try:
+        iface_id = resolve_interface_ref(ref, conn=conn)
+        rows = db.list_audit_events(
+            entity_type=db.AuditEntityType.INTERFACE,
+            entity_id=str(iface_id),
+            limit=limit,
+            conn=conn,
+        )
+    except InterfaceNotFoundError:
+        # Fallback for deleted interfaces
+        if ref.isdigit():
+            rows = db.list_audit_events(
+                entity_type=db.AuditEntityType.INTERFACE,
+                entity_id=ref,
+                limit=limit,
+                conn=conn,
+            )
+        else:
+            rows = db.list_audit_events(
+                entity_type=db.AuditEntityType.INTERFACE,
+                interface=ref,
+                limit=limit,
+                conn=conn,
+            )
     return [audit_event_to_dict(row) for row in rows]
 
 
@@ -201,8 +225,10 @@ def resolve_peer_ref(
     if not normalized or not all(c in "0123456789abcdef" for c in normalized):
         raise PeerNotFoundError(f"Peer {ref} not found")
 
+    iface_id = resolve_interface_ref(interface, conn=conn) if interface else None
+
     if len(normalized) == _PEER_ID_HEX_LEN:
-        matches = db.find_peers_by_id_prefix(normalized, interface, conn=conn)
+        matches = db.find_peers_by_id_prefix(normalized, iface_id, conn=conn)
         if active_only:
             matches = [peer for peer in matches if _is_peer_active(peer)]
         exact = [peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized]
@@ -214,7 +240,7 @@ def resolve_peer_ref(
     if len(normalized) < _MIN_PEER_ID_PREFIX_LEN:
         raise PeerNotFoundError(f"Peer {ref} not found")
 
-    matches = db.find_peers_by_id_prefix(normalized, interface, conn=conn)
+    matches = db.find_peers_by_id_prefix(normalized, iface_id, conn=conn)
     if active_only:
         matches = [peer for peer in matches if _is_peer_active(peer)]
     if not matches:
@@ -222,6 +248,36 @@ def resolve_peer_ref(
     if len(matches) == 1:
         return str(matches[0]["id"])
     raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, matches))
+
+
+def _ambiguous_interface_message(ref: str, matches: list[sqlite3.Row]) -> str:
+    lines = [f"Multiple interfaces named '{ref}':"]
+    for i, iface in enumerate(matches, 1):
+        lines.append(f"  ID {iface['id']} → {iface['endpoint']}:{iface['port']} ({iface['address_pool']})")
+    lines.append(f"Specify the interface ID directly, e.g.: wgpl <command> {matches[0]['id']} ...")
+    return "\n".join(lines)
+
+
+def resolve_interface_ref(
+    ref: str,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Resolve an interface name or numerical ID to its unique integer ID."""
+    if ref.isdigit():
+        iface_id = int(ref)
+        iface = db.get_interface(iface_id, conn=conn)
+        if iface:
+            return iface_id
+        # Fallback to treating it as a name if no ID matches (unlikely, but robust)
+    
+    matches = db.get_interfaces_by_name(ref, conn=conn)
+    if not matches:
+        raise InterfaceNotFoundError(f"Interface {ref} not found")
+    
+    if len(matches) == 1:
+        return int(matches[0]["id"])
+    
+    raise AmbiguousInterfaceError(_ambiguous_interface_message(ref, matches))
 
 
 def _peer_actual_changed_fields(
@@ -237,6 +293,7 @@ def _peer_actual_changed_fields(
         "desc": "desc",
         "mtu": "mtu",
         "keepalive": "keepalive",
+        "expires": "expires_at",
     }
     changed: list[str] = []
     for field in candidates:
@@ -293,6 +350,41 @@ def validate_dns(value: str) -> str:
     return ", ".join(normalized)
 
 
+def validate_endpoint(endpoint: str) -> str:
+    """Validate that endpoint is a valid IP address or FQDN."""
+    endpoint = endpoint.strip()
+    if not endpoint:
+        raise ValueError("Endpoint cannot be empty")
+    try:
+        ipaddress.ip_address(endpoint)
+        return endpoint
+    except ValueError:
+        pass
+    
+    # Regex for valid hostname (RFC 1123)
+    hostname_re = re.compile(
+        r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*"
+        r"([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$"
+    )
+    if not hostname_re.match(endpoint):
+        raise ValueError(f"Invalid endpoint '{endpoint}'. Must be a valid IP or hostname.")
+    return endpoint
+
+
+def validate_public_key(key: str) -> str:
+    """Validate that key is a valid 32-byte Base64 WireGuard public key."""
+    key = key.strip()
+    if not key:
+        raise ValueError("Public key cannot be empty")
+    try:
+        decoded = base64.b64decode(key.encode('utf-8'), validate=True)
+        if len(decoded) != 32:
+            raise ValueError(f"Invalid public key length: expected 32 decoded bytes, got {len(decoded)}")
+    except Exception as exc:
+        raise ValueError("Invalid public key: must be valid Base64") from exc
+    return key
+
+
 def add_interface(
     name: str,
     endpoint: str,
@@ -305,8 +397,14 @@ def add_interface(
     keepalive: int | None = None,
 ) -> dict[str, Any]:
     """Register a WireGuard interface in the database."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Interface name cannot be empty")
     if not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
+    
+    endpoint = validate_endpoint(endpoint)
+    public_key = validate_public_key(public_key)
 
     try:
         normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
@@ -320,7 +418,7 @@ def add_interface(
         raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
     with db.transaction() as conn:
-        db.add_interface(
+        iface_id = db.add_interface(
             name,
             endpoint,
             public_key,
@@ -333,13 +431,14 @@ def add_interface(
             conn=conn,
         )
         _audit_interface_event(
-            name,
+            iface_id,
             db.AuditEventType.CREATED,
             conn,
-            metadata={"port": port, "address_pool": normalized_pool},
+            metadata={"name": name, "port": port, "address_pool": normalized_pool},
         )
 
     result: dict[str, Any] = {
+        "id": iface_id,
         "name": name,
         "endpoint": endpoint,
         "port": port,
@@ -357,17 +456,20 @@ def add_interface(
     return result
 
 
-def remove_interface(name: str, *, force: bool = False) -> None:
+def remove_interface(ref: str, *, force: bool = False) -> None:
     """Remove an interface and optionally all associated peers (requires --force if peers exist)."""
     with db.transaction() as conn:
-        iface = db.get_interface(name, conn=conn)
+        iface_id = resolve_interface_ref(ref, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
+            raise InterfaceNotFoundError(f"Interface {ref} not found")
+        
+        name = str(iface["name"])
 
-        peers = db.list_peers(name, conn=conn)
+        peers = db.list_peers(iface_id, conn=conn)
         if peers and not force:
             raise InterfaceHasPeersError(
-                f"Interface {name} has {len(peers)} peer(s). "
+                f"Interface {name} (ID {iface_id}) has {len(peers)} peer(s). "
                 "Remove or prune peers first, or use --force."
             )
 
@@ -376,15 +478,15 @@ def remove_interface(name: str, *, force: bool = False) -> None:
                 peer,
                 db.AuditEventType.CASCADE_REMOVED,
                 conn,
-                metadata={"trigger": "interface_removed", "interface": name},
+                metadata={"trigger": "interface_removed", "interface": name, "interface_id": iface_id},
             )
         _audit_interface_event(
-            name,
+            iface_id,
             db.AuditEventType.REMOVED,
             conn,
-            metadata={"peer_count": len(peers), "forced": bool(peers and force)},
+            metadata={"name": name, "peer_count": len(peers), "forced": bool(peers and force)},
         )
-        db.remove_interface(name, conn=conn)
+        db.remove_interface(iface_id, conn=conn)
 
 
 def ensure_database() -> None:
@@ -397,9 +499,9 @@ def list_interfaces() -> list[dict[str, Any]]:
     return [dict(row) for row in db.list_interfaces()]
 
 
-def interface_dns_map() -> dict[str, str | None]:
-    """Return interface name to default DNS."""
-    return {row["name"]: row["dns"] for row in db.list_interfaces()}
+def interface_dns_map() -> dict[int, str | None]:
+    """Return interface ID to default DNS."""
+    return {int(row["id"]): row["dns"] for row in db.list_interfaces()}
 
 
 def list_peers(
@@ -409,7 +511,9 @@ def list_peers(
     show_all: bool = False,
 ) -> list[sqlite3.Row]:
     """Return peers filtered by lifecycle status for display."""
-    raw_peers = db.list_peers(interface)
+    with db.transaction() as conn:
+        iface_id = resolve_interface_ref(interface, conn=conn) if interface else None
+        raw_peers = db.list_peers(iface_id, conn=conn)
     peers: list[sqlite3.Row] = []
     for peer in raw_peers:
         status = get_peer_status(peer)
@@ -447,19 +551,19 @@ def _effective_peer_keepalive(peer: sqlite3.Row, iface: sqlite3.Row) -> int | No
 
 
 def _pool_used_ips(
-    interface_name: str,
+    iface_id: int,
     conn: sqlite3.Connection,
     exclude_peer_id: str | None = None,
 ) -> tuple[ipaddress.IPv4Network, set[str]]:
     """Return the interface pool network and all reserved/used host IPs."""
-    iface = db.get_interface(interface_name, conn=conn)
+    iface = db.get_interface(iface_id, conn=conn)
     if not iface:
-        raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+        raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
     network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
     used_ips = {
         peer["ip_address"]
-        for peer in db.list_peers(interface_name, conn=conn)
+        for peer in db.list_peers(iface_id, conn=conn)
         if _is_peer_active(peer)
     }
 
@@ -503,7 +607,7 @@ def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ip
 
 
 def _reclaim_inactive_peer_slots(
-    interface_name: str,
+    iface_id: int,
     conn: sqlite3.Connection,
     *,
     ip: str | None = None,
@@ -513,7 +617,7 @@ def _reclaim_inactive_peer_slots(
     """Hard-delete inactive peers blocking partial unique indexes; log reclaimed events."""
     if ip is None and name is None:
         return
-    for peer in db.list_peers(interface_name, conn=conn):
+    for peer in db.list_peers(iface_id, conn=conn):
         if _is_peer_active(peer) or peer["deleted_at"] is not None:
             continue
         blocks_ip = ip is not None and peer["ip_address"] == ip
@@ -535,18 +639,34 @@ def _reclaim_inactive_peer_slots(
 
 
 def allocate_peer_ip(
-    interface_name: str,
+    iface_id: int,
     conn: sqlite3.Connection,
     requested: str | None = None,
     exclude_peer_id: str | None = None,
 ) -> str:
     """Allocate the next free IP or validate a requested IP within the interface pool."""
-    network, used_ips = _pool_used_ips(interface_name, conn, exclude_peer_id=exclude_peer_id)
+    network, used_ips = _pool_used_ips(iface_id, conn, exclude_peer_id=exclude_peer_id)
 
     if requested is None:
-        available = next((str(ip) for ip in network.hosts() if str(ip) not in used_ips), None)
-        if available:
-            return available
+        if not used_ips:
+            available = next((str(ip) for ip in network.hosts()), None)
+            if available:
+                return available
+        else:
+            try:
+                max_ip_obj = max(ipaddress.IPv4Address(ip) for ip in used_ips)
+                # Check from max_ip + 1 to end of network
+                for ip_int in range(int(max_ip_obj) + 1, int(network.broadcast_address)):
+                    ip_str = str(ipaddress.IPv4Address(ip_int))
+                    if ip_str not in used_ips:
+                        return ip_str
+                # Wrap around: Check from first host to max_ip
+                for ip_int in range(int(network.network_address) + 1, int(max_ip_obj)):
+                    ip_str = str(ipaddress.IPv4Address(ip_int))
+                    if ip_str not in used_ips:
+                        return ip_str
+            except ValueError:
+                pass
         raise NoAvailableIpsError(f"No available IPs in pool {network}")
 
     _validate_requested_peer_ip(requested, network, used_ips)
@@ -567,6 +687,9 @@ def add_peer(
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
     Returns a dictionary with the peer's essential information.
     """
+    peer_name = peer_name.strip()
+    if not peer_name:
+        raise ValueError("Peer name cannot be empty")
     normalized_dns = validate_dns(dns) if dns is not None else None
     if mtu is not None and mtu < 576:
         raise ValueError(f"MTU must be >= 576, got {mtu}")
@@ -574,14 +697,15 @@ def add_peer(
         raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
     with db.transaction() as conn:
-        allocated_ip = allocate_peer_ip(interface_name, conn, ip_address)
+        iface_id = resolve_interface_ref(interface_name, conn=conn)
+        allocated_ip = allocate_peer_ip(iface_id, conn, ip_address)
 
         keypair = wireguard.generate_keypair()
         preshared_key = wireguard.generate_preshared_key()
 
         peer_id = str(uuid.uuid4())
         _reclaim_inactive_peer_slots(
-            interface_name,
+            iface_id,
             conn,
             ip=allocated_ip,
             name=peer_name,
@@ -596,7 +720,7 @@ def add_peer(
 
         db.add_peer(
             id=peer_id,
-            interface=interface_name,
+            interface_id=iface_id,
             name=peer_name,
             ip_address=allocated_ip,
             public_key=keypair.public_key,
@@ -623,9 +747,9 @@ def add_peer(
                 metadata=meta or None,
             )
 
-        iface = db.get_interface(interface_name, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
-            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
     effective_dns = normalized_dns or (str(iface["dns"]) if iface["dns"] else None)
 
@@ -640,16 +764,17 @@ def add_peer(
         "keepalive": keepalive,
     }
 
-def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False) -> None:
+def remove_peer(interface_ref: str, canonical_peer_id: str, hard: bool = False) -> None:
     """Removes a peer from the database. Does a soft-delete by default."""
     with db.transaction() as conn:
+        iface_id = resolve_interface_ref(interface_ref, conn=conn)
         peer = db.get_peer(canonical_peer_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {canonical_peer_id} not found")
 
-        if peer['interface'] != interface_name:
+        if peer['interface_id'] != iface_id:
             raise PeerInterfaceMismatchError(
-                f"Peer {canonical_peer_id} does not belong to interface {interface_name}"
+                f"Peer {canonical_peer_id} does not belong to interface {interface_ref}"
             )
 
         if hard:
@@ -667,16 +792,17 @@ def remove_peer(interface_name: str, canonical_peer_id: str, hard: bool = False)
             db.remove_peer(canonical_peer_id, conn=conn)
 
 
-def prune_peers(interface_name: str) -> int:
+def prune_peers(interface_ref: str) -> int:
     """Physically removes all inactive peers (soft-deleted or expired) for an interface."""
     with db.transaction() as conn:
-        iface = db.get_interface(interface_name, conn=conn)
+        iface_id = resolve_interface_ref(interface_ref, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
-            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+            raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
 
         to_remove = [
             peer
-            for peer in db.list_peers(interface_name, conn=conn)
+            for peer in db.list_peers(iface_id, conn=conn)
             if not _is_peer_active(peer)
         ]
         for peer in to_remove:
@@ -702,9 +828,9 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
 
-    iface = db.get_interface(peer['interface'])
+    iface = db.get_interface(peer['interface_id'])
     if not iface:
-        raise InterfaceNotFoundError(f"Interface {peer['interface']} not found")
+        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
         
     network = ipaddress.IPv4Network(iface['address_pool'], strict=False)
 
@@ -770,13 +896,14 @@ def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> bytes
     img.save(buffer)
     return buffer.getvalue()
 
-def get_interface_config(interface_name: str) -> str:
+def get_interface_config(interface_ref: str) -> str:
     """Generates the declarative config string for the server interface."""
-    iface = db.get_interface(interface_name)
+    iface_id = resolve_interface_ref(interface_ref)
+    iface = db.get_interface(iface_id)
     if not iface:
-        raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
         
-    peers = db.list_peers(interface_name)
+    peers = db.list_peers(iface_id)
     
     conf_lines = []
     if iface["mtu"] is not None:
@@ -795,14 +922,20 @@ def get_interface_config(interface_name: str) -> str:
         
     return "\n".join(conf_lines)
 
-def sync_interface(interface_name: str) -> None:
+def sync_interface(interface_ref: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
-    conf_content = get_interface_config(interface_name)
-    wireguard.syncconf(interface_name, conf_content)
+    iface_id = resolve_interface_ref(interface_ref)
+    iface = db.get_interface(iface_id)
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
+    name = str(iface["name"])
+    conf_content = get_interface_config(str(iface_id))
+    wireguard.syncconf(name, conf_content)
 
 
 def _interface_row_to_dict(iface: sqlite3.Row) -> dict[str, Any]:
     return {
+        "id": iface["id"],
         "name": iface["name"],
         "endpoint": iface["endpoint"],
         "port": iface["port"],
@@ -821,7 +954,9 @@ def validate_peers_in_pool(
     network = ipaddress.IPv4Network(pool_cidr, strict=False)
     conflicts: list[dict[str, str]] = []
 
-    for peer in db.list_peers(interface_name, conn=conn):
+    iface_id = resolve_interface_ref(interface_name, conn=conn)
+
+    for peer in db.list_peers(iface_id, conn=conn):
         if not _is_peer_active(peer):
             continue
         ip = str(peer["ip_address"])
@@ -834,8 +969,17 @@ def validate_peers_in_pool(
         raise PeersOutsidePoolError(interface_name, conflicts)
 
 
+def _resolve_optional(val: Any, clear: bool) -> Any | UnsetType:
+    """Helper to resolve update values vs clear flags."""
+    if clear:
+        return None
+    if val is not None:
+        return val
+    return UNSET
+
+
 def update_interface(
-    name: str,
+    ref: str,
     *,
     endpoint: str | None = None,
     port: int | None = None,
@@ -865,21 +1009,11 @@ def update_interface(
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
-    if endpoint is not None:
-        hints.append("re_export_clients")
-    if port is not None:
-        hints.append("re_export_clients")
-    if public_key is not None:
-        hints.append("re_export_clients")
-    if address_pool is not None:
-        hints.append("re_export_clients")
-    if dns is not None or clear_dns:
-        hints.append("re_export_clients")
     if mtu is not None or clear_mtu:
         hints.append("apply_server")
-        hints.append("re_export_clients")
-    if keepalive is not None or clear_keepalive:
-        hints.append("re_export_clients")
+    if any(x is not None for x in (endpoint, port, public_key, address_pool, dns, mtu, keepalive)) or clear_dns or clear_mtu or clear_keepalive:
+        if "re_export_clients" not in hints:
+            hints.append("re_export_clients")
 
     if port is not None and not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
@@ -894,6 +1028,11 @@ def update_interface(
             normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
         except ValueError as exc:
             raise ValueError(f"Invalid address pool '{address_pool}'") from exc
+
+    if endpoint is not None:
+        endpoint = validate_endpoint(endpoint)
+    if public_key is not None:
+        public_key = validate_public_key(public_key)
 
     normalized_dns: str | None | UnsetType = UNSET
     if clear_dns:
@@ -938,15 +1077,18 @@ def update_interface(
         changed_fields.append("keepalive")
 
     with db.transaction() as conn:
-        iface = db.get_interface(name, conn=conn)
+        iface_id = resolve_interface_ref(ref, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
+            raise InterfaceNotFoundError(f"Interface {ref} not found")
+        
+        name = str(iface["name"])
 
         if normalized_pool is not None and normalized_pool != iface["address_pool"]:
             validate_peers_in_pool(name, normalized_pool, conn)
 
         db.update_interface(
-            name,
+            iface_id,
             endpoint=endpoint if endpoint is not None else UNSET,
             port=port if port is not None else UNSET,
             public_key=public_key if public_key is not None else UNSET,
@@ -958,17 +1100,17 @@ def update_interface(
             conn=conn,
         )
 
-        updated = db.get_interface(name, conn=conn)
+        updated = db.get_interface(iface_id, conn=conn)
         if not updated:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
+            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found after update")
 
         actual_changes = _interface_actual_changed_fields(iface, updated, changed_fields)
         if actual_changes:
             _audit_interface_event(
-                name,
+                iface_id,
                 db.AuditEventType.UPDATED,
                 conn,
-                metadata={"fields": actual_changes},
+                metadata={"name": name, "fields": actual_changes},
             )
 
     result: dict[str, str | int | list[str] | None] = dict(_interface_row_to_dict(updated))
@@ -977,7 +1119,7 @@ def update_interface(
 
 
 def update_peer(
-    interface_name: str,
+    interface_ref: str,
     peer_ref: str,
     *,
     name: str | None = None,
@@ -990,8 +1132,14 @@ def update_peer(
     clear_mtu: bool = False,
     keepalive: int | None = None,
     clear_keepalive: bool = False,
+    expires: str | None = None,
+    clear_expires: bool = False,
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ValueError("Peer name cannot be empty")
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
@@ -1000,20 +1148,17 @@ def update_peer(
         raise ValueError("Cannot set both mtu and clear_mtu")
     if clear_keepalive and keepalive is not None:
         raise ValueError("Cannot set both keepalive and clear_keepalive")
+    if clear_expires and expires is not None:
+        raise ValueError("Cannot set both expires and clear_expires")
 
-    has_field = any(v is not None for v in (name, ip_address, dns, desc, mtu, keepalive))
-    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive:
+    has_field = any(v is not None for v in (name, ip_address, dns, desc, mtu, keepalive, expires))
+    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive and not clear_expires:
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
-
     if ip_address is not None:
-        hints.extend(["apply_server", "re_export_client"])
-    if dns is not None or clear_dns:
-        hints.append("re_export_client")
-    if mtu is not None or clear_mtu:
-        hints.append("re_export_client")
-    if keepalive is not None or clear_keepalive:
+        hints.append("apply_server")
+    if any(x is not None for x in (ip_address, dns, mtu, keepalive)) or clear_dns or clear_mtu or clear_keepalive:
         hints.append("re_export_client")
     
     if mtu is not None and mtu < 576:
@@ -1021,29 +1166,12 @@ def update_peer(
     if keepalive is not None and not (0 <= keepalive <= 65535):
         raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
 
-    normalized_dns: str | None | UnsetType = UNSET
-    if clear_dns:
-        normalized_dns = None
-    elif dns is not None:
-        normalized_dns = validate_dns(dns)
+    normalized_dns = _resolve_optional(validate_dns(dns) if dns else None, clear_dns)
+    normalized_desc = _resolve_optional(desc, clear_desc)
+    normalized_mtu = _resolve_optional(mtu, clear_mtu)
+    normalized_keepalive = _resolve_optional(keepalive, clear_keepalive)
 
-    normalized_desc: str | None | UnsetType = UNSET
-    if clear_desc:
-        normalized_desc = None
-    elif desc is not None:
-        normalized_desc = desc
-        
-    normalized_mtu: int | None | UnsetType = UNSET
-    if clear_mtu:
-        normalized_mtu = None
-    elif mtu is not None:
-        normalized_mtu = mtu
-
-    normalized_keepalive: int | None | UnsetType = UNSET
-    if clear_keepalive:
-        normalized_keepalive = None
-    elif keepalive is not None:
-        normalized_keepalive = keepalive
+    normalized_expires = _resolve_optional(_parse_duration(expires).isoformat() if expires else None, clear_expires)
 
     changed_fields: list[str] = []
     if name is not None:
@@ -1058,15 +1186,18 @@ def update_peer(
         changed_fields.append("mtu")
     if keepalive is not None or clear_keepalive:
         changed_fields.append("keepalive")
+    if expires is not None or clear_expires:
+        changed_fields.append("expires")
 
     with db.transaction() as conn:
-        canonical_id = resolve_peer_ref(peer_ref, interface_name, conn=conn)
+        iface_id = resolve_interface_ref(interface_ref, conn=conn)
+        canonical_id = resolve_peer_ref(peer_ref, str(iface_id), conn=conn)
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
-        if peer["interface"] != interface_name:
+        if peer["interface_id"] != iface_id:
             raise PeerInterfaceMismatchError(
-                f"Peer {peer_ref} does not belong to interface {interface_name}"
+                f"Peer {peer_ref} does not belong to interface {interface_ref}"
             )
         before = peer
 
@@ -1074,7 +1205,7 @@ def update_peer(
         slot_ip: str | None = None
         if ip_address is not None:
             validated_ip = allocate_peer_ip(
-                interface_name,
+                iface_id,
                 conn,
                 ip_address,
                 exclude_peer_id=canonical_id,
@@ -1084,7 +1215,7 @@ def update_peer(
         slot_name = name
         if slot_ip is not None or slot_name is not None:
             _reclaim_inactive_peer_slots(
-                interface_name,
+                iface_id,
                 conn,
                 ip=slot_ip,
                 name=slot_name,
@@ -1100,6 +1231,7 @@ def update_peer(
                 desc=normalized_desc,
                 mtu=normalized_mtu,
                 keepalive=normalized_keepalive,
+                expires_at=normalized_expires,
                 conn=conn,
             )
         except PeerAlreadyExistsError:
@@ -1118,9 +1250,9 @@ def update_peer(
                 metadata={"fields": actual_changes},
             )
 
-        iface = db.get_interface(interface_name, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
-            raise InterfaceNotFoundError(f"Interface {interface_name} not found")
+            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
     effective_dns = _effective_peer_dns(updated, iface)
     return {
@@ -1134,6 +1266,7 @@ def update_peer(
         "mtu_override": updated["mtu"],
         "keepalive": _effective_peer_keepalive(updated, iface),
         "keepalive_override": updated["keepalive"],
+        "expires_at": updated["expires_at"],
         "hints": list(dict.fromkeys(hints)),
     }
 
@@ -1143,7 +1276,8 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
     issues: list[dict[str, str | None]] = []
 
     if interface is not None:
-        iface = db.get_interface(interface)
+        iface_id = resolve_interface_ref(interface)
+        iface = db.get_interface(iface_id)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {interface} not found")
         interfaces = [iface]
@@ -1168,7 +1302,7 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
-        for peer in db.list_peers(iface_name):
+        for peer in db.list_peers(iface["id"]):
             if not _is_peer_active(peer):
                 continue
             peer_name = str(peer["name"])

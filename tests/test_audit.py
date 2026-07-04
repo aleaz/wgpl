@@ -132,7 +132,7 @@ def test_interface_remove_force_audit_cascade(wg0_interface: str) -> None:
     assert any(e["event_type"] == AuditEventType.REMOVED for e in iface_events)
 
     for pid in (str(p1["id"]), str(p2["id"])):
-        events = core.list_peer_audit_history(pid, wg0_interface)
+        events = core.list_peer_audit_history(pid)
         assert any(e["event_type"] == AuditEventType.CASCADE_REMOVED for e in events)
 
 
@@ -179,7 +179,7 @@ def test_interface_update_logs_updated_event(wg0_interface: str) -> None:
     events = core.list_interface_audit_history(wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
     assert len(updated) == 1
-    assert updated[0]["metadata"] == {"fields": ["endpoint"]}
+    assert updated[0]["metadata"]["fields"] == ["endpoint"]
 
 
 def test_audit_metadata_rejects_private_key(wg0_interface: str) -> None:

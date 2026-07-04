@@ -13,7 +13,15 @@ from rich.console import Console
 from rich.table import Table
 
 from . import core
-from .exceptions import WgplException, InterfaceAlreadyExistsError, PeerAlreadyExistsError, WgBinaryNotFoundError, InterfaceNotFoundError, PeerNotFoundError
+from .exceptions import (
+    AmbiguousInterfaceError,
+    InterfaceAlreadyExistsError,
+    InterfaceNotFoundError,
+    PeerAlreadyExistsError,
+    PeerNotFoundError,
+    WgBinaryNotFoundError,
+    WgplException,
+)
 
 _HINT_MESSAGES = {
     "re_export_clients": "Re-export client configs (peer config / qr) for peers on this interface.",
@@ -38,7 +46,7 @@ _STYLE_VALUE = typer_styles.STYLE_TYPES
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
 
-_BASE_PUBLIC_PEER_FIELDS = ("id", "interface", "name", "ip_address", "public_key", "created_at")
+_BASE_PUBLIC_PEER_FIELDS = ("id", "interface_id", "name", "ip_address", "public_key", "created_at")
 
 def _styled(text: str, style: str = "") -> str:
     """Wrap text in Rich markup for a given style (empty = no markup)."""
@@ -48,15 +56,16 @@ def _styled(text: str, style: str = "") -> str:
 
 def _public_peer_rows(
     peers: list[sqlite3.Row],
-    iface_dns: dict[str, str | None] | None = None,
+    iface_dns: dict[int, str | None] | None = None,
 ) -> list[dict[str, str | None]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
     iface_dns_map = iface_dns or {}
     rows: list[dict[str, str | None]] = []
     for peer in peers:
         peer_dns = peer["dns"]
-        row = {field: peer[field] for field in _BASE_PUBLIC_PEER_FIELDS}
-        row["dns"] = core.get_effective_dns(peer_dns, iface_dns_map.get(peer["interface"]))
+        row = {field: str(peer[field]) if peer[field] is not None else None for field in _BASE_PUBLIC_PEER_FIELDS}
+        row["dns"] = core.get_effective_dns(peer_dns, iface_dns_map.get(peer["interface_id"]))
+        row["interface_id"] = str(peer["interface_id"])
         row["dns_override"] = peer_dns
         row["status"] = core.get_peer_status(peer)
         row["expires_at"] = peer["expires_at"] if "expires_at" in peer.keys() else None
@@ -186,7 +195,7 @@ def _validate_allowed_ips(ctx: typer.Context, allowed_ips: str) -> None:
 @interface_app.command("add")
 def interface_add(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     endpoint: str = typer.Argument(..., help="Public endpoint (e.g. vpn.example.com)"),
     public_key: str = typer.Argument(..., help="Server public key"),
     address_pool: str = typer.Argument(..., help="Address pool (e.g. 10.0.0.0/24)"),
@@ -212,7 +221,7 @@ def interface_add(
 @interface_app.command("remove")
 def interface_remove(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     force: bool = typer.Option(
         False,
         "--force",
@@ -220,14 +229,16 @@ def interface_remove(
     ),
 ):
     try:
-        core.remove_interface(name, force=force)
+        core.remove_interface(interface, force=force)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "interface": name, "force": force})
+            _output(ctx, {"status": "success", "interface": interface, "force": force})
         else:
             if force:
-                console.print(f"[green]Removed interface {name} and all its associated peers.[/green]")
+                console.print(f"[green]Removed interface {interface} and all its associated peers.[/green]")
             else:
-                console.print(f"[green]Removed interface {name}.[/green]")
+                console.print(f"[green]Removed interface {interface}.[/green]")
+    except AmbiguousInterfaceError as e:
+        _exit_error(ctx, str(e))
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -240,6 +251,7 @@ def interface_list(ctx: typer.Context) -> None:
         else:
             rows = [
                 [
+                    _styled(str(i["id"]), _STYLE_ID),
                     _styled(i["name"], _STYLE_ID),
                     _styled(f"{i['endpoint']}:{i['port']}", ""),
                     _styled(i["address_pool"], _STYLE_META),
@@ -254,13 +266,14 @@ def interface_list(ctx: typer.Context) -> None:
                 "WireGuard Interfaces",
                 "interfaces",
                 [
-                    ("Name", {"overflow": "fold"}),
-                    ("Endpoint", {"overflow": "fold"}),
-                    ("Pool", {"overflow": "fold"}),
-                    ("DNS", {"overflow": "fold"}),
-                    ("MTU", {"overflow": "fold"}),
-                    ("Keepalive", {"overflow": "fold"}),
-                    ("Desc", {"overflow": "fold"}),
+                    ("ID", {"style": _STYLE_ID, "no_wrap": True}),
+                    ("Name", {"style": _STYLE_ID, "no_wrap": True}),
+                    ("Endpoint:Port", {"no_wrap": True}),
+                    ("Address Pool", {}),
+                    ("DNS", {}),
+                    ("MTU", {}),
+                    ("Keepalive", {}),
+                    ("Description", {}),
                 ],
                 rows,
             )
@@ -268,20 +281,22 @@ def interface_list(ctx: typer.Context) -> None:
         _exit_error(ctx, str(e))
 
 @interface_app.command("export")
-def interface_export(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name to export (e.g. wg0)")):
+def interface_export(ctx: typer.Context, interface: str = typer.Argument(..., help="Interface name or ID to export (e.g. wg0 or 1)")):
     try:
-        conf = core.get_interface_config(name)
+        conf = core.get_interface_config(interface)
         if ctx.obj.get("json"):
             _output(ctx, {"config": conf})
         else:
             print(conf)
+    except AmbiguousInterfaceError as e:
+        _exit_error(ctx, str(e))
     except WgplException as e:
         _exit_error(ctx, str(e))
 
 @peer_app.command("show")
 def peer_show(
     ctx: typer.Context,
-    interface: str | None = typer.Option(None, help="Interface name (e.g. wg0)"),
+    interface: str | None = typer.Option(None, help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
 ):
     try:
@@ -319,11 +334,10 @@ def peer_show(
         _exit_error(ctx, str(e))
 
 @interface_app.command("show")
-def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name (e.g. wg0)")):
+def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)")):
     try:
-        # Assuming list_interfaces provides all data. Otherwise we could add get_interface to core
-        interfaces = core.list_interfaces()
-        interface = next((i for i in interfaces if i["name"] == name), None)
+        iface_id = core.resolve_interface_ref(name)
+        interface = core.db.get_interface(iface_id)
         if not interface:
             raise InterfaceNotFoundError(f"Interface {name} not found")
 
@@ -348,7 +362,7 @@ def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Int
 @interface_app.command("update")
 def interface_update(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     endpoint: str | None = typer.Option(None, "--endpoint", help="Public endpoint hostname"),
     port: int | None = typer.Option(None, "--port", help="Listen port"),
     public_key: str | None = typer.Option(None, "--public-key", help="Server public key"),
@@ -400,7 +414,7 @@ def interface_update(
 @peer_app.command("add")
 def peer_add(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     name: str = typer.Argument(..., help="Peer name/description"),
     ip: str | None = typer.Option(None, "--ip", help="Peer IP from the interface pool (auto if omitted)"),
     dns: str | None = typer.Option(None, "--dns", help="DNS override for this peer's client config"),
@@ -424,7 +438,7 @@ def peer_add(
 @interface_app.command("history")
 def interface_history(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
 ):
     try:
@@ -459,7 +473,7 @@ def interface_history(
 @peer_app.command("history")
 def peer_history(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
 ):
@@ -497,7 +511,7 @@ def peer_history(
 @peer_app.command("remove")
 def peer_remove(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     hard: bool = typer.Option(False, "--hard", help="Physically delete the peer instead of soft-deleting"),
 ):
@@ -514,7 +528,7 @@ def peer_remove(
 @peer_app.command("prune")
 def peer_prune(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
 ):
     try:
         deleted = core.prune_peers(interface)
@@ -528,7 +542,7 @@ def peer_prune(
 @peer_app.command("update")
 def peer_update(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name (e.g. wg0)"),
+    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     name: str | None = typer.Option(None, "--name", help="New peer name"),
     ip: str | None = typer.Option(None, "--ip", help="New peer IP from the interface pool"),
@@ -540,6 +554,8 @@ def peer_update(
     clear_mtu: bool = typer.Option(False, "--clear-mtu", help="Remove peer MTU override (inherit interface default)"),
     keepalive: int | None = typer.Option(None, "--keepalive", help="PersistentKeepalive override for this peer"),
     clear_keepalive: bool = typer.Option(False, "--clear-keepalive", help="Remove peer PersistentKeepalive override (inherit interface default)"),
+    expires: str | None = typer.Option(None, "--expires", help="When the peer should expire (e.g., '30d', '1y')"),
+    clear_expires: bool = typer.Option(False, "--clear-expires", help="Remove peer expiration"),
 ):
     try:
         if clear_dns and dns is not None:
@@ -550,6 +566,8 @@ def peer_update(
             _exit_error(ctx, "Cannot use --mtu and --clear-mtu together.")
         if clear_keepalive and keepalive is not None:
             _exit_error(ctx, "Cannot use --keepalive and --clear-keepalive together.")
+        if clear_expires and expires is not None:
+            _exit_error(ctx, "Cannot use --expires and --clear-expires together.")
 
         result = core.update_peer(
             interface,
@@ -564,6 +582,8 @@ def peer_update(
             clear_mtu=clear_mtu,
             keepalive=keepalive,
             clear_keepalive=clear_keepalive,
+            expires=expires,
+            clear_expires=clear_expires,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -585,7 +605,8 @@ def peer_list(
     try:
         peers = core.list_peers(interface, expired_only=expired, show_all=all)
 
-        iface_dns = core.interface_dns_map()
+        iface_dns: dict[int, str | None] = core.interface_dns_map()
+        iface_map = {iface["id"]: iface["name"] for iface in core.list_interfaces()}
         if ctx.obj.get("json"):
             _output(ctx, _public_peer_rows(peers, iface_dns))
         else:
@@ -594,12 +615,12 @@ def peer_list(
             rows = [
                 [
                     _styled(_format_peer_id_display(p["id"], total_peers), _STYLE_ID),
-                    _styled(p["interface"], ""),
+                    _styled(str(iface_map.get(p["interface_id"], p["interface_id"])), ""),
                     _styled(p["name"], _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
                     _styled(core.get_peer_status(p), _STYLE_META),
                     _styled(
-                        _display_dns(core.get_effective_dns(p["dns"], iface_dns.get(p["interface"]))),
+                        _display_dns(core.get_effective_dns(p["dns"], iface_dns.get(p["interface_id"]))),
                         _STYLE_META,
                     ),
                     _styled(str(p.get("mtu") or "—"), _STYLE_META),

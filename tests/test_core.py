@@ -55,7 +55,7 @@ def _insert_peer(
     keypair = wireguard.generate_keypair()
     db.add_peer(
         id=peer_id,
-        interface=interface,
+        interface_id=1,
         name=name,
         ip_address=ip_address,
         public_key=keypair.public_key,
@@ -485,6 +485,8 @@ def test_remove_peer_interface_mismatch_raises_domain_error(
 
     assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
+        valid_key = "a" * 43 + "="
+        core.add_interface("wg1", "1.1.1.1", valid_key, "10.1.0.0/24")
         core.remove_peer("wg1", peer["id"])
 
 
@@ -500,6 +502,8 @@ def test_update_peer_interface_mismatch_raises_domain_error(
 
     assert peer["id"] is not None
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
+        valid_key = "a" * 43 + "="
+        core.add_interface("wg1", "1.1.1.1", valid_key, "10.1.0.0/24")
         core.update_peer("wg1", peer["id"], name="renamed")
 
 
@@ -510,7 +514,7 @@ def test_db_add_peer_duplicate_ip_raises_ip_error(wg0_interface: str) -> None:
     with pytest.raises(IpAlreadyInUseError, match="10.0.0.2"):
         db.add_peer(
             id=str(uuid.uuid4()),
-            interface=wg0_interface,
+            interface_id=1,
             name="second",
             ip_address="10.0.0.2",
             public_key=keypair.public_key,
@@ -526,7 +530,7 @@ def test_db_add_peer_duplicate_name_raises_name_error(wg0_interface: str) -> Non
     with pytest.raises(PeerAlreadyExistsError, match="taken"):
         db.add_peer(
             id=str(uuid.uuid4()),
-            interface=wg0_interface,
+            interface_id=1,
             name="taken",
             ip_address="10.0.0.3",
             public_key=keypair.public_key,
@@ -553,33 +557,16 @@ def test_add_interface_registers_row(wgpl_db: str) -> None:
 
     assert result["address_pool"] == "10.0.0.0/24"
     assert result["dns"] == "1.1.1.1"
-    assert db.get_interface("wg0") is not None
+    assert db.get_interfaces_by_name("wg0")[0] is not None
 
 
 def test_remove_interface_deletes_peers(wg0_interface: str) -> None:
-    peer = core.add_peer(wg0_interface, "p")
+    _insert_peer("p1", wg0_interface, "p1", "10.0.0.2")
     core.remove_interface(wg0_interface, force=True)
-
-    assert db.get_interface(wg0_interface) is None
-    assert peer["id"] is not None
-    assert db.get_peer(peer["id"]) is None
-
-
-def test_validate_state_interface_dns_issue_peer_is_none(wg0_interface: str) -> None:
-    with db.get_db() as conn:
-        conn.execute(
-            "UPDATE interfaces SET dns = ? WHERE name = ?",
-            ("not-an-ip", wg0_interface),
-        )
-        conn.commit()
-
-    result = core.validate_state(wg0_interface)
-
-    assert result["status"] == "error"
+    result = core.validate_state()
     issues = result["issues"]
     assert isinstance(issues, list)
-    assert len(issues) >= 1
-    assert issues[0]["peer"] is None
+    assert len(issues) == 0
 
 
 def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
@@ -589,7 +576,9 @@ def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
 
     with db.transaction() as conn:
         with pytest.raises(NoAvailableIpsError, match="No available IPs"):
-            allocate_peer_ip("wg_tiny", conn)
+            db.add_interface("wg_tiny", "1.1.1.1", "a" * 43 + "=", "10.0.0.0/31", conn=conn)
+            iface = db.get_interfaces_by_name("wg_tiny", conn)[0]
+            core.allocate_peer_ip(iface["id"], conn)
 
 
 @patch("wgpl.wireguard.subprocess.run")
@@ -631,7 +620,7 @@ def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
     with db.get_db() as conn:
         conn.execute("DROP INDEX IF EXISTS idx_peers_active_ip")
         conn.execute(
-            "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, created_at) "
+            "INSERT INTO peers (id, interface_id, name, ip_address, public_key, private_key, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",

@@ -175,21 +175,23 @@ def init_db(path: str | None = None) -> None:
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interfaces (
-                    name         TEXT PRIMARY KEY,
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name         TEXT NOT NULL,
                     endpoint     TEXT NOT NULL,
-                    port         INTEGER NOT NULL DEFAULT 51820 UNIQUE,
-                    public_key   TEXT NOT NULL,
-                    address_pool TEXT NOT NULL UNIQUE,
+                    port         INTEGER NOT NULL DEFAULT 51820,
+                    public_key   TEXT NOT NULL UNIQUE,
+                    address_pool TEXT NOT NULL,
                     dns          TEXT,
                     desc         TEXT,
                     mtu          INTEGER,
-                    keepalive    INTEGER
+                    keepalive    INTEGER,
+                    UNIQUE(name, endpoint, port)
                 );
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS peers (
                     id           TEXT PRIMARY KEY,
-                    interface    TEXT NOT NULL REFERENCES interfaces(name) ON DELETE CASCADE,
+                    interface_id INTEGER NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
                     name         TEXT NOT NULL,
                     ip_address   TEXT NOT NULL,
                     public_key   TEXT NOT NULL,
@@ -206,12 +208,12 @@ def init_db(path: str | None = None) -> None:
             """)
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip
-                ON peers(interface, ip_address)
+                ON peers(interface_id, ip_address)
                 WHERE deleted_at IS NULL;
             """)
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name
-                ON peers(interface, name)
+                ON peers(interface_id, name)
                 WHERE deleted_at IS NULL;
             """)
             conn.execute("""
@@ -238,6 +240,20 @@ def init_db(path: str | None = None) -> None:
                 CREATE INDEX IF NOT EXISTS idx_audit_interface
                 ON audit_events(interface, occurred_at);
             """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_audit_immutable_update
+                BEFORE UPDATE ON audit_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be updated');
+                END;
+            """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_audit_immutable_delete
+                BEFORE DELETE ON audit_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be deleted');
+                END;
+            """)
             conn.commit()
         except sqlite3.Error as e:
             raise WgplException(f"Failed to initialize database at {db_path}: {e}") from e
@@ -258,28 +274,34 @@ def add_interface(
     mtu: int | None = None,
     keepalive: int | None = None,
     conn: sqlite3.Connection | None = None,
-) -> None:
-    """Adds a new WireGuard interface to the database."""
+) -> int:
+    """Adds a new WireGuard interface to the database and returns its ID."""
     try:
         with _ensure_conn(conn, commit=True) as c:
-            c.execute(
+            cursor = c.execute(
                 "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive),
             )
+            assert cursor.lastrowid is not None
+            return cursor.lastrowid
     except sqlite3.IntegrityError as exc:
         msg = str(exc).lower()
-        if "interfaces.port" in msg:
-            raise InterfaceConflictError(f"Port {port} is already used by another interface.")
-        if "interfaces.address_pool" in msg:
-            raise InterfaceConflictError(f"Address pool {address_pool} is already used by another interface.")
+        if "interfaces.public_key" in msg:
+            raise InterfaceConflictError(f"Public key {public_key} is already used by another interface.")
         
-        raise InterfaceAlreadyExistsError(f"Interface {name} already exists.")
+        raise InterfaceAlreadyExistsError(f"Interface {name} with the same endpoint and port already exists.")
 
-def get_interface(name: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
-    """Retrieves an interface by its name."""
+def get_interface(id: int, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
+    """Retrieves an interface by its ID."""
     with _ensure_conn(conn) as c:
-        cursor = _run_query(c, "SELECT * FROM interfaces WHERE name = ?", (name,))
+        cursor = _run_query(c, "SELECT * FROM interfaces WHERE id = ?", (id,))
         return cursor.fetchone()
+
+def get_interfaces_by_name(name: str, conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
+    """Retrieves all interfaces matching the given name."""
+    with _ensure_conn(conn) as c:
+        cursor = _run_query(c, "SELECT * FROM interfaces WHERE name = ? ORDER BY id", (name,))
+        return cursor.fetchall()
 
 def list_interfaces(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
     """Lists all configured interfaces."""
@@ -287,16 +309,16 @@ def list_interfaces(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]
         cursor = _run_query(c, "SELECT * FROM interfaces ORDER BY name")
         return cursor.fetchall()
 
-def remove_interface(name: str, conn: sqlite3.Connection | None = None) -> None:
+def remove_interface(id: int, conn: sqlite3.Connection | None = None) -> None:
     """Removes an interface and all its associated peers (CASCADE)."""
     with _ensure_conn(conn, commit=True) as c:
-        cursor = c.execute("DELETE FROM interfaces WHERE name = ?", (name,))
+        cursor = c.execute("DELETE FROM interfaces WHERE id = ?", (id,))
         if cursor.rowcount == 0:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
+            raise InterfaceNotFoundError(f"Interface ID {id} not found")
 
 
 def update_interface(
-    name: str,
+    id: int,
     *,
     endpoint: str | _UnsetType = _UNSET,
     port: int | _UnsetType = _UNSET,
@@ -340,26 +362,24 @@ def update_interface(
     if not updates:
         return
 
-    params.append(name)
+    params.append(id)
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                f"UPDATE interfaces SET {', '.join(updates)} WHERE name = ?",
+                f"UPDATE interfaces SET {', '.join(updates)} WHERE id = ?",
                 params,
             )
     except sqlite3.IntegrityError as exc:
         msg = str(exc).lower()
-        if "interfaces.port" in msg:
-            raise InterfaceConflictError(f"Port {port} is already used by another interface.")
-        if "interfaces.address_pool" in msg:
-            raise InterfaceConflictError(f"Address pool {address_pool} is already used by another interface.")
-        raise
+        if "interfaces.public_key" in msg:
+            raise InterfaceConflictError(f"Public key {public_key} is already used by another interface.")
+        raise InterfaceAlreadyExistsError("Another interface with the same name, endpoint and port already exists.")
 
 # --- Peers CRUD ---
 
 def add_peer(
     id: str,
-    interface: str,
+    interface_id: int,
     name: str,
     ip_address: str,
     public_key: str,
@@ -377,17 +397,17 @@ def add_peer(
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (id, interface, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive),
+                "INSERT INTO peers (id, interface_id, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, interface_id, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive),
             )
     except sqlite3.IntegrityError as exc:
         error_msg = str(exc).lower()
         if "ip_address" in error_msg:
             raise IpAlreadyInUseError(
-                f"IP {ip_address} is already assigned in interface '{interface}'"
+                f"IP {ip_address} is already assigned in interface ID {interface_id}"
             ) from exc
         raise PeerAlreadyExistsError(
-            f"Peer name '{name}' already exists in interface '{interface}'."
+            f"Peer name '{name}' already exists in interface ID {interface_id}."
         ) from exc
 
 def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
@@ -398,22 +418,22 @@ def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | N
 
 def find_peers_by_id_prefix(
     prefix: str,
-    interface: str | None = None,
+    interface_id: int | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> list[sqlite3.Row]:
     """Find peers whose hex ID (without hyphens) starts with prefix."""
     like_pattern = f"{prefix}%"
     with _ensure_conn(conn) as c:
-        if interface:
+        if interface_id is not None:
             cursor = _run_query(
                 c,
                 """
                 SELECT * FROM peers
                 WHERE REPLACE(LOWER(id), '-', '') LIKE ?
-                  AND interface = ?
-                ORDER BY interface, ip_address
+                  AND interface_id = ?
+                ORDER BY interface_id, ip_address
                 """,
-                (like_pattern, interface),
+                (like_pattern, interface_id),
             )
         else:
             cursor = _run_query(
@@ -421,23 +441,23 @@ def find_peers_by_id_prefix(
                 """
                 SELECT * FROM peers
                 WHERE REPLACE(LOWER(id), '-', '') LIKE ?
-                ORDER BY interface, ip_address
+                ORDER BY interface_id, ip_address
                 """,
                 (like_pattern,),
             )
         return cursor.fetchall()
 
-def list_peers(interface: str | None = None, conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
-    """Lists all peers, optionally filtered by a specific interface."""
+def list_peers(interface_id: int | None = None, conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
+    """Lists all peers, optionally filtered by a specific interface ID."""
     with _ensure_conn(conn) as c:
-        if interface:
+        if interface_id is not None:
             cursor = _run_query(
                 c,
-                "SELECT * FROM peers WHERE interface = ? ORDER BY ip_address",
-                (interface,),
+                "SELECT * FROM peers WHERE interface_id = ? ORDER BY ip_address",
+                (interface_id,),
             )
         else:
-            cursor = _run_query(c, "SELECT * FROM peers ORDER BY interface, ip_address")
+            cursor = _run_query(c, "SELECT * FROM peers ORDER BY interface_id, ip_address")
         return cursor.fetchall()
 
 def remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
@@ -462,6 +482,7 @@ def update_peer(
     desc: str | None | _UnsetType = _UNSET,
     mtu: int | None | _UnsetType = _UNSET,
     keepalive: int | None | _UnsetType = _UNSET,
+    expires_at: str | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the peer fields that are not _UNSET."""
@@ -486,6 +507,9 @@ def update_peer(
     if keepalive is not _UNSET:
         updates.append("keepalive = ?")
         params.append(keepalive)
+    if expires_at is not _UNSET:
+        updates.append("expires_at = ?")
+        params.append(expires_at)
 
     if not updates:
         return
@@ -536,9 +560,7 @@ def append_audit_event(
     """Insert an append-only audit row. Caller must own the transaction."""
     _validate_audit_metadata(metadata)
     if occurred_at is None:
-        from datetime import datetime, timezone
-
-        occurred_at = datetime.now(timezone.utc).isoformat()
+        occurred_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     metadata_json = json.dumps(metadata) if metadata is not None else None
     conn.execute(
         """

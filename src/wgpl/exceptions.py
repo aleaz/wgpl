@@ -42,6 +42,10 @@ class PeerInterfaceMismatchError(WgplException):
     """Raised when a peer does not belong to the requested interface."""
     pass
 
+class AmbiguousInterfaceError(WgplException):
+    """Raised when an interface name matches multiple interfaces in the database."""
+    pass
+
 class AmbiguousPeerIdError(WgplException):
     """Raised when a peer ID prefix matches more than one peer."""
     pass

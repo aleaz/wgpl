@@ -20,5 +20,5 @@ def wgpl_db(monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
 def wg0_interface(wgpl_db: str) -> str:
     """Register wg0 with a /24 pool."""
     public_key = wireguard.generate_keypair().public_key
-    db.add_interface("wg0", "vpn.example.com", public_key, "10.0.0.0/24", 51820)
-    return "wg0"
+    iface_id = db.add_interface("wg0", "vpn.example.com", public_key, "10.0.0.0/24", 51820)
+    return str(iface_id)
