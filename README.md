@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**WGPL** is a lightweight, Enterprise-Grade Control Plane for WireGuard. It acts as a Single Source of Truth (SSOT) to manage the lifecycle of WireGuard peers across multiple servers, decoupling the configuration management from the underlying network hardware.
+**WGPL** is a DevOps-first WireGuard control plane. It automates zero-downtime deployments and manages peers across multiple servers effortlessly, acting as a Single Source of Truth (SSOT) to decouple configuration management from underlying network hardware.
 
 ## Features
 
