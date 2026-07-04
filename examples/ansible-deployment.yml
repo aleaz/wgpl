@@ -1,0 +1,31 @@
+---
+- name: Zero-Downtime WireGuard Deployment with WGPL
+  hosts: vpn_gateways
+  become: yes
+  tasks:
+    - name: Fetch declarative configuration from Control Plane (localhost)
+      delegate_to: localhost
+      become: no
+      # We extract the configuration for the specific target server
+      # Assuming WGPL interfaces are named like the Ansible inventory_hostname
+      command: wgpl interface export {{ inventory_hostname }}
+      register: wg_config
+      changed_when: false
+
+    - name: Ensure WireGuard interface exists and is up
+      command: wg show {{ inventory_hostname }}
+      register: wg_status
+      failed_when: false
+      changed_when: false
+
+    - name: Apply Zero-Downtime state via wg syncconf
+      # The config is securely piped directly into the kernel module
+      # Existing active connections (TCP/UDP) will NOT be dropped.
+      shell: echo "{{ wg_config.stdout }}" | wg syncconf {{ inventory_hostname }} /dev/stdin
+      when: wg_status.rc == 0
+      notify: Save WireGuard config
+
+  handlers:
+    - name: Save WireGuard config
+      # Persist the running kernel state to disk for reboots
+      shell: wg-quick save {{ inventory_hostname }}

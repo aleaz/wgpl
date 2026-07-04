@@ -173,6 +173,17 @@ wgpl peer history wg0 <PEER_ID>
 
 ---
 
+## Advanced Integrations
+
+WGPL is designed to integrate seamlessly into modern DevOps and Cloud-Native stacks. To keep this README clean, we have provided fully working examples in the `examples/` directory:
+
+- **[Ansible Playbook](examples/ansible-deployment.yml):** Centralize multi-server zero-downtime updates from an Ansible control node.
+- **[Terraform & Cloud Firewalls](examples/terraform-external-data.tf):** Dynamically whitelist WireGuard peer IPs in an AWS Security Group (or GCP/Azure) using Terraform's `external` data source.
+- **[GitHub Actions (GitOps)](examples/github-actions-gitops.yml):** Deploy VPN configuration seamlessly via CI/CD from a declarative YAML state.
+- **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** Embed WGPL inside a Python web API to generate and return QR codes to users automatically.
+
+---
+
 ## Quick Start & Installation
 
 WGPL requires **Python 3.12+**.
