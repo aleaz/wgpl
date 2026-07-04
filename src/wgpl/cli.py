@@ -342,7 +342,7 @@ def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Int
             raise InterfaceNotFoundError(f"Interface {name} not found")
 
         if ctx.obj.get("json"):
-            _output(ctx, interface)
+            _output(ctx, dict(interface))
         else:
             rows = [
                 ("Name", str(interface["name"])),
