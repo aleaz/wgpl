@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import core
+from . import db
 from .exceptions import (
     AmbiguousInterfaceError,
     InterfaceAlreadyExistsError,
@@ -204,7 +205,7 @@ def interface_add(
     desc: str | None = typer.Option(None, "--desc", help="Description of the interface"),
     mtu: int | None = typer.Option(None, "--mtu", help="Global MTU for the interface and clients"),
     keepalive: int | None = typer.Option(None, "--keepalive", help="Global PersistentKeepalive for clients"),
-):
+) -> None:
     try:
         result = core.add_interface(
             name, endpoint, public_key, address_pool, port=port, dns=dns, desc=desc, mtu=mtu, keepalive=keepalive
@@ -227,7 +228,7 @@ def interface_remove(
         "--force",
         help="Delete the interface and all peers (required when peers remain)",
     ),
-):
+) -> None:
     try:
         core.remove_interface(interface, force=force)
         if ctx.obj.get("json"):
@@ -281,7 +282,7 @@ def interface_list(ctx: typer.Context) -> None:
         _exit_error(ctx, str(e))
 
 @interface_app.command("export")
-def interface_export(ctx: typer.Context, interface: str = typer.Argument(..., help="Interface name or ID to export (e.g. wg0 or 1)")):
+def interface_export(ctx: typer.Context, interface: str = typer.Argument(..., help="Interface name or ID to export (e.g. wg0 or 1)")) -> None:
     try:
         conf = core.get_interface_config(interface)
         if ctx.obj.get("json"):
@@ -298,7 +299,7 @@ def peer_show(
     ctx: typer.Context,
     interface: str | None = typer.Option(None, help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
-):
+) -> None:
     try:
         # Fetching peer data
         peers = core.list_peers(interface, expired_only=False, show_all=True)
@@ -334,10 +335,10 @@ def peer_show(
         _exit_error(ctx, str(e))
 
 @interface_app.command("show")
-def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)")):
+def interface_show(ctx: typer.Context, name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)")) -> None:
     try:
         iface_id = core.resolve_interface_ref(name)
-        interface = core.db.get_interface(iface_id)
+        interface = db.get_interface(iface_id)
         if not interface:
             raise InterfaceNotFoundError(f"Interface {name} not found")
 
@@ -375,7 +376,7 @@ def interface_update(
     clear_mtu: bool = typer.Option(False, "--clear-mtu", help="Remove interface MTU"),
     keepalive: int | None = typer.Option(None, "--keepalive", help="Global PersistentKeepalive for clients"),
     clear_keepalive: bool = typer.Option(False, "--clear-keepalive", help="Remove interface PersistentKeepalive"),
-):
+) -> None:
     try:
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
@@ -422,7 +423,7 @@ def peer_add(
     desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
     mtu: int | None = typer.Option(None, "--mtu", help="MTU override for this peer"),
     keepalive: int | None = typer.Option(None, "--keepalive", help="PersistentKeepalive override for this peer"),
-):
+) -> None:
     try:
         result = core.add_peer(interface, name, ip_address=ip, dns=dns, expires=expires, desc=desc, mtu=mtu, keepalive=keepalive)
         if ctx.obj.get("json"):
@@ -440,7 +441,7 @@ def interface_history(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
-):
+) -> None:
     try:
         events = core.list_interface_audit_history(name, limit=limit)
         if ctx.obj.get("json"):
@@ -476,7 +477,7 @@ def peer_history(
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
-):
+) -> None:
     try:
         events = core.list_peer_audit_history(peer_id, interface, limit=limit)
         if ctx.obj.get("json"):
@@ -514,7 +515,7 @@ def peer_remove(
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     hard: bool = typer.Option(False, "--hard", help="Physically delete the peer instead of soft-deleting"),
-):
+) -> None:
     try:
         canonical_id = core.resolve_peer_ref(peer_id, interface, active_only=not hard)
         core.remove_peer(interface, canonical_id, hard=hard)
@@ -529,7 +530,7 @@ def peer_remove(
 def peer_prune(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
-):
+) -> None:
     try:
         deleted = core.prune_peers(interface)
         if ctx.obj.get("json"):
@@ -556,7 +557,7 @@ def peer_update(
     clear_keepalive: bool = typer.Option(False, "--clear-keepalive", help="Remove peer PersistentKeepalive override (inherit interface default)"),
     expires: str | None = typer.Option(None, "--expires", help="When the peer should expire (e.g., '30d', '1y')"),
     clear_expires: bool = typer.Option(False, "--clear-expires", help="Remove peer expiration"),
-):
+) -> None:
     try:
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
@@ -601,7 +602,7 @@ def peer_list(
     interface: str | None = typer.Option(None, help="Filter by interface"),
     expired: bool = typer.Option(False, "--expired", help="Show only expired peers"),
     all: bool = typer.Option(False, "--all", help="Show all peers including deleted ones"),
-):
+) -> None:
     try:
         peers = core.list_peers(interface, expired_only=expired, show_all=all)
 
@@ -653,7 +654,7 @@ def peer_config(
     ctx: typer.Context, 
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
-):
+) -> None:
     try:
         _validate_allowed_ips(ctx, allowed_ips)
         config = core.get_peer_config(peer_id, allowed_ips=allowed_ips)
@@ -670,7 +671,7 @@ def peer_qr(
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write QR code as PNG to this file"),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
-):
+) -> None:
     try:
         _validate_allowed_ips(ctx, allowed_ips)
         if output is not None:
@@ -702,7 +703,7 @@ def peer_qr(
 def validate_cmd(
     ctx: typer.Context,
     interface: str | None = typer.Argument(None, help="Interface name to check (all if omitted)"),
-):
+) -> None:
     """Validate database consistency (peer IPs in pool, DNS values)."""
     try:
         result = core.validate_state(interface)
@@ -752,7 +753,7 @@ def db_restore(
         "-", 
         help="SQL file to restore from (use '-' for stdin)"
     )
-):
+) -> None:
     """Restore the database from a logical SQL script (destructive)."""
     try:
         sql_script = file.read()
@@ -769,7 +770,7 @@ def db_restore(
 # --- Apply ---
 
 @app.command("apply")
-def apply(ctx: typer.Context, interface: str = typer.Argument(..., help="Interface name to sync (e.g. wg0)")):
+def apply(ctx: typer.Context, interface: str = typer.Argument(..., help="Interface name to sync (e.g. wg0)")) -> None:
     """Syncs the WireGuard interface with the database state."""
     try:
         core.sync_interface(interface)
