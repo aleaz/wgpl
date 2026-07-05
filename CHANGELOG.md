@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Consistent point-in-time database dumps under exclusive lock
-- `peer update` resolves peer reference inside the transaction
-- Soft-delete timestamps use ISO-8601 UTC
-- `remove_peer` idempotent soft-remove; audit `updated` only on real value changes
-- Treat naive `expires_at` timestamps as UTC in lifecycle checks (no crash on legacy rows)
-- `peer history` / `interface history` `--limit` returns the most recent events (not the oldest)
-- `db restore`: validate row integrity before swap; rotate backups (keep 3); clean tmp on init failure
-- `peer add` exits cleanly on invalid MTU/keepalive (ValueError)
-
 ### Added
 
 - Tests: restore retry, chmod 600, JSON validate errors, pool rejection CLI, audit metadata asserts
@@ -47,22 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PeerInterfaceMismatchError` for wrong-interface peer operations
 - Interface add/remove routed through `core`
 
-### Fixed
-
-- `peer list --json`: `dns` reflects the effective value; added `dns_override` for the peer-stored value
-- `peer remove --json`: returns canonical UUID in `id` plus the user-supplied ref in `input`
-- `interface remove` reports an error when the interface does not exist
-- `syncconf` temp file is created with `chmod 600` before writing peer config
-- Atomic database restore with schema validation, `.bak.*` backup at `chmod 600`, and WAL/SHM cleanup
-- Double peer ID resolution bug in `peer remove`
-- `validate` interface issues use `peer: null` instead of an empty string
-- `db.add_peer` distinguishes IP vs name uniqueness conflicts
-- `validate` and `resolve_peer_ref` skip soft-deleted and expired peers by default
-- `peer remove` on an already soft-deleted peer returns not found instead of re-deleting silently
-- IP pool allocation no longer treats expired peers as occupying addresses (`_pool_used_ips` uses `_is_peer_active`)
-- `peer prune` removes expired peers correctly (`_is_peer_active` in core, not broken SQL timestamp comparison)
-- Expired peers no longer block reuse of the same peer name on `peer add` / `peer update`
-
 ### Changed
 
 - **Breaking:** `interface remove` fails if the interface has any peers unless `--force` is passed
@@ -76,6 +49,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `wgpl db dump` hints on stderr; SQL script lines come from `core.dump_database_lines()` (no I/O in core)
 - `peer config` / `peer qr`: PersistentKeepalive and MTU come from the database (interface → peer cascade), not CLI flags
 - CONTRIBUTING: self-contained Conventional Commit messages (no internal process IDs)
+
+### Fixed
+
+- `peer history` resolves short-ID prefixes for soft-deleted and pruned peers from audit events
+- `db.update_peer` correctly distinguishes IP vs name uniqueness conflicts
+- Consistent point-in-time database dumps under exclusive lock
+- `peer update` resolves peer reference inside the transaction
+- Soft-delete timestamps use ISO-8601 UTC
+- `remove_peer` idempotent soft-remove; audit `updated` only on real value changes
+- Treat naive `expires_at` timestamps as UTC in lifecycle checks (no crash on legacy rows)
+- `peer history` / `interface history` `--limit` returns the most recent events (not the oldest)
+- `db restore`: validate row integrity before swap; rotate backups (keep 3); clean tmp on init failure
+- `peer add` exits cleanly on invalid MTU/keepalive (ValueError)
+- `peer list --json`: `dns` reflects the effective value; added `dns_override` for the peer-stored value
+- `peer remove --json`: returns canonical UUID in `id` plus the user-supplied ref in `input`
+- `interface remove` reports an error when the interface does not exist
+- `syncconf` temp file is created with `chmod 600` before writing peer config
+- Atomic database restore with schema validation, `.bak.*` backup at `chmod 600`, and WAL/SHM cleanup
+- Double peer ID resolution bug in `peer remove`
+- `validate` interface issues use `peer: null` instead of an empty string
+- `db.add_peer` distinguishes IP vs name uniqueness conflicts
+- `validate` and `resolve_peer_ref` skip soft-deleted and expired peers by default
+- `peer remove` on an already soft-deleted peer returns not found instead of re-deleting silently
+- IP pool allocation no longer treats expired peers as occupying addresses (`_pool_used_ips` uses `_is_peer_active`)
+- `peer prune` removes expired peers correctly (`_is_peer_active` in core, not broken SQL timestamp comparison)
+- Expired peers no longer block reuse of the same peer name on `peer add` / `peer update`
 
 ### Security
 
