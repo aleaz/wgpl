@@ -531,6 +531,25 @@ def find_peers_by_id_prefix(
         return cursor.fetchall()
 
 
+def find_deleted_peer_id_from_audit(
+    prefix: str,
+    conn: sqlite3.Connection | None = None,
+) -> list[str]:
+    """Find a peer's full UUID from the audit logs using its hex prefix."""
+    like_pattern = f"{prefix}%"
+    with _ensure_conn(conn) as c:
+        cursor = _run_query(
+            c,
+            """
+            SELECT DISTINCT entity_id FROM audit_events
+            WHERE entity_type = 'peer'
+              AND REPLACE(LOWER(entity_id), '-', '') LIKE ?
+            """,
+            (like_pattern,),
+        )
+        return [row["entity_id"] for row in cursor.fetchall()]
+
+
 def list_peers(
     interface_id: int | None = None, conn: sqlite3.Connection | None = None
 ) -> list[sqlite3.Row]:
@@ -611,11 +630,12 @@ def update_peer(
                 params,
             )
     except sqlite3.IntegrityError as exc:
-        if name is not _UNSET:
+        err_msg = str(exc).lower()
+        if "name" in err_msg and name is not _UNSET:
             raise PeerAlreadyExistsError(
                 f"Peer name '{name}' already exists in this interface."
             ) from exc
-        if ip_address is not _UNSET:
+        if "ip_address" in err_msg and ip_address is not _UNSET:
             raise IpAlreadyInUseError(
                 f"IP {ip_address} is already assigned in this interface"
             ) from exc

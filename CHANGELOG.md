@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** `interface remove` fails if the interface has any peers unless `--force` is passed
-- Reclaiming an expired peer's IP or name logs `reclaimed` and hard-deletes the old row (audit preserved in `audit_events`)
+- Reclaiming an expired peer's IP or name logs `reclaimed` and soft-deletes the old row (audit preserved in `audit_events`)
 - `get_peer_status()` delegates expiration checks to `_is_peer_active()`
 - `peer update` logs an `updated` audit event with changed field names
 - `peer history` / `interface history` accept `--limit` (default 100)

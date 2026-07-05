@@ -171,8 +171,20 @@ def list_peer_audit_history(
     except PeerNotFoundError:
         normalized = _normalize_peer_ref(peer_ref)
         if len(normalized) != _PEER_ID_HEX_LEN:
-            raise
-        canonical_id = str(uuid.UUID(hex=normalized))
+            matches = db.find_deleted_peer_id_from_audit(normalized)
+            if not matches:
+                raise PeerNotFoundError(
+                    f"Peer {peer_ref} not found in current peers or audit history"
+                )
+            if len(matches) > 1:
+                from wgpl.exceptions import AmbiguousPeerIdError
+
+                raise AmbiguousPeerIdError(
+                    f"Peer ID prefix '{peer_ref}' is ambiguous in audit history"
+                )
+            canonical_id = matches[0]
+        else:
+            canonical_id = str(uuid.UUID(hex=normalized))
     rows = db.list_audit_events(
         entity_type=db.AuditEntityType.PEER,
         entity_id=canonical_id,
@@ -659,7 +671,7 @@ def _reclaim_inactive_peer_slots(
     name: str | None = None,
     replaced_by_peer_id: str,
 ) -> None:
-    """Hard-delete inactive peers blocking partial unique indexes; log reclaimed events."""
+    """Soft-delete inactive peers blocking partial unique indexes; log reclaimed events."""
     if ip is None and name is None:
         return
     for peer in db.list_peers(iface_id, conn=conn):

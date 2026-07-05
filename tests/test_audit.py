@@ -56,7 +56,9 @@ def test_remove_peer_soft_and_hard_audit(wg0_interface: str) -> None:
     assert any(e.get("metadata") == {"hard": True} for e in hard_events)
 
 
-def test_reclaim_expired_logs_reclaimed_and_old_row_gone(wg0_interface: str) -> None:
+def test_reclaim_expired_logs_reclaimed_and_old_row_soft_deleted(
+    wg0_interface: str,
+) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3", expires="1h")
     old_id = str(peer["id"])
 
