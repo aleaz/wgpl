@@ -30,7 +30,9 @@ def test_add_peer_logs_created_event(wg0_interface: str) -> None:
     events = core.list_peer_audit_history(str(peer["id"]), wg0_interface)
     assert len(events) == 1
     assert events[0]["event_type"] == AuditEventType.CREATED
-    assert events[0]["metadata"] is None or "private_key" not in str(events[0]["metadata"])
+    assert events[0]["metadata"] is None or "private_key" not in str(
+        events[0]["metadata"]
+    )
 
 
 def test_remove_peer_soft_and_hard_audit(wg0_interface: str) -> None:
@@ -58,7 +60,9 @@ def test_reclaim_expired_logs_reclaimed_and_old_row_gone(wg0_interface: str) -> 
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3", expires="1h")
     old_id = str(peer["id"])
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
         conn.commit()
@@ -116,7 +120,9 @@ def test_interface_remove_blocked_with_peers(wg0_interface: str) -> None:
 
 def test_interface_remove_blocked_with_expired_peer_only(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", expires="1h")
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -157,8 +163,6 @@ def test_interface_add_logs_created(wgpl_db: str) -> None:
     events = core.list_interface_audit_history("wg1")
     assert len(events) == 1
     assert events[0]["event_type"] == AuditEventType.CREATED
-
-
 
 
 def test_peer_update_logs_updated_event(wg0_interface: str) -> None:
@@ -223,7 +227,9 @@ def test_add_peer_rolls_back_when_audit_fails_on_second_event(
 ) -> None:
     expired = core.add_peer(wg0_interface, "old", ip_address="10.0.0.3", expires="1h")
     old_id = str(expired["id"])
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
         conn.commit()
@@ -246,13 +252,24 @@ def test_add_peer_rolls_back_when_audit_fails_on_second_event(
     assert db.get_peer(old_id) is not None
     assert audit_calls == 2
     peers = db.list_peers(int(wg0_interface))
-    assert len([p for p in peers if p["ip_address"] == "10.0.0.3" and core.get_peer_status(p) == "Active"]) == 0
+    assert (
+        len(
+            [
+                p
+                for p in peers
+                if p["ip_address"] == "10.0.0.3" and core.get_peer_status(p) == "Active"
+            ]
+        )
+        == 0
+    )
 
 
 def test_reclaim_via_peer_update_logs_reclaimed(wg0_interface: str) -> None:
     expired = core.add_peer(wg0_interface, "old", ip_address="10.0.0.3", expires="1h")
     old_id = str(expired["id"])
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
         conn.commit()

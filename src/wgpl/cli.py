@@ -943,7 +943,7 @@ def db_dump(
                 os.close(fd)
                 core.dump_database(path)
                 with open(path, "rb") as f:
-                    shutil.copyfileobj(f, sys.stdout.buffer)
+                    shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]
             finally:
                 os.remove(path)
     except WgplException as e:

@@ -62,7 +62,17 @@ def test_json_interface_add_includes_dns(wgpl_db: str) -> None:
 def test_json_interface_list(wgpl_db: str, iface_pubkey: str) -> None:
     runner.invoke(
         app,
-        ["--json", "interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24", "--dns", "1.1.1.1"],
+        [
+            "--json",
+            "interface",
+            "add",
+            "wg0",
+            "vpn.example.com",
+            iface_pubkey,
+            "10.0.0.0/24",
+            "--dns",
+            "1.1.1.1",
+        ],
     )
 
     result = runner.invoke(app, ["--json", "interface", "list"])
@@ -82,7 +92,11 @@ def test_json_interface_remove(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "remove", "wg0"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"status": "success", "interface": "wg0", "force": False}
+    assert json.loads(result.stdout) == {
+        "status": "success",
+        "interface": "wg0",
+        "force": False,
+    }
 
 
 def test_json_interface_export(wgpl_db: str, iface_pubkey: str) -> None:
@@ -173,7 +187,9 @@ def test_json_peer_remove_canonical_id(wgpl_db: str) -> None:
 
 def test_json_peer_config_includes_private_key(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "cfg"]).stdout)
+    peer = json.loads(
+        runner.invoke(app, ["--json", "peer", "add", "wg0", "cfg"]).stdout
+    )
 
     result = runner.invoke(app, ["--json", "peer", "config", peer["id"]])
 
@@ -196,7 +212,9 @@ def test_json_peer_qr_ascii(wgpl_db: str) -> None:
 
 def test_json_peer_qr_output_file(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "qrfile"]).stdout)
+    peer = json.loads(
+        runner.invoke(app, ["--json", "peer", "add", "wg0", "qrfile"]).stdout
+    )
     output_path = Path(tempfile.mkdtemp()) / "peer.png"
 
     result = runner.invoke(
@@ -263,7 +281,9 @@ def test_json_peer_update(wgpl_db: str, iface_pubkey: str) -> None:
         app,
         ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
     )
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout)
+    peer = json.loads(
+        runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout
+    )
 
     result = runner.invoke(
         app,
@@ -294,7 +314,9 @@ def test_json_validate_error(wgpl_db: str, iface_pubkey: str) -> None:
         app,
         ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
     )
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout)
+    peer = json.loads(
+        runner.invoke(app, ["--json", "peer", "add", "wg0", "phone"]).stdout
+    )
     with db.get_db() as conn:
         conn.execute(
             "UPDATE peers SET ip_address = ? WHERE id = ?",

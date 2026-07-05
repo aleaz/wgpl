@@ -41,12 +41,18 @@ def _parse_duration(duration: str) -> datetime.datetime:
     """Parses a duration string (e.g. '7d', '24h') and returns a future datetime."""
     match = re.match(r"^(\d+)([dh])$", duration)
     if not match:
-        raise WgplException(f"Invalid duration format: '{duration}'. Expected format like '7d' or '24h'.")
-    
+        raise WgplException(
+            f"Invalid duration format: '{duration}'. Expected format like '7d' or '24h'."
+        )
+
     value = int(match.group(1))
     unit = match.group(2)
-    
-    delta = datetime.timedelta(days=value) if unit == 'd' else datetime.timedelta(hours=value)
+
+    delta = (
+        datetime.timedelta(days=value)
+        if unit == "d"
+        else datetime.timedelta(hours=value)
+    )
     return datetime.datetime.now(datetime.timezone.utc) + delta
 
 
@@ -175,7 +181,9 @@ def list_peer_audit_history(
     return [audit_event_to_dict(row) for row in rows]
 
 
-def list_interface_audit_history(ref: str, *, limit: int = 100, conn: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
+def list_interface_audit_history(
+    ref: str, *, limit: int = 100, conn: sqlite3.Connection | None = None
+) -> list[dict[str, Any]]:
     """Return audit events for an interface (including after it was removed)."""
     try:
         iface_id = resolve_interface_ref(ref, conn=conn)
@@ -242,7 +250,9 @@ def resolve_peer_ref(
         matches = db.find_peers_by_id_prefix(normalized, iface_id, conn=conn)
         if active_only:
             matches = [peer for peer in matches if _is_peer_active(peer)]
-        exact = [peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized]
+        exact = [
+            peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized
+        ]
         if len(exact) == 1:
             return str(exact[0]["id"])
         if len(exact) > 1:
@@ -264,8 +274,12 @@ def resolve_peer_ref(
 def _ambiguous_interface_message(ref: str, matches: list[sqlite3.Row]) -> str:
     lines = [f"Multiple interfaces named '{ref}':"]
     for i, iface in enumerate(matches, 1):
-        lines.append(f"  ID {iface['id']} → {iface['endpoint']}:{iface['port']} ({iface['address_pool']})")
-    lines.append(f"Specify the interface ID directly, e.g.: wgpl <command> {matches[0]['id']} ...")
+        lines.append(
+            f"  ID {iface['id']} → {iface['endpoint']}:{iface['port']} ({iface['address_pool']})"
+        )
+    lines.append(
+        f"Specify the interface ID directly, e.g.: wgpl <command> {matches[0]['id']} ..."
+    )
     return "\n".join(lines)
 
 
@@ -280,14 +294,14 @@ def resolve_interface_ref(
         if iface:
             return iface_id
         # Fallback to treating it as a name if no ID matches (unlikely, but robust)
-    
+
     matches = db.get_interfaces_by_name(ref, conn=conn)
     if not matches:
         raise InterfaceNotFoundError(f"Interface {ref} not found")
-    
+
     if len(matches) == 1:
         return int(matches[0]["id"])
-    
+
     raise AmbiguousInterfaceError(_ambiguous_interface_message(ref, matches))
 
 
@@ -371,14 +385,16 @@ def validate_endpoint(endpoint: str) -> str:
         return endpoint
     except ValueError:
         pass
-    
+
     # Regex for valid hostname (RFC 1123)
     hostname_re = re.compile(
         r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*"
         r"([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$"
     )
     if not hostname_re.match(endpoint):
-        raise ValueError(f"Invalid endpoint '{endpoint}'. Must be a valid IP or hostname.")
+        raise ValueError(
+            f"Invalid endpoint '{endpoint}'. Must be a valid IP or hostname."
+        )
     return endpoint
 
 
@@ -388,9 +404,11 @@ def validate_public_key(key: str) -> str:
     if not key:
         raise ValueError("Public key cannot be empty")
     try:
-        decoded = base64.b64decode(key.encode('utf-8'), validate=True)
+        decoded = base64.b64decode(key.encode("utf-8"), validate=True)
         if len(decoded) != 32:
-            raise ValueError(f"Invalid public key length: expected 32 decoded bytes, got {len(decoded)}")
+            raise ValueError(
+                f"Invalid public key length: expected 32 decoded bytes, got {len(decoded)}"
+            )
     except Exception as exc:
         raise ValueError("Invalid public key: must be valid Base64") from exc
     return key
@@ -412,10 +430,12 @@ def add_interface(
     if not name:
         raise ValueError("Interface name cannot be empty")
     if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", name):
-        raise ValueError("Interface name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores.")
+        raise ValueError(
+            "Interface name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
+        )
     if not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
-    
+
     endpoint = validate_endpoint(endpoint)
     public_key = validate_public_key(public_key)
 
@@ -476,7 +496,7 @@ def remove_interface(ref: str, *, force: bool = False) -> None:
         iface = db.get_interface(iface_id, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {ref} not found")
-        
+
         name = str(iface["name"])
 
         peers = db.list_peers(iface_id, conn=conn)
@@ -491,13 +511,21 @@ def remove_interface(ref: str, *, force: bool = False) -> None:
                 peer,
                 db.AuditEventType.CASCADE_REMOVED,
                 conn,
-                metadata={"trigger": "interface_removed", "interface": name, "interface_id": iface_id},
+                metadata={
+                    "trigger": "interface_removed",
+                    "interface": name,
+                    "interface_id": iface_id,
+                },
             )
         _audit_interface_event(
             iface_id,
             db.AuditEventType.REMOVED,
             conn,
-            metadata={"name": name, "peer_count": len(peers), "forced": bool(peers and force)},
+            metadata={
+                "name": name,
+                "peer_count": len(peers),
+                "forced": bool(peers and force),
+            },
         )
         db.remove_interface(iface_id, conn=conn)
 
@@ -544,6 +572,7 @@ def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
     """Return peer DNS override or interface default."""
     return get_effective_dns(peer["dns"], iface["dns"])
 
+
 def _effective_peer_mtu(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
     peer_mtu = peer["mtu"]
     if peer_mtu is not None:
@@ -552,6 +581,7 @@ def _effective_peer_mtu(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
     if iface_mtu is not None:
         return int(iface_mtu)
     return None
+
 
 def _effective_peer_keepalive(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
     peer_ka = peer["keepalive"]
@@ -611,7 +641,9 @@ def _validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
         pass
 
 
-def _validate_requested_peer_ip(ip: str, network: ipaddress.IPv4Network, used_ips: set[str]) -> None:
+def _validate_requested_peer_ip(
+    ip: str, network: ipaddress.IPv4Network, used_ips: set[str]
+) -> None:
     """Raise if ip is invalid, outside the pool, reserved, or already used."""
     _validate_peer_ip_in_pool(ip, network)
 
@@ -669,12 +701,12 @@ def allocate_peer_ip(
             try:
                 used_ips_int = {int(ipaddress.IPv4Address(ip)) for ip in used_ips}
                 max_ip_int = max(used_ips_int)
-                
+
                 # Check from max_ip + 1 to end of network
                 for ip_int in range(max_ip_int + 1, int(network.broadcast_address)):
                     if ip_int not in used_ips_int:
                         return str(ipaddress.IPv4Address(ip_int))
-                        
+
                 # Wrap around: Check from first host to max_ip
                 for ip_int in range(int(network.network_address) + 1, max_ip_int):
                     if ip_int not in used_ips_int:
@@ -778,6 +810,7 @@ def add_peer(
         "keepalive": keepalive,
     }
 
+
 def remove_peer(interface_ref: str, canonical_peer_id: str, hard: bool = False) -> None:
     """Removes a peer from the database. Does a soft-delete by default."""
     with db.transaction() as conn:
@@ -786,7 +819,7 @@ def remove_peer(interface_ref: str, canonical_peer_id: str, hard: bool = False) 
         if not peer:
             raise PeerNotFoundError(f"Peer {canonical_peer_id} not found")
 
-        if peer['interface_id'] != iface_id:
+        if peer["interface_id"] != iface_id:
             raise PeerInterfaceMismatchError(
                 f"Peer {canonical_peer_id} does not belong to interface {interface_ref}"
             )
@@ -835,6 +868,7 @@ def prune_peers(interface_ref: str) -> int:
 
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
+
 def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
     canonical_id = resolve_peer_ref(peer_id)
@@ -842,11 +876,11 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
 
-    iface = db.get_interface(peer['interface_id'])
+    iface = db.get_interface(peer["interface_id"])
     if not iface:
         raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
-        
-    network = ipaddress.IPv4Network(iface['address_pool'], strict=False)
+
+    network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
 
     config_lines = [
         "[Interface]",
@@ -862,27 +896,26 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     if effective_mtu is not None:
         config_lines.append(f"MTU = {effective_mtu}")
 
-    config_lines.extend([
-        "",
-        "[Peer]",
-        f"PublicKey = {iface['public_key']}"
-    ])
-    
-    if peer['preshared_key']:
+    config_lines.extend(["", "[Peer]", f"PublicKey = {iface['public_key']}"])
+
+    if peer["preshared_key"]:
         config_lines.append(f"PresharedKey = {peer['preshared_key']}")
-        
-    config_lines.extend([
-        f"Endpoint = {iface['endpoint']}:{iface['port']}",
-        f"AllowedIPs = {allowed_ips}",
-    ])
+
+    config_lines.extend(
+        [
+            f"Endpoint = {iface['endpoint']}:{iface['port']}",
+            f"AllowedIPs = {allowed_ips}",
+        ]
+    )
 
     effective_keepalive = _effective_peer_keepalive(peer, iface)
     if effective_keepalive is not None:
         config_lines.append(f"PersistentKeepalive = {effective_keepalive}")
 
     config_lines.append("")
-    
+
     return "\n".join(config_lines)
+
 
 def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     """Generates an ASCII-art QR code for the given peer configuration."""
@@ -893,6 +926,7 @@ def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     qr.print_ascii(out=f, invert=True)
     f.seek(0)
     return f.read()
+
 
 def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> bytes:
     """Generates a PNG QR code image for the given peer configuration."""
@@ -910,31 +944,33 @@ def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> bytes
     img.save(buffer)
     return buffer.getvalue()
 
+
 def get_interface_config(interface_ref: str) -> str:
     """Generates the declarative config string for the server interface."""
     iface_id = resolve_interface_ref(interface_ref)
     iface = db.get_interface(iface_id)
     if not iface:
         raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
-        
+
     peers = db.list_peers(iface_id)
-    
+
     conf_lines = []
     if iface["mtu"] is not None:
         conf_lines.append(f"MTU = {iface['mtu']}")
         conf_lines.append("")
-    
+
     for peer in peers:
         if not _is_peer_active(peer):
             continue
         conf_lines.append("[Peer]")
         conf_lines.append(f"PublicKey = {peer['public_key']}")
-        if peer['preshared_key']:
+        if peer["preshared_key"]:
             conf_lines.append(f"PresharedKey = {peer['preshared_key']}")
         conf_lines.append(f"AllowedIPs = {peer['ip_address']}/32")
         conf_lines.append("")
-        
+
     return "\n".join(conf_lines)
+
 
 def sync_interface(interface_ref: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
@@ -977,7 +1013,9 @@ def validate_peers_in_pool(
         try:
             _validate_peer_ip_in_pool(ip, network)
         except InvalidPeerIpError as exc:
-            conflicts.append({"name": str(peer["name"]), "ip_address": ip, "detail": str(exc)})
+            conflicts.append(
+                {"name": str(peer["name"]), "ip_address": ip, "detail": str(exc)}
+            )
 
     if conflicts:
         raise PeersOutsidePoolError(interface_name, conflicts)
@@ -1018,14 +1056,31 @@ def update_interface(
     if clear_keepalive and keepalive is not None:
         raise ValueError("Cannot set both keepalive and clear_keepalive")
 
-    has_field = any(v is not None for v in (endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive))
-    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive:
+    has_field = any(
+        v is not None
+        for v in (endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive)
+    )
+    if (
+        not has_field
+        and not clear_dns
+        and not clear_desc
+        and not clear_mtu
+        and not clear_keepalive
+    ):
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
     if mtu is not None or clear_mtu:
         hints.append("apply_server")
-    if any(x is not None for x in (endpoint, port, public_key, address_pool, dns, mtu, keepalive)) or clear_dns or clear_mtu or clear_keepalive:
+    if (
+        any(
+            x is not None
+            for x in (endpoint, port, public_key, address_pool, dns, mtu, keepalive)
+        )
+        or clear_dns
+        or clear_mtu
+        or clear_keepalive
+    ):
         if "re_export_clients" not in hints:
             hints.append("re_export_clients")
 
@@ -1095,7 +1150,7 @@ def update_interface(
         iface = db.get_interface(iface_id, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {ref} not found")
-        
+
         name = str(iface["name"])
 
         if normalized_pool is not None and normalized_pool != iface["address_pool"]:
@@ -1116,9 +1171,13 @@ def update_interface(
 
         updated = db.get_interface(iface_id, conn=conn)
         if not updated:
-            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found after update")
+            raise InterfaceNotFoundError(
+                f"Interface ID {iface_id} not found after update"
+            )
 
-        actual_changes = _interface_actual_changed_fields(iface, updated, changed_fields)
+        actual_changes = _interface_actual_changed_fields(
+            iface, updated, changed_fields
+        )
         if actual_changes:
             _audit_interface_event(
                 iface_id,
@@ -1127,7 +1186,9 @@ def update_interface(
                 metadata={"name": name, "fields": actual_changes},
             )
 
-    result: dict[str, str | int | list[str] | None] = dict(_interface_row_to_dict(updated))
+    result: dict[str, str | int | list[str] | None] = dict(
+        _interface_row_to_dict(updated)
+    )
     result["hints"] = list(dict.fromkeys(hints))
     return result
 
@@ -1166,16 +1227,30 @@ def update_peer(
     if clear_expires and expires is not None:
         raise ValueError("Cannot set both expires and clear_expires")
 
-    has_field = any(v is not None for v in (name, ip_address, dns, desc, mtu, keepalive, expires))
-    if not has_field and not clear_dns and not clear_desc and not clear_mtu and not clear_keepalive and not clear_expires:
+    has_field = any(
+        v is not None for v in (name, ip_address, dns, desc, mtu, keepalive, expires)
+    )
+    if (
+        not has_field
+        and not clear_dns
+        and not clear_desc
+        and not clear_mtu
+        and not clear_keepalive
+        and not clear_expires
+    ):
         raise NoUpdateFieldsError("No fields provided to update")
 
     hints: list[str] = []
     if ip_address is not None:
         hints.append("apply_server")
-    if any(x is not None for x in (ip_address, dns, mtu, keepalive)) or clear_dns or clear_mtu or clear_keepalive:
+    if (
+        any(x is not None for x in (ip_address, dns, mtu, keepalive))
+        or clear_dns
+        or clear_mtu
+        or clear_keepalive
+    ):
         hints.append("re_export_client")
-    
+
     if mtu is not None and mtu < 576:
         raise ValueError(f"MTU must be >= 576, got {mtu}")
     if keepalive is not None and not (0 <= keepalive <= 65535):
@@ -1186,7 +1261,9 @@ def update_peer(
     normalized_mtu = _resolve_optional(mtu, clear_mtu)
     normalized_keepalive = _resolve_optional(keepalive, clear_keepalive)
 
-    normalized_expires = _resolve_optional(_parse_duration(expires).isoformat() if expires else None, clear_expires)
+    normalized_expires = _resolve_optional(
+        _parse_duration(expires).isoformat() if expires else None, clear_expires
+    )
 
     changed_fields: list[str] = []
     if name is not None:
@@ -1206,7 +1283,9 @@ def update_peer(
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
-        canonical_id = resolve_peer_ref(peer_ref, str(iface_id), active_only=active_only, conn=conn)
+        canonical_id = resolve_peer_ref(
+            peer_ref, str(iface_id), active_only=active_only, conn=conn
+        )
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
@@ -1286,7 +1365,9 @@ def update_peer(
     }
 
 
-def validate_state(interface: str | None = None) -> dict[str, str | list[dict[str, str | None]]]:
+def validate_state(
+    interface: str | None = None,
+) -> dict[str, str | list[dict[str, str | None]]]:
     """Validate DB consistency without mutating state."""
     issues: list[dict[str, str | None]] = []
 
@@ -1308,12 +1389,14 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
             try:
                 validate_dns(str(iface["dns"]))
             except InvalidDnsError as exc:
-                issues.append({
-                    "interface": iface_name,
-                    "peer": None,
-                    "code": "invalid_dns",
-                    "detail": f"Interface DNS: {exc}",
-                })
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": None,
+                        "code": "invalid_dns",
+                        "detail": f"Interface DNS: {exc}",
+                    }
+                )
 
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
@@ -1323,48 +1406,58 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
             peer_name = str(peer["name"])
             ip = str(peer["ip_address"])
             if ip in seen_ips:
-                issues.append({
-                    "interface": iface_name,
-                    "peer": peer_name,
-                    "code": "duplicate_ip",
-                    "detail": f"IP {ip} also used by active peer {seen_ips[ip]}",
-                })
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "duplicate_ip",
+                        "detail": f"IP {ip} also used by active peer {seen_ips[ip]}",
+                    }
+                )
             else:
                 seen_ips[ip] = peer_name
             if peer_name in seen_names:
-                issues.append({
-                    "interface": iface_name,
-                    "peer": peer_name,
-                    "code": "duplicate_name",
-                    "detail": f"Name {peer_name} also used by peer {seen_names[peer_name]}",
-                })
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "duplicate_name",
+                        "detail": f"Name {peer_name} also used by peer {seen_names[peer_name]}",
+                    }
+                )
             else:
                 seen_names[peer_name] = str(peer["id"])
             try:
                 _validate_peer_ip_in_pool(ip, network)
             except InvalidPeerIpError as exc:
-                issues.append({
-                    "interface": iface_name,
-                    "peer": peer_name,
-                    "code": "ip_outside_pool",
-                    "detail": str(exc),
-                })
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "ip_outside_pool",
+                        "detail": str(exc),
+                    }
+                )
 
             if peer["dns"]:
                 try:
                     validate_dns(str(peer["dns"]))
                 except InvalidDnsError as exc:
-                    issues.append({
-                        "interface": iface_name,
-                        "peer": peer_name,
-                        "code": "invalid_dns",
-                        "detail": str(exc),
-                    })
+                    issues.append(
+                        {
+                            "interface": iface_name,
+                            "peer": peer_name,
+                            "code": "invalid_dns",
+                            "detail": str(exc),
+                        }
+                    )
 
     status = "ok" if not issues else "error"
     return {"status": status, "issues": issues}
 
+
 # --- Database Dump & Restore ---
+
 
 def dump_database(target_path: str) -> None:
     """Creates a binary backup of the database to target_path."""
@@ -1386,7 +1479,6 @@ def _cleanup_tmp_files(tmp_path: str) -> None:
                 os.remove(path)
             except OSError:
                 pass
-
 
 
 def _rotate_backups(db_path: str, keep: int = 3) -> None:
@@ -1433,8 +1525,6 @@ def _validate_restored_schema(path: str) -> None:
         raise WgplException(
             f"Restored database is missing required tables: {', '.join(sorted(missing))}"
         )
-
-
 
 
 def restore_database(source_path: str) -> list[str]:

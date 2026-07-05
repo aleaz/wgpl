@@ -109,22 +109,42 @@ def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
 def test_cli_interface_port_conflict(wgpl_db: str) -> None:
     _setup_interface("wg0")
     pubkey = wireguard.generate_keypair().public_key
-    
-    result = runner.invoke(app, [
-        "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.1.0/24", "--port", "51820"
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "interface",
+            "add",
+            "wg1",
+            "vpn.example.com",
+            pubkey,
+            "10.0.1.0/24",
+            "--port",
+            "51820",
+        ],
+    )
+
     assert result.exit_code == 0
 
 
 def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
     _setup_interface("wg0")
     pubkey = wireguard.generate_keypair().public_key
-    
-    result = runner.invoke(app, [
-        "interface", "add", "wg1", "vpn.example.com", pubkey, "10.0.0.0/24", "--port", "51821"
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "interface",
+            "add",
+            "wg1",
+            "vpn.example.com",
+            pubkey,
+            "10.0.0.0/24",
+            "--port",
+            "51821",
+        ],
+    )
+
     assert result.exit_code == 0
 
 
@@ -149,7 +169,9 @@ def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
     peer = core.add_peer("wg0", "guest", expires="1h")
     assert peer["id"] is not None
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -188,9 +210,7 @@ def test_cli_peer_history_json(wgpl_db: str) -> None:
     _setup_interface("wg0")
     peer = core.add_peer("wg0", "phone")
 
-    result = runner.invoke(
-        app, ["--json", "peer", "history", "wg0", str(peer["id"])]
-    )
+    result = runner.invoke(app, ["--json", "peer", "history", "wg0", str(peer["id"])])
 
     assert result.exit_code == 0
     events = json.loads(result.stdout)

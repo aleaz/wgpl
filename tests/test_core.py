@@ -27,7 +27,16 @@ from wgpl.exceptions import (
 def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
     result = core.add_peer(wg0_interface, "test_peer")
 
-    assert set(result.keys()) == {"id", "name", "ip_address", "public_key", "dns", "desc", "mtu", "keepalive"}
+    assert set(result.keys()) == {
+        "id",
+        "name",
+        "ip_address",
+        "public_key",
+        "dns",
+        "desc",
+        "mtu",
+        "keepalive",
+    }
     assert result["dns"] is None
     assert "private_key" not in result
     assert "preshared_key" not in result
@@ -87,8 +96,12 @@ def test_resolve_peer_ref_unique_prefix(wg0_interface: str) -> None:
 
 
 def test_resolve_peer_ref_ambiguous_prefix(wg0_interface: str) -> None:
-    _insert_peer("55c521ad-2d94-4689-8abc-111111111111", wg0_interface, "phone", "10.0.0.2")
-    _insert_peer("55c521ff-8abc-4689-8abc-222222222222", wg0_interface, "laptop", "10.0.0.3")
+    _insert_peer(
+        "55c521ad-2d94-4689-8abc-111111111111", wg0_interface, "phone", "10.0.0.2"
+    )
+    _insert_peer(
+        "55c521ff-8abc-4689-8abc-222222222222", wg0_interface, "laptop", "10.0.0.3"
+    )
 
     with pytest.raises(AmbiguousPeerIdError, match="ambiguous"):
         resolve_peer_ref("55c521")
@@ -292,7 +305,9 @@ def test_update_peer_ip_same(wg0_interface: str) -> None:
 
 def test_update_peer_clear_dns(wgpl_db: str) -> None:
     public_key = wireguard.generate_keypair().public_key
-    db.add_interface("wg_dns", "vpn.example.com", public_key, "10.0.0.0/24", dns="1.1.1.1")
+    db.add_interface(
+        "wg_dns", "vpn.example.com", public_key, "10.0.0.0/24", dns="1.1.1.1"
+    )
     peer = core.add_peer("wg_dns", "phone", dns="9.9.9.9")
 
     assert peer["id"] is not None
@@ -315,7 +330,9 @@ def test_validate_state_detects_bad_ip(wg0_interface: str) -> None:
     _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
 
     with db.get_db() as conn:
-        conn.execute("UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id))
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id)
+        )
         conn.commit()
 
     result = core.validate_state(wg0_interface)
@@ -332,7 +349,9 @@ def test_validate_state_skips_soft_deleted_peer(wg0_interface: str) -> None:
     core.remove_peer(wg0_interface, peer_id)
 
     with db.get_db() as conn:
-        conn.execute("UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id))
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?", ("10.0.1.50", peer_id)
+        )
         conn.commit()
 
     result = core.validate_state(wg0_interface)
@@ -344,7 +363,9 @@ def test_validate_state_skips_expired_peer(wg0_interface: str) -> None:
     peer_id = "55c521ad-2d94-4689-8abc-123456789abc"
     _insert_peer(peer_id, wg0_interface, "phone", "10.0.0.2")
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute(
             "UPDATE peers SET ip_address = ?, expires_at = ? WHERE id = ?",
@@ -380,7 +401,9 @@ def test_resolve_peer_ref_excludes_expired_by_default(wg0_interface: str) -> Non
     peer = core.add_peer(wg0_interface, "phone", expires="1h")
     assert peer["id"] is not None
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -393,7 +416,9 @@ def test_expired_peer_releases_ip_for_allocation(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3", expires="1h")
     assert peer["id"] is not None
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -415,7 +440,9 @@ def test_expired_peer_releases_name_for_allocation(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.5", expires="1h")
     assert peer["id"] is not None
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -429,7 +456,9 @@ def test_prune_removes_expired_peer(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", expires="1h")
     assert peer["id"] is not None
 
-    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
     with db.get_db() as conn:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
@@ -555,7 +584,9 @@ def test_get_interface_config_excludes_removed_peer(wg0_interface: str) -> None:
 
 def test_add_interface_registers_row(wgpl_db: str) -> None:
     pubkey = wireguard.generate_keypair().public_key
-    result = core.add_interface("wg0", "vpn.example.com", pubkey, "10.0.0.0/24", dns="1.1.1.1")
+    result = core.add_interface(
+        "wg0", "vpn.example.com", pubkey, "10.0.0.0/24", dns="1.1.1.1"
+    )
 
     assert result["address_pool"] == "10.0.0.0/24"
     assert result["dns"] == "1.1.1.1"
@@ -578,7 +609,9 @@ def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
 
     with db.transaction() as conn:
         with pytest.raises(NoAvailableIpsError, match="No available IPs"):
-            db.add_interface("wg_tiny", "1.1.1.1", "a" * 43 + "=", "10.0.0.0/31", conn=conn)
+            db.add_interface(
+                "wg_tiny", "1.1.1.1", "a" * 43 + "=", "10.0.0.0/31", conn=conn
+            )
             iface = db.get_interfaces_by_name("wg_tiny", conn)[0]
             core.allocate_peer_ip(iface["id"], conn)
 
@@ -597,7 +630,9 @@ def test_naive_expires_at_does_not_crash_status(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3")
     naive_future = "2099-01-01 00:00:00"
     with db.get_db() as conn:
-        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (naive_future, peer["id"]))
+        conn.execute(
+            "UPDATE peers SET expires_at = ? WHERE id = ?", (naive_future, peer["id"])
+        )
         conn.commit()
 
     row = db.get_peer(str(peer["id"]))
@@ -609,7 +644,9 @@ def test_naive_expires_at_past_is_expired(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.4")
     naive_past = "2020-01-01 00:00:00"
     with db.get_db() as conn:
-        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (naive_past, peer["id"]))
+        conn.execute(
+            "UPDATE peers SET expires_at = ? WHERE id = ?", (naive_past, peer["id"])
+        )
         conn.commit()
 
     row = db.get_peer(str(peer["id"]))

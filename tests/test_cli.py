@@ -29,6 +29,7 @@ def test_public_peer_rows_redact_secrets() -> None:
     ]
 
     from typing import cast
+
     public = _public_peer_rows(cast(list[sqlite3.Row], rows), {1: "1.1.1.1"})
 
     assert public == [
@@ -183,7 +184,17 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
 
     add_peer = runner.invoke(
         app,
-        ["--json", "peer", "add", "wg_dns", "Work", "--ip", "10.0.3.50", "--dns", "9.9.9.9"],
+        [
+            "--json",
+            "peer",
+            "add",
+            "wg_dns",
+            "Work",
+            "--ip",
+            "10.0.3.50",
+            "--dns",
+            "9.9.9.9",
+        ],
     )
     assert add_peer.exit_code == 0
     work_id = json.loads(add_peer.stdout)["id"]
@@ -208,6 +219,7 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
     peer_id = str(peer["id"])
     import tempfile
     import os
+
     fd, path = tempfile.mkstemp()
     os.close(fd)
     core.dump_database(path)
