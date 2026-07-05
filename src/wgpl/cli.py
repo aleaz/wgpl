@@ -4,6 +4,8 @@ import json
 import os
 import sqlite3
 import sys
+import shutil
+import tempfile
 import ipaddress
 from pathlib import Path
 from typing import Any, Mapping
@@ -517,7 +519,7 @@ def peer_remove(
     hard: bool = typer.Option(False, "--hard", help="Physically delete the peer instead of soft-deleting"),
 ) -> None:
     try:
-        canonical_id = core.resolve_peer_ref(peer_id, interface, active_only=not hard)
+        canonical_id = core.resolve_peer_ref(peer_id, interface, active_only=False)
         core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
@@ -573,6 +575,7 @@ def peer_update(
         result = core.update_peer(
             interface,
             peer_id,
+            active_only=False,
             name=name,
             ip_address=ip,
             dns=dns,
@@ -729,35 +732,51 @@ def validate_cmd(
 # --- Database ---
 
 @db_app.command("dump")
-def db_dump(ctx: typer.Context) -> None:
-    """Export the database as a logical SQL script to standard output."""
+def db_dump(
+    ctx: typer.Context,
+    output: Path | None = typer.Option(None, "--output", "-o", help="File to write binary backup to")
+) -> None:
+    """Export the database as a binary SQLite backup."""
     try:
         console.print(
-            "[yellow]Hint: Redirect this output to a file "
-            "(e.g. wgpl db dump > backup.sql).[/yellow]"
+            "[yellow]Warning: Output is a binary SQLite database file.[/yellow]", file=sys.stderr
         )
-        console.print(
-            "[yellow]      Ensure the resulting file has secure permissions "
-            "(chmod 600) or encrypt it.[/yellow]"
-        )
-        console.print()
-        for line in core.dump_database_lines():
-            print(line, end="")
+        if output:
+            core.dump_database(str(output))
+            os.chmod(output, 0o600)
+        else:
+            fd, path = tempfile.mkstemp()
+            try:
+                os.close(fd)
+                core.dump_database(path)
+                with open(path, "rb") as f:
+                    shutil.copyfileobj(f, sys.stdout.buffer)
+            finally:
+                os.remove(path)
     except WgplException as e:
         _exit_error(ctx, str(e))
 
 @db_app.command("restore")
 def db_restore(
     ctx: typer.Context,
-    file: typer.FileText = typer.Argument(
+    file: str = typer.Argument(
         "-", 
-        help="SQL file to restore from (use '-' for stdin)"
+        help="Binary SQLite file to restore from (use '-' for stdin)"
     )
 ) -> None:
-    """Restore the database from a logical SQL script (destructive)."""
+    """Restore the database from a binary SQLite backup (destructive)."""
     try:
-        sql_script = file.read()
-        warnings = core.restore_database(sql_script)
+        if file == "-":
+            fd, path = tempfile.mkstemp()
+            try:
+                with os.fdopen(fd, 'wb') as f:
+                    shutil.copyfileobj(sys.stdin.buffer, f)
+                warnings = core.restore_database(path)
+            finally:
+                os.remove(path)
+        else:
+            warnings = core.restore_database(file)
+            
         for warning in warnings:
             console.print(f"[yellow]{warning}[/yellow]")
         if ctx.obj.get("json"):

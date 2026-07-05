@@ -635,7 +635,7 @@ def _reclaim_inactive_peer_slots(
             conn,
             metadata={"replaced_by_peer_id": replaced_by_peer_id, "slot": slots},
         )
-        db.hard_remove_peer(peer["id"], conn=conn)
+        db.remove_peer(peer["id"], conn=conn)
 
 
 def allocate_peer_ip(
@@ -654,17 +654,18 @@ def allocate_peer_ip(
                 return available
         else:
             try:
-                max_ip_obj = max(ipaddress.IPv4Address(ip) for ip in used_ips)
+                used_ips_int = {int(ipaddress.IPv4Address(ip)) for ip in used_ips}
+                max_ip_int = max(used_ips_int)
+                
                 # Check from max_ip + 1 to end of network
-                for ip_int in range(int(max_ip_obj) + 1, int(network.broadcast_address)):
-                    ip_str = str(ipaddress.IPv4Address(ip_int))
-                    if ip_str not in used_ips:
-                        return ip_str
+                for ip_int in range(max_ip_int + 1, int(network.broadcast_address)):
+                    if ip_int not in used_ips_int:
+                        return str(ipaddress.IPv4Address(ip_int))
+                        
                 # Wrap around: Check from first host to max_ip
-                for ip_int in range(int(network.network_address) + 1, int(max_ip_obj)):
-                    ip_str = str(ipaddress.IPv4Address(ip_int))
-                    if ip_str not in used_ips:
-                        return ip_str
+                for ip_int in range(int(network.network_address) + 1, max_ip_int):
+                    if ip_int not in used_ips_int:
+                        return str(ipaddress.IPv4Address(ip_int))
             except ValueError:
                 pass
         raise NoAvailableIpsError(f"No available IPs in pool {network}")
@@ -1122,6 +1123,7 @@ def update_peer(
     interface_ref: str,
     peer_ref: str,
     *,
+    active_only: bool = True,
     name: str | None = None,
     ip_address: str | None = None,
     dns: str | None = None,
@@ -1191,7 +1193,7 @@ def update_peer(
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
-        canonical_id = resolve_peer_ref(peer_ref, str(iface_id), conn=conn)
+        canonical_id = resolve_peer_ref(peer_ref, str(iface_id), active_only=active_only, conn=conn)
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
@@ -1351,11 +1353,15 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 
 # --- Database Dump & Restore ---
 
-def dump_database_lines() -> Iterator[str]:
-    """Yield SQLite logical dump lines from a consistent point-in-time snapshot."""
+def dump_database(target_path: str) -> None:
+    """Creates a binary backup of the database to target_path."""
     with db.exclusive_snapshot() as conn:
-        for line in conn.iterdump():
-            yield f"{line}\n"
+        target_conn = sqlite3.connect(target_path)
+        try:
+            with target_conn:
+                conn.backup(target_conn)
+        finally:
+            target_conn.close()
 
 
 def _cleanup_tmp_files(tmp_path: str) -> None:
@@ -1418,8 +1424,8 @@ def _validate_restored_schema(path: str) -> None:
 
 
 
-def restore_database(sql_script: str) -> list[str]:
-    """Safely restores the database from a SQL script.
+def restore_database(source_path: str) -> list[str]:
+    """Safely restores the database from a binary SQLite backup.
 
     Returns warning messages (e.g. WAL checkpoint). CLI prints them on stderr.
 
@@ -1428,7 +1434,6 @@ def restore_database(sql_script: str) -> list[str]:
     - Backup file (if created) has 0o600 permissions.
     - All temporary files are cleaned up on any failure path.
     - Restored schema is validated before replacing the live DB.
-    - Missing tables (e.g. audit_events) are created on the tmp DB before swap.
     - Old backups are rotated (keeps last 3).
     """
     warnings: list[str] = []
@@ -1444,11 +1449,16 @@ def restore_database(sql_script: str) -> list[str]:
     fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     os.close(fd)
 
-    # 3. Execute script in tmp DB and validate schema
+    # 3. Execute binary backup to tmp DB and validate schema
     try:
         tmp_conn = sqlite3.connect(tmp_path)
         try:
-            tmp_conn.executescript(sql_script)
+            source_conn = sqlite3.connect(source_path)
+            try:
+                with source_conn:
+                    source_conn.backup(tmp_conn)
+            finally:
+                source_conn.close()
         finally:
             tmp_conn.close()
         _validate_restored_schema(tmp_path)
@@ -1457,7 +1467,7 @@ def restore_database(sql_script: str) -> list[str]:
         raise
     except Exception as e:
         _cleanup_tmp_files(tmp_path)
-        raise WgplException(f"Failed to restore database from script: {e}") from e
+        raise WgplException(f"Failed to restore database from backup: {e}") from e
 
     saved_db_path = os.environ.get("WGPL_DB_PATH")
     try:

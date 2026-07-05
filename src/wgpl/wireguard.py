@@ -54,11 +54,18 @@ def generate_preshared_key() -> str:
 
 def syncconf(interface: str, conf_content: str) -> None:
     """Applies a declarative configuration to a WireGuard interface."""
-    fd, path = tempfile.mkstemp()
+    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
+    cmd = [wg_bin, "syncconf", interface, "/dev/stdin"]
+    
     try:
-        os.chmod(path, 0o600)
-        with os.fdopen(fd, 'wb') as f:
-            f.write(conf_content.encode('utf-8'))
-        run_wg_command("syncconf", interface, path)
-    finally:
-        os.remove(path)
+        subprocess.run(
+            cmd,
+            input=conf_content,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        raise WgBinaryNotFoundError("The 'wg' command was not found. Make sure wireguard-tools is installed on the target system.")
+    except subprocess.CalledProcessError as e:
+        raise WireguardConfigError(f"wg command failed: {' '.join(cmd)}\nError: {e.stderr}")
