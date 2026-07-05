@@ -230,10 +230,10 @@ wgpl --help
 
 WGPL requires zero configuration, but respects the following environment variables:
 
-| Variable                  | Description                                                          | Default      |
-|---------------------------|----------------------------------------------------------------------|--------------|
-| `WGPL_DB_PATH`            | Path to the local SQLite database used to store cryptographic state. | `~/.wgpl.db` |
-| `WGPL_WG_BIN`             | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent LPE) | `wg` (PATH)  |
+| Variable       | Description                                                                                                         | Default      |
+|----------------|---------------------------------------------------------------------------------------------------------------------|--------------|
+| `WGPL_DB_PATH` | Path to the local SQLite database used to store cryptographic state.                                                | `~/.wgpl.db` |
+| `WGPL_WG_BIN`  | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent LPE) | `wg` (PATH)  |
 
 *Note: `wireguard-tools` (`wg`) is **only** necessary if you want to run `wgpl apply` on the same machine.*
 
