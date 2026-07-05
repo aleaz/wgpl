@@ -4,7 +4,38 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**WGPL** is a DevOps-first WireGuard control plane. It automates zero-downtime deployments and manages peers across multiple servers effortlessly, acting as a Single Source of Truth (SSOT) to decouple configuration management from underlying network hardware.
+**WGPL** is a DevOps-first WireGuard control plane. It automates zero-downtime deployments and manages peers across multiple servers effortlessly, acting as a Single Source of Truth (SSOT) to decouple configuration management from underlying network hardware. Built for enterprise environments, it features an immutable, append-only audit trail designed to fulfill **SOC2** and **ISO27001** compliance out-of-the-box.
+
+## Table of Contents
+
+- [Features](#features)
+  - [Multi-Server Ready](#multi-server-ready)
+  - [Advanced Networking](#advanced-networking)
+  - [Security & Cryptography](#security--cryptography)
+  - [Automation and State](#automation-and-state)
+- [Decoupled Architectures (BYOI)](#decoupled-architectures-byoi)
+  - [1. Native Linux Server (Zero-Downtime Systemd)](#1-native-linux-server-zero-downtime-systemd)
+  - [2. Remote Linux Servers (CI/CD Pipeline)](#2-remote-linux-servers-cicd-pipeline)
+  - [3. MikroTik (RouterOS v7) Appliances](#3-mikrotik-routeros-v7-appliances)
+- [Client Provisioning (End-User Devices)](#client-provisioning-end-user-devices)
+  - [Mobile (iOS / Android)](#mobile-ios--android)
+  - [Desktop (Windows / macOS)](#desktop-windows--macos)
+  - [Linux Clients](#linux-clients)
+- [Enterprise Lifecycle & Audit (SRE)](#enterprise-lifecycle--audit-sre)
+  - [Temporary Access (TTL)](#temporary-access-ttl)
+  - [Garbage Collection & Deletion](#garbage-collection--deletion)
+  - [Immutable Audit Trail](#immutable-audit-trail)
+- [Advanced Integrations](#advanced-integrations)
+- [Quick Start & Installation](#quick-start--installation)
+  - [Recommended Installation (via `uv`)](#recommended-installation-via-uv)
+  - [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+  - [Interface Management (`wgpl interface`)](#interface-management-wgpl-interface)
+  - [Peer Management (`wgpl peer`)](#peer-management-wgpl-peer)
+  - [General & Database](#general--database)
+- [Contributing](#contributing)
+- [Author](#author)
+- [License](#license)
 
 ## Features
 

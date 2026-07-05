@@ -75,7 +75,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting. Do not include real 
 **Canonical AI context for this repo (versioned in git):**
 
 | Tool | Location | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | **Cursor** | [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) | Architecture and security invariants (always apply) |
 | **Cursor** | [`.cursor/rules/wgpl-git-agent.mdc`](.cursor/rules/wgpl-git-agent.mdc) | Git for agents: no co-author trailers, no push unless asked |
 | **Cursor** | [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) | CLI workflows and pre-PR checklist |
