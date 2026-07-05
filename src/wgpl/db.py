@@ -164,6 +164,19 @@ def exclusive_snapshot() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def get_current_actor() -> str:
+    """Resolve the true identity of the caller for audit logs."""
+    actor = os.environ.get("SUDO_USER")
+    if not actor:
+        actor = os.environ.get("USER")
+    if not actor:
+        try:
+            actor = os.getlogin()
+        except OSError:
+            actor = "unknown"
+    return os.environ.get("WGPL_ACTOR", actor)
+
+
 def init_db(path: str | None = None) -> None:
     """Initializes the database schema and enforces restrictive permissions."""
     if path:
@@ -226,12 +239,15 @@ def init_db(path: str | None = None) -> None:
                         'created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed'
                     )),
                     occurred_at  TEXT NOT NULL,
+                    actor        TEXT,
                     name         TEXT,
                     ip_address   TEXT,
                     public_key   TEXT,
                     metadata     TEXT
                 );
             """)
+
+            
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_audit_entity
                 ON audit_events(entity_type, entity_id);
@@ -555,19 +571,23 @@ def append_audit_event(
     public_key: str | None = None,
     metadata: dict[str, Any] | None = None,
     occurred_at: str | None = None,
+    actor: str | None = None,
     conn: sqlite3.Connection,
 ) -> None:
     """Insert an append-only audit row. Caller must own the transaction."""
     _validate_audit_metadata(metadata)
     if occurred_at is None:
         occurred_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if actor is None:
+        actor = get_current_actor()
+        
     metadata_json = json.dumps(metadata) if metadata is not None else None
     conn.execute(
         """
         INSERT INTO audit_events (
             entity_type, entity_id, interface, event_type, occurred_at,
-            name, ip_address, public_key, metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            actor, name, ip_address, public_key, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             entity_type.value,
@@ -575,6 +595,7 @@ def append_audit_event(
             interface,
             event_type.value,
             occurred_at,
+            actor,
             name,
             ip_address,
             public_key,

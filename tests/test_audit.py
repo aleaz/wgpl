@@ -1,6 +1,8 @@
 """Audit log and interface remove guard tests."""
 
 import datetime
+import json
+from pathlib import Path
 
 import pytest
 
@@ -66,7 +68,9 @@ def test_reclaim_expired_logs_reclaimed_and_old_row_gone(wg0_interface: str) -> 
     assert core.get_peer_status(db.get_peer(old_id)) == "Expired"
 
     new_peer = core.add_peer(wg0_interface, "phone2", ip_address="10.0.0.3")
-    assert db.get_peer(old_id) is None
+    old_peer_row = db.get_peer(old_id)
+    assert old_peer_row is not None
+    assert old_peer_row["deleted_at"] is not None
 
     old_events = core.list_peer_audit_history(old_id, wg0_interface)
     assert any(e["event_type"] == AuditEventType.CREATED for e in old_events)
@@ -155,10 +159,6 @@ def test_interface_add_logs_created(wgpl_db: str) -> None:
     assert events[0]["event_type"] == AuditEventType.CREATED
 
 
-def test_dump_includes_audit_events(wg0_interface: str) -> None:
-    core.add_peer(wg0_interface, "phone")
-    output = "".join(core.dump_database_lines())
-    assert "audit_events" in output
 
 
 def test_peer_update_logs_updated_event(wg0_interface: str) -> None:
@@ -170,7 +170,8 @@ def test_peer_update_logs_updated_event(wg0_interface: str) -> None:
     events = core.list_peer_audit_history(peer_id, wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
     assert len(updated) == 1
-    assert updated[0]["metadata"] == {"fields": ["name"]}
+    assert updated[0]["metadata"]["fields"]["name"]["new"] == "renamed"
+    assert updated[0]["metadata"]["fields"]["name"]["old"] == "phone"
 
 
 def test_interface_update_logs_updated_event(wg0_interface: str) -> None:
@@ -179,7 +180,7 @@ def test_interface_update_logs_updated_event(wg0_interface: str) -> None:
     events = core.list_interface_audit_history(wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
     assert len(updated) == 1
-    assert updated[0]["metadata"]["fields"] == ["endpoint"]
+    assert updated[0]["metadata"]["fields"]["endpoint"]["new"] == "vpn2.example.com"
 
 
 def test_audit_metadata_rejects_private_key(wg0_interface: str) -> None:
@@ -261,7 +262,9 @@ def test_reclaim_via_peer_update_logs_reclaimed(wg0_interface: str) -> None:
 
     core.update_peer(wg0_interface, active_id, ip_address="10.0.0.3")
 
-    assert db.get_peer(old_id) is None
+    old_peer_row = db.get_peer(old_id)
+    assert old_peer_row is not None
+    assert old_peer_row["deleted_at"] is not None
     updated = db.get_peer(active_id)
     assert updated is not None
     assert updated["ip_address"] == "10.0.0.3"

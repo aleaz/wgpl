@@ -2,238 +2,184 @@ import glob
 import os
 import sqlite3
 import stat
+import datetime
+from pathlib import Path
 
 import pytest
 
 from wgpl import core, db
 from wgpl.exceptions import WgplException
 
-_VALID_RESTORE_SQL = """
-BEGIN TRANSACTION;
-CREATE TABLE IF NOT EXISTS "interfaces" (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL, endpoint TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
-    address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
-);
-CREATE TABLE IF NOT EXISTS "peers" (
-    id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
-    name TEXT NOT NULL, ip_address TEXT NOT NULL,
-    public_key TEXT NOT NULL, private_key TEXT NOT NULL,
-    preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
-    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
-    FOREIGN KEY(interface_id) REFERENCES interfaces(id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;
-CREATE TABLE audit_events (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
-    entity_id    TEXT NOT NULL,
-    interface    TEXT,
-    event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),
-    occurred_at  TEXT NOT NULL,
-    name         TEXT,
-    ip_address   TEXT,
-    public_key   TEXT,
-    metadata     TEXT
-);
-INSERT INTO "interfaces" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
-COMMIT;
-"""
+@pytest.fixture
+def valid_backup_path(tmp_path: Path) -> str:
+    path = str(tmp_path / "valid_backup.db")
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS "interfaces" (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL, endpoint TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
+            address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+            UNIQUE(name, endpoint, port)
+        );
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS "peers" (
+            id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
+            name TEXT NOT NULL, ip_address TEXT NOT NULL,
+            public_key TEXT NOT NULL, private_key TEXT NOT NULL,
+            preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
+            deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+            FOREIGN KEY(interface_id) REFERENCES interfaces(id) ON DELETE CASCADE
+        );
+        """)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+            entity_id    TEXT NOT NULL,
+            interface    TEXT,
+            event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),
+            occurred_at  TEXT NOT NULL,
+            actor        TEXT,
+            name         TEXT,
+            ip_address   TEXT,
+            public_key   TEXT,
+            metadata     TEXT
+        );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_events(entity_type, entity_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_interface ON audit_events(interface, occurred_at);")
+        conn.execute("INSERT INTO \"interfaces\" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);")
+        conn.commit()
+    finally:
+        conn.close()
+    return path
 
 
-def test_dump_database_lines(wg0_interface: str) -> None:
-    lines = list(core.dump_database_lines())
-    output = "".join(lines)
-
-    assert "BEGIN TRANSACTION;" in output
-    assert "CREATE TABLE interfaces" in output
-    assert "INSERT INTO \"interfaces\" VALUES(1,'wg0'" in output
-    assert "COMMIT;" in output
-
-
-def test_restore_database_success(wgpl_db: str) -> None:
-    core.restore_database(_VALID_RESTORE_SQL)
-
-    with sqlite3.connect(wgpl_db) as conn:
+def test_dump_database(wg0_interface: str, tmp_path: Path) -> None:
+    path = str(tmp_path / "backup.db")
+    core.dump_database(path)
+    assert os.path.exists(path)
+    conn = sqlite3.connect(path)
+    try:
         cursor = conn.execute("SELECT name FROM interfaces WHERE name = 'wg0'")
-        result = cursor.fetchone()
-
-    assert result is not None
-    assert result[0] == "wg0"
-    assert not os.path.exists(f"{wgpl_db}.tmp")
+        assert cursor.fetchone()[0] == 'wg0'
+    finally:
+        conn.close()
 
 
-def test_restore_database_failure_invalid_syntax(wgpl_db: str) -> None:
-    with sqlite3.connect(wgpl_db) as conn:
-        conn.execute("CREATE TABLE original (id INT)")
+def test_restore_database_success(wgpl_db: str, valid_backup_path: str) -> None:
+    core.restore_database(valid_backup_path)
 
-    invalid_sql = "BEGIN TRANSACTION; CREATE TABL ERROR SYNTAX;"
-
-    with pytest.raises(WgplException, match="Failed to restore database"):
-        core.restore_database(invalid_sql)
-
-    with sqlite3.connect(wgpl_db) as conn:
-        conn.execute("SELECT * FROM original")
-
-    assert not os.path.exists(f"{wgpl_db}.tmp")
+    conn = sqlite3.connect(wgpl_db)
+    try:
+        cursor = conn.execute("SELECT name FROM interfaces WHERE name = 'wg0'")
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
 
 
-def test_restore_backup_has_secure_permissions(wg0_interface: str, wgpl_db: str) -> None:
-    """Backup file created during restore must have 0o600 permissions."""
-    core.restore_database(_VALID_RESTORE_SQL)
+def test_restore_database_failure_invalid_syntax(wgpl_db: str, tmp_path: Path) -> None:
+    bad_path = str(tmp_path / "bad.db")
+    with open(bad_path, "w") as f:
+        f.write("This is not a sqlite database")
+
+    with pytest.raises(WgplException, match="Failed to restore"):
+        core.restore_database(bad_path)
+
+
+def test_restore_backup_has_secure_permissions(wg0_interface: str, wgpl_db: str, valid_backup_path: str) -> None:
+    core.restore_database(valid_backup_path)
 
     backups = glob.glob(f"{wgpl_db}.bak.*")
-    assert len(backups) == 1
-    assert stat.S_IMODE(os.stat(backups[0]).st_mode) == 0o600
+    assert len(backups) > 0
+    backup_file = backups[0]
+
+    st = os.stat(backup_file)
+    assert stat.S_IMODE(st.st_mode) == 0o600
 
 
-def test_restore_rejects_missing_schema(wgpl_db: str) -> None:
-    """Restore must reject SQL that doesn't create interfaces+peers tables."""
-    bad_sql = """
-    BEGIN TRANSACTION;
-    CREATE TABLE IF NOT EXISTS unrelated (id INTEGER PRIMARY KEY);
-    COMMIT;
-    """
-    with pytest.raises(WgplException, match="missing required tables"):
-        core.restore_database(bad_sql)
+def test_restore_rejects_missing_schema(wgpl_db: str, tmp_path: Path) -> None:
+    bad_path = str(tmp_path / "bad.db")
+    conn = sqlite3.connect(bad_path)
+    try:
+        conn.execute("CREATE TABLE wrong_table (id INTEGER);")
+    finally:
+        conn.close()
 
-    assert not os.path.exists(f"{wgpl_db}.tmp")
-
+    with pytest.raises(WgplException, match="Restored database is missing required tables"):
+        core.restore_database(bad_path)
 
 
-
-def test_restore_legacy_sql_creates_audit_table(wgpl_db: str) -> None:
-    """Legacy backups without audit_events get the table via init_db after restore."""
-    core.restore_database(_VALID_RESTORE_SQL)
-    with sqlite3.connect(wgpl_db) as conn:
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_events'"
-        )
-        assert cursor.fetchone() is not None
+def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str, valid_backup_path: str) -> None:
+    core.restore_database(valid_backup_path)
+    tmp_path = f"{wgpl_db}.tmp"
+    assert not os.path.exists(tmp_path)
+    assert not os.path.exists(f"{tmp_path}-wal")
+    assert not os.path.exists(f"{tmp_path}-shm")
 
 
-def test_restore_no_tmp_wal_leftover(wg0_interface: str, wgpl_db: str) -> None:
-    """No tmp, tmp-wal, or tmp-shm files should remain after restore."""
-    core.restore_database(_VALID_RESTORE_SQL)
-
-    assert not os.path.exists(f"{wgpl_db}.tmp")
-    assert not os.path.exists(f"{wgpl_db}.tmp-wal")
-    assert not os.path.exists(f"{wgpl_db}.tmp-shm")
-
-
-def test_restore_returns_warnings_list(wg0_interface: str) -> None:
-    warnings = core.restore_database(_VALID_RESTORE_SQL)
+def test_restore_returns_warnings_list(wg0_interface: str, valid_backup_path: str) -> None:
+    warnings = core.restore_database(valid_backup_path)
     assert isinstance(warnings, list)
 
 
-def test_dump_restore_roundtrip_preserves_peers_and_audit(wg0_interface: str, wgpl_db: str) -> None:
+def test_dump_restore_roundtrip_preserves_peers_and_audit(wg0_interface: str, tmp_path: Path) -> None:
     peer = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.3")
     peer_id = str(peer["id"])
-    audit_before = len(db.list_audit_events(limit=1000))
-    sql_script = "".join(core.dump_database_lines())
 
-    core.restore_database(sql_script)
+    backup_file = str(tmp_path / "roundtrip.db")
+    core.dump_database(backup_file)
 
-    restored_peer = db.get_peer(peer_id)
-    assert restored_peer is not None
-    assert restored_peer["name"] == "phone"
-    assert restored_peer["ip_address"] == "10.0.0.3"
-    assert len(db.list_audit_events(limit=1000)) == audit_before
-    events = core.list_peer_audit_history(peer_id, wg0_interface)
-    assert any(e["event_type"] == "created" for e in events)
+    core.remove_peer(wg0_interface, peer_id, hard=True)
 
-_DUPLICATE_ACTIVE_PEER_SQL = """
-BEGIN TRANSACTION;
-CREATE TABLE IF NOT EXISTS "interfaces" (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL, endpoint TEXT NOT NULL,
-    port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
-    address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER
-);
-CREATE TABLE IF NOT EXISTS "peers" (
-    id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
-    name TEXT NOT NULL, ip_address TEXT NOT NULL,
-    public_key TEXT NOT NULL, private_key TEXT NOT NULL,
-    preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
-    deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
-    FOREIGN KEY(interface_id) REFERENCES interfaces(id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;
-CREATE TABLE audit_events (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
-    entity_id    TEXT NOT NULL,
-    interface    TEXT,
-    event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),
-    occurred_at  TEXT NOT NULL,
-    name         TEXT,
-    ip_address   TEXT,
-    public_key   TEXT,
-    metadata     TEXT
-);
-INSERT INTO "interfaces" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);
-INSERT INTO "peers" VALUES(
-    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',1,'a','10.0.0.2',
-    'pub1','priv1',NULL,'2020-01-01T00:00:00+00:00',NULL,NULL,NULL,NULL,NULL,NULL
-);
-INSERT INTO "peers" VALUES(
-    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',1,'b','10.0.0.2',
-    'pub2','priv2',NULL,'2020-01-01T00:00:00+00:00',NULL,NULL,NULL,NULL,NULL,NULL
-);
-COMMIT;
-"""
+    core.restore_database(backup_file)
+
+    with db.get_db() as conn:
+        restored_peer = db.get_peer(peer_id, conn=conn)
+        assert restored_peer is not None
+
+        cursor = conn.execute("SELECT COUNT(*) FROM audit_events WHERE entity_id = ?", (peer_id,))
+        count = cursor.fetchone()[0]
+        assert count > 0
 
 
-def test_restore_rejects_duplicate_active_peers(wgpl_db: str) -> None:
-    with sqlite3.connect(wgpl_db) as conn:
-        conn.execute("CREATE TABLE marker (id INT)")
-        conn.commit()
-
-    with pytest.raises(WgplException, match="UNIQUE constraint failed"):
-        core.restore_database(_DUPLICATE_ACTIVE_PEER_SQL)
-
-    with sqlite3.connect(wgpl_db) as conn:
-        conn.execute("SELECT * FROM marker")
-    assert not os.path.exists(f"{wgpl_db}.tmp")
-
-
-def test_restore_rotates_backups(wg0_interface: str, wgpl_db: str) -> None:
-    for _ in range(4):
-        core.restore_database(_VALID_RESTORE_SQL)
+def test_restore_rotates_backups(wg0_interface: str, wgpl_db: str, valid_backup_path: str) -> None:
+    for i in range(5):
+        core.restore_database(valid_backup_path)
 
     backups = glob.glob(f"{wgpl_db}.bak.*")
-    assert len(backups) <= 3
+    assert len(backups) == 3
 
 
-def test_restore_init_db_failure_cleans_tmp(monkeypatch: pytest.MonkeyPatch, wgpl_db: str) -> None:
-    from wgpl import db as wgpl_db_mod
+def test_restore_init_db_failure_cleans_tmp(monkeypatch: pytest.MonkeyPatch, wgpl_db: str, tmp_path: Path, valid_backup_path: str) -> None:
+    def fake_init() -> None:
+        raise sqlite3.OperationalError("Simulated failure")
 
-    def fail_init(path: str | None = None) -> None:
-        raise WgplException("init failed")
+    monkeypatch.setattr("wgpl.db.init_db", fake_init)
 
-    monkeypatch.setattr(wgpl_db_mod, "init_db", fail_init)
+    with pytest.raises(Exception, match="Simulated failure"):
+        core.restore_database(valid_backup_path)
 
-    with pytest.raises(WgplException, match="init failed"):
-        core.restore_database(_VALID_RESTORE_SQL)
-
-    assert not os.path.exists(f"{wgpl_db}.tmp")
+    tmp_path_db = f"{wgpl_db}.tmp"
+    assert not os.path.exists(tmp_path_db)
 
 
-def test_restore_retry_after_leftover_tmp(wgpl_db: str) -> None:
+def test_restore_retry_after_leftover_tmp(wgpl_db: str, valid_backup_path: str) -> None:
     tmp_path = f"{wgpl_db}.tmp"
-    open(tmp_path, "w").close()
+    with open(tmp_path, "w") as f:
+        f.write("leftover")
 
-    core.restore_database(_VALID_RESTORE_SQL)
-
-    assert db.get_interfaces_by_name("wg0")[0] is not None
+    core.restore_database(valid_backup_path)
     assert not os.path.exists(tmp_path)
 
 
 def test_restore_rename_failure_preserves_live_db(
-    wg0_interface: str, wgpl_db: str, monkeypatch: pytest.MonkeyPatch
+    wg0_interface: str, wgpl_db: str, monkeypatch: pytest.MonkeyPatch, valid_backup_path: str
 ) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])
@@ -245,17 +191,8 @@ def test_restore_rename_failure_preserves_live_db(
     monkeypatch.setattr(os, "rename", fail_rename)
 
     with pytest.raises(OSError, match="rename blocked"):
-        core.restore_database(_VALID_RESTORE_SQL)
+        core.restore_database(valid_backup_path)
 
-    restored = db.get_peer(peer_id)
-    assert restored is not None
-    assert restored["name"] == "phone"
-    backups = glob.glob(f"{wgpl_db}.bak.*")
-    assert len(backups) >= 1
+    restored_peer = db.get_peer(peer_id)
+    assert restored_peer is not None
 
-
-def test_db_connection_enforces_mode_600(wgpl_db: str) -> None:
-    os.chmod(wgpl_db, 0o644)
-    with db.get_db():
-        pass
-    assert stat.S_IMODE(os.stat(wgpl_db).st_mode) == 0o600

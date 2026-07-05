@@ -158,6 +158,9 @@ def main(
     if db_path:
         os.environ["WGPL_DB_PATH"] = db_path
 
+    # Inject execution context for auditing
+    os.environ["WGPL_EXEC_CMD"] = " ".join(sys.argv)
+
     try:
         core.ensure_database()
     except WgplException as e:
@@ -455,6 +458,7 @@ def interface_history(
             rows = [
                 [
                     _styled(str(e["occurred_at"]), _STYLE_META),
+                    _styled(str(e.get("actor", "unknown")), _STYLE_VALUE),
                     _styled(str(e["event_type"]), _STYLE_ID),
                     _styled(str(e.get("metadata") or ""), ""),
                 ]
@@ -465,6 +469,7 @@ def interface_history(
                 "events",
                 [
                     ("When", {"overflow": "fold"}),
+                    ("Actor", {"overflow": "fold"}),
                     ("Event", {"overflow": "fold"}),
                     ("Metadata", {"overflow": "fold"}),
                 ],
@@ -491,6 +496,7 @@ def peer_history(
             rows = [
                 [
                     _styled(str(e["occurred_at"]), _STYLE_META),
+                    _styled(str(e.get("actor", "unknown")), _STYLE_VALUE),
                     _styled(str(e["event_type"]), _STYLE_ID),
                     _styled(str(e.get("name") or ""), _STYLE_VALUE),
                     _styled(str(e.get("ip_address") or ""), _STYLE_META),
@@ -502,6 +508,7 @@ def peer_history(
                 "events",
                 [
                     ("When", {"overflow": "fold"}),
+                    ("Actor", {"overflow": "fold"}),
                     ("Event", {"overflow": "fold"}),
                     ("Name", {"overflow": "fold"}),
                     ("IP", {"overflow": "fold"}),
@@ -739,7 +746,7 @@ def db_dump(
     """Export the database as a binary SQLite backup."""
     try:
         console.print(
-            "[yellow]Warning: Output is a binary SQLite database file.[/yellow]", file=sys.stderr
+            "[yellow]Warning: Output is a binary SQLite database file.[/yellow]"
         )
         if output:
             core.dump_database(str(output))

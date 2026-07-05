@@ -88,6 +88,11 @@ def _audit_peer_from_row(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    metadata_with_context = dict(metadata) if metadata else {}
+    exec_cmd = os.environ.get("WGPL_EXEC_CMD")
+    if exec_cmd:
+        metadata_with_context["exec_cmd"] = exec_cmd
+
     db.append_audit_event(
         entity_type=db.AuditEntityType.PEER,
         entity_id=str(peer["id"]),
@@ -96,7 +101,7 @@ def _audit_peer_from_row(
         name=str(peer["name"]),
         ip_address=str(peer["ip_address"]),
         public_key=str(peer["public_key"]),
-        metadata=metadata,
+        metadata=metadata_with_context or None,
         conn=conn,
     )
 
@@ -109,6 +114,11 @@ def _audit_interface_event(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Create an audit trail event for an interface action."""
+    metadata_with_context = dict(metadata) if metadata else {}
+    exec_cmd = os.environ.get("WGPL_EXEC_CMD")
+    if exec_cmd:
+        metadata_with_context["exec_cmd"] = exec_cmd
+
     iface = db.get_interface(interface_id, conn=conn)
     name = iface["name"] if iface else str(interface_id)
     db.append_audit_event(
@@ -117,7 +127,7 @@ def _audit_interface_event(
         event_type=event_type,
         interface=name,
         name=name,
-        metadata=metadata,
+        metadata=metadata_with_context or None,
         conn=conn,
     )
 
@@ -135,6 +145,7 @@ def audit_event_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         "interface": row["interface"],
         "event_type": row["event_type"],
         "occurred_at": row["occurred_at"],
+        "actor": row["actor"] if "actor" in row.keys() else "unknown",
         "name": row["name"],
         "ip_address": row["ip_address"],
         "public_key": row["public_key"],
@@ -284,8 +295,8 @@ def _peer_actual_changed_fields(
     before: sqlite3.Row,
     after: sqlite3.Row,
     candidates: list[str],
-) -> list[str]:
-    """Return candidate field names whose values actually changed."""
+) -> dict[str, dict[str, Any]]:
+    """Return candidate field names and their state diffs."""
     column_map = {
         "name": "name",
         "ip_address": "ip_address",
@@ -295,11 +306,11 @@ def _peer_actual_changed_fields(
         "keepalive": "keepalive",
         "expires": "expires_at",
     }
-    changed: list[str] = []
+    changed: dict[str, dict[str, Any]] = {}
     for field in candidates:
         column = column_map[field]
         if before[column] != after[column]:
-            changed.append(field)
+            changed[field] = {"old": before[column], "new": after[column]}
     return changed
 
 
@@ -307,8 +318,8 @@ def _interface_actual_changed_fields(
     before: sqlite3.Row,
     after: sqlite3.Row,
     candidates: list[str],
-) -> list[str]:
-    """Return candidate interface field names whose values actually changed."""
+) -> dict[str, dict[str, Any]]:
+    """Return candidate interface field names and their state diffs."""
     column_map = {
         "endpoint": "endpoint",
         "port": "port",
@@ -319,11 +330,11 @@ def _interface_actual_changed_fields(
         "mtu": "mtu",
         "keepalive": "keepalive",
     }
-    changed: list[str] = []
+    changed: dict[str, dict[str, Any]] = {}
     for field in candidates:
         column = column_map[field]
         if before[column] != after[column]:
-            changed.append(field)
+            changed[field] = {"old": before[column], "new": after[column]}
     return changed
 
 
@@ -738,7 +749,7 @@ def add_peer(
 
         created_peer = db.get_peer(peer_id, conn=conn)
         if created_peer:
-            meta: dict[str, Any] = {}
+            meta: dict[str, Any] = {"has_psk": bool(preshared_key)}
             if expires_at:
                 meta["expires_at"] = expires_at
             _audit_peer_from_row(
@@ -1355,7 +1366,7 @@ def validate_state(interface: str | None = None) -> dict[str, str | list[dict[st
 
 def dump_database(target_path: str) -> None:
     """Creates a binary backup of the database to target_path."""
-    with db.exclusive_snapshot() as conn:
+    with db.get_db() as conn:
         target_conn = sqlite3.connect(target_path)
         try:
             with target_conn:

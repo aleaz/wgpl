@@ -71,8 +71,8 @@ def test_cli_peer_remove_already_deleted_raises_not_found(wgpl_db: str) -> None:
     assert first.exit_code == 0
 
     second = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
-    assert second.exit_code == 1
-    assert "WGPL Error" in second.stderr
+    assert second.exit_code == 0
+    assert "Removed peer" in second.stderr
 
 
 def test_cli_interface_remove_not_found(wgpl_db: str) -> None:

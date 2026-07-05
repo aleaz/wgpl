@@ -158,9 +158,8 @@ def test_db_dump_cli_writes_hints_to_stderr(wg0_interface: str) -> None:
     result = runner.invoke(app, ["db", "dump"])
 
     assert result.exit_code == 0
-    assert "chmod 600" in result.stderr
-    assert "BEGIN TRANSACTION;" in result.stdout
-    assert "Hint:" not in result.stdout
+    assert "Warning: Output is a binary SQLite database file." in result.stderr
+    assert b"SQLite format 3" in result.stdout_bytes
 
 
 def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
@@ -207,9 +206,16 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
     core.add_interface("wg0", "vpn.example.com", pubkey, "10.0.0.0/24", 51820)
     peer = core.add_peer("wg0", "phone", ip_address="10.0.0.3")
     peer_id = str(peer["id"])
-    sql_script = "".join(core.dump_database_lines())
+    import tempfile
+    import os
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    core.dump_database(path)
+    with open(path, "rb") as f:
+        binary_db = f.read()
+    os.remove(path)
 
-    result = runner.invoke(app, ["--json", "db", "restore", "-"], input=sql_script)
+    result = runner.invoke(app, ["--json", "db", "restore", "-"], input=binary_db)
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
