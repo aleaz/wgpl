@@ -407,10 +407,12 @@ def add_interface(
     mtu: int | None = None,
     keepalive: int | None = None,
 ) -> dict[str, Any]:
-    """Register a WireGuard interface in the database."""
+    """Register a new interface in the DB."""
     name = name.strip()
     if not name:
         raise ValueError("Interface name cannot be empty")
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", name):
+        raise ValueError("Interface name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores.")
     if not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
     
