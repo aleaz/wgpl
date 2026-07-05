@@ -1,86 +1,88 @@
-# WireGuard Peer Lite (WGPL)
+# WGPL (WireGuard Peer Lite) - Zero-Downtime Peer Management & IPAM
 
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+![Status: Production Ready](https://img.shields.io/badge/Status-Production_Ready-success.svg)
 
-**WGPL** is a DevOps-first WireGuard control plane. It automates zero-downtime deployments and manages peers across multiple servers effortlessly, acting as a Single Source of Truth (SSOT) to decouple configuration management from underlying network hardware. Built for enterprise environments, it features an immutable, append-only audit trail designed to fulfill **SOC2** and **ISO27001** compliance out-of-the-box.
+**WGPL (WireGuard Peer Lite)** is a lightweight, database-backed CLI for managing WireGuard peers across multiple servers.
+
+**The Problem:** Managing WireGuard manually means editing text files (`wg0.conf`), guessing which IPs are free, and restarting interfaces (dropping all active connections) just to add one user. It also lacks a clear history of who was granted access.
+
+**The Solution:** WGPL decouples peer management from your OS. It uses a local SQLite database to automatically handle IP allocation (IPAM), generates configurations natively, and applies changes to the Linux kernel with **zero downtime**. It features an immutable, append-only audit trail that simplifies SOC2 and ISO27001 access reviews by proving exactly who got access, when, and when it was revoked.
+
+## 1-Minute Quick Start
+
+WGPL requires **Python 3.12+**.
+
+### 1. Install via uv
+
+```bash
+uv tool install wgpl
+wgpl --help
+```
+
+### 2. Register an Interface & Add a Peer
+
+WGPL doesn't create the interface; it manages who connects to it.
+
+```bash
+# Register an interface and define its IP pool
+wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
+
+# Add a user (WGPL automatically assigns the next free IP)
+wgpl peer add wg0 "Alice_Laptop"
+```
+
+### 3. Apply and Export
+
+```bash
+# Sync changes to the Linux kernel without dropping connections (requires sudo to write to /etc/wireguard)
+sudo wgpl apply wg0
+
+# Get the QR code for Alice's phone
+wgpl peer qr "Alice_Laptop"
+
+# Or get the config file for her desktop
+wgpl peer config "Alice_Laptop" > alice.conf
+```
+
+## How it compares to wg-quick
+
+| Feature | `wg-quick` (Manual) | `wgpl` |
+| --- | --- | --- |
+| **Peer Storage** | Text files (`.conf`) | Relational SQLite Database |
+| **IP Allocation** | Manual (Risk of collisions) | Automatic CIDR IPAM |
+| **Applying Changes** | Restarts interface (Drops connections) | Zero-downtime hot-reloads (`wg syncconf`) |
+| **Audit & History** | None | Immutable Append-Only Log |
+| **Expiration** | Manual cleanup | Built-in TTL (`--expires 24h`) |
 
 ## Table of Contents
 
-- [Features](#features)
-  - [Multi-Server Ready](#multi-server-ready)
-  - [Advanced Networking](#advanced-networking)
-  - [Security & Cryptography](#security--cryptography)
-  - [Automation and State](#automation-and-state)
 - [Decoupled Architectures (BYOI)](#decoupled-architectures-byoi)
-  - [1. Native Linux Server (Zero-Downtime Systemd)](#1-native-linux-server-zero-downtime-systemd)
-  - [2. Remote Linux Servers (CI/CD Pipeline)](#2-remote-linux-servers-cicd-pipeline)
-  - [3. MikroTik (RouterOS v7) Appliances](#3-mikrotik-routeros-v7-appliances)
+- [Features](#features)
 - [Client Provisioning (End-User Devices)](#client-provisioning-end-user-devices)
-  - [Mobile (iOS / Android)](#mobile-ios--android)
-  - [Desktop (Windows / macOS)](#desktop-windows--macos)
-  - [Linux Clients](#linux-clients)
 - [Enterprise Lifecycle & Audit (SRE)](#enterprise-lifecycle--audit-sre)
-  - [Temporary Access (TTL)](#temporary-access-ttl)
-  - [Garbage Collection & Deletion](#garbage-collection--deletion)
-  - [Immutable Audit Trail](#immutable-audit-trail)
 - [Advanced Integrations](#advanced-integrations)
-- [Quick Start & Installation](#quick-start--installation)
-  - [Recommended Installation (via `uv`)](#recommended-installation-via-uv)
-  - [Configuration](#configuration)
-- [CLI Reference](#cli-reference)
-  - [Interface Management (`wgpl interface`)](#interface-management-wgpl-interface)
-  - [Peer Management (`wgpl peer`)](#peer-management-wgpl-peer)
-  - [General & Database](#general--database)
+- [Configuration](#configuration)
 - [Contributing](#contributing)
-- [Author](#author)
-- [License](#license)
-
-## Features
-
-### Multi-Server Ready
-
-Manage an unlimited number of WireGuard servers from a single SQLite database.
-
-- **Composite Identity:** Interface names (e.g. `wg0`) can be repeated across different servers. WGPL identifies tunnels by their composite key (`Name + Endpoint + Port`).
-- **Global IPAM:** Automatic allocation of free IPv4 addresses within a CIDR block per server.
-
-### Advanced Networking
-
-Bring enterprise networking features to your tunnels automatically:
-
-- **Per-Peer Granularity:** Customize `MTU`, `PersistentKeepalive`, and `DNS` at the interface level (default) or override them per peer.
-- **FQDN & IP Support:** Endpoints are proactively validated via RFC 1123, ensuring your generated configs are always resolvable by WireGuard.
-
-### Security & Cryptography
-
-- **Native Generation:** Public/private key generation (X25519) in native RAM using Python's `cryptography` (no `wg genkey` subprocesses).
-- **Hardened Validation:** 32-byte Base64 key validation prevents kernel panics during configuration synchronization.
-- **Secure by Default:** Automatic strict permissions (`chmod 600`) on databases and exported QR codes.
-
-### Automation and State
-
-- **Strict JSON Output (`--json`)** for M2M integration (Ansible, Terraform, Bash).
-- **Hot-Reloads:** Declarative synchronization with the Linux kernel using `wg syncconf` (without dropping TCP connections).
-
----
 
 ## Decoupled Architectures (BYOI)
 
-WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. It doesn't configure your kernel interfaces (`ip link add wg0`); instead, it manages the *Peers* (the clients) that connect to those interfaces.
+WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. **It is not a network daemon, it does not route traffic, and it does not create the initial `wg0` interface.** You provide the interface; WGPL manages the peers.
+
+```mermaid
+graph TD
+    DB[(WGPL SQLite SSOT)] --> CLI(wgpl CLI)
+    CLI -->|Zero-Downtime Reload| Linux[Linux Kernel wg0]
+    CLI -->|SSH / Ansible| Remote[Remote Servers]
+    CLI -->|JSON Export| Router[RouterOS / Edge]
+    CLI -->|QR Code PNG| Mobile[iOS / Android]
+```
 
 ### 1. Native Linux Server (Zero-Downtime Systemd)
 
 Run WGPL directly on the VPN Gateway (Debian/Ubuntu). You can automate garbage collection and peer synchronization using Systemd without ever bringing the interface down.
-
-```bash
-# 1. Register the local interface
-wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
-
-# 2. Add a new employee
-wgpl peer add wg0 "New_Employee"
-```
 
 **Systemd Automation Example:**
 Create a systemd service (`/etc/systemd/system/wgpl-sync.service`) to prune expired peers and hot-reload the kernel:
@@ -93,7 +95,7 @@ After=wg-quick@wg0.service
 [Service]
 Type=oneshot
 ExecStartPre=/usr/local/bin/wgpl peer prune wg0
-ExecStart=/usr/local/bin/wgpl apply wg0
+ExecStart=/usr/bin/sudo /usr/local/bin/wgpl apply wg0
 ```
 
 Trigger it with a `.timer` every 5 minutes to fully automate your VPN lifecycle.
@@ -115,16 +117,42 @@ cat server-a.conf | ssh root@server-a "wg syncconf wg0 /dev/stdin"
 Bring modern IPAM, TTL, and Audit capabilities to hardware routers that lack these features natively.
 
 ```bash
-# 1. Add the peer
-wgpl peer add mk-vpn "Smartphone"
-
-# 2. Extract configuration via JSON and generate an .rsc script
+# Extract configuration via JSON and generate an .rsc script
 wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.ip_address)/32\""' > mikrotik_sync.rsc
 ```
 
 Then import `mikrotik_sync.rsc` into your router.
 
----
+## Features
+
+### Multi-Server Ready
+
+Manage an unlimited number of WireGuard servers from a single SQLite database.
+
+- **Composite Identity:** Interface names (e.g. `wg0`) can be repeated across different servers. WGPL identifies tunnels by their composite key (`Name + Endpoint + Port`).
+- **Global IPAM:** Automatic allocation of free IPv4 addresses within a CIDR block per server.
+
+### Safe Concurrency
+
+- **CI/CD Ready:** SQLite WAL mode and exclusive locks ensure multiple CI/CD pipelines won't corrupt the state when running concurrently.
+
+### Advanced Networking
+
+Bring enterprise networking features to your tunnels automatically:
+
+- **Per-Peer Granularity:** Customize `MTU`, `PersistentKeepalive`, and `DNS` at the interface level (default) or override them per peer.
+- **FQDN & IP Support:** Endpoints are proactively validated via RFC 1123, ensuring your generated configs are always resolvable by WireGuard.
+
+### Security & Cryptography
+
+- **Native Generation:** Public/private key generation (X25519) in native RAM using Python's `cryptography` (no `wg genkey` subprocesses).
+- **Hardened Validation:** 32-byte Base64 key validation prevents kernel panics during configuration synchronization.
+- **Secure by Default:** Automatic strict permissions (`chmod 600`) on databases and exported QR codes.
+
+### Automation and State
+
+- **Strict JSON Output (`--json`)** for M2M integration (Ansible, Terraform, Bash).
+- **Hot-Reloads:** Declarative synchronization with the Linux kernel using `wg syncconf` (without dropping TCP connections).
 
 ## Client Provisioning (End-User Devices)
 
@@ -159,8 +187,6 @@ wgpl peer config <PEER_ID> | sudo tee /etc/wireguard/wg0.conf > /dev/null
 sudo systemctl enable --now wg-quick@wg0
 ```
 
----
-
 ## Enterprise Lifecycle & Audit (SRE)
 
 WGPL is built for operations teams that need traceability and access control.
@@ -192,7 +218,7 @@ wgpl peer remove wg0 <PEER_ID> --hard
 
 ### Immutable Audit Trail
 
-WGPL uses SQLite Triggers to maintain an append-only audit log. Fulfill SOC2 / ISO27001 requirements out-of-the-box.
+WGPL uses SQLite Triggers to maintain an append-only audit log.
 
 ```bash
 # View the lifecycle history of an interface
@@ -202,7 +228,17 @@ wgpl interface history wg0
 wgpl peer history wg0 <PEER_ID>
 ```
 
----
+### Backups & Point-in-Time Restore
+
+To prevent data loss and ease migrations, WGPL provides an atomic backup system that verifies schema integrity before swapping out the database.
+
+```bash
+# Dump the SQLite database into a logical .sql file
+wgpl db dump > backup.sql
+
+# Restore atomatically, preserving permissions and wiping out temp WAL files
+wgpl db restore backup.sql
+```
 
 ## Advanced Integrations
 
@@ -213,66 +249,31 @@ WGPL is designed to integrate seamlessly into modern DevOps and Cloud-Native sta
 - **[GitHub Actions (GitOps)](examples/github-actions-gitops.yml):** Deploy VPN configuration seamlessly via CI/CD from a declarative YAML state.
 - **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** Embed WGPL inside a Python web API to generate and return QR codes to users automatically.
 
----
-
-## Quick Start & Installation
-
-WGPL requires **Python 3.12+**.
-
-### Recommended Installation (via `uv`)
-
-```bash
-uv tool install wgpl
-wgpl --help
-```
-
-### Configuration
+## Configuration
 
 WGPL requires zero configuration, but respects the following environment variables:
 
-| Variable       | Description                                                                                                         | Default      |
-|----------------|---------------------------------------------------------------------------------------------------------------------|--------------|
-| `WGPL_DB_PATH` | Path to the local SQLite database used to store cryptographic state.                                                | `~/.wgpl.db` |
-| `WGPL_WG_BIN`  | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent LPE) | `wg` (PATH)  |
+| Variable | Description | Default |
+| --- | --- | --- |
+| `WGPL_DB_PATH` | Path to the local SQLite database used to store cryptographic state. | `~/.wgpl.db` |
+| `WGPL_WG_BIN` | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent LPE) | `wg` (PATH) |
 
 *Note: `wireguard-tools` (`wg`) is **only** necessary if you want to run `wgpl apply` on the same machine.*
 
----
-
-## CLI Reference
-
-All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs.
-
-### Interface Management (`wgpl interface`)
-
-- **`add <NAME> <ENDPOINT> <PUBKEY> <POOL_IP> [options]`**: Registers a new network. Accepts `--port`, `--dns`, `--mtu`, `--keepalive`, and `--desc`.
-- **`list`**: Shows interfaces and their unique IDs.
-- **`update <NAME_OR_ID> [options]`**: Modifies advanced network parameters (e.g., `--mtu 1360` or `--clear-mtu`).
-- **`export <NAME_OR_ID>`**: Prints standard `[Peer]` blocks compatible with the WireGuard server.
-- **`remove <NAME_OR_ID> [--force]`**: Deletes the interface (requires `--force` if peers exist).
-- **`history <NAME_OR_ID>`**: Shows append-only audit events.
-
-### Peer Management (`wgpl peer`)
-
-- **`add <INTERFACE_NAME_OR_ID> <NAME> [options]`**: Creates a new client. Accepts `--ip`, `--dns`, `--expires`, `--mtu`, `--keepalive`, and `--desc`.
-- **`list [--all] [--expired]`**: Shows active/all clients.
-- **`config <ID>`**: Shows the client configuration ready for consumption.
-- **`qr <ID> [-o <PNG_PATH>]`**: Generates the QR code.
-- **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies properties or uses `--clear-*` to inherit from the interface.
-- **`remove <INTERFACE_NAME_OR_ID> <ID> [--hard]`**: Soft-deletes a peer. Use `--hard` for physical deletion.
-- **`prune <INTERFACE_NAME_OR_ID>`**: Purges expired and soft-deleted peers.
-- **`history <INTERFACE_NAME_OR_ID> <ID>`**: Shows append-only audit events for a peer.
-
-### General & Database
-
-- **`wgpl apply <INTERFACE_NAME_OR_ID>`**: Synchronizes the state to the WireGuard kernel seamlessly using `wg syncconf`.
-- **`wgpl validate [INTERFACE_NAME_OR_ID]`**: Verifies database integrity.
-- **`wgpl db dump`**: Extracts the entire DB as a binary SQLite backup.
-- **`wgpl db restore <FILE>`**: Safely restores the database from a binary SQLite backup.
+WGPL features a self-documenting CLI. Run `wgpl --help` to explore commands, or check out the [Full CLI Reference](docs/cli.md) for details.
 
 ## Contributing
 
-Contributions are always welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) to understand the architecture, version control strategy, and commit conventions.
+Contributions are always welcome. Getting started is easy:
+
+```bash
+git clone https://github.com/aleaz/wgpl.git
+cd wgpl
+uv sync
+uv run pytest
+```
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) to understand the architecture, version control strategy, and commit conventions.
 
 ## Author
 
