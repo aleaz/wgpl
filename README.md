@@ -9,7 +9,7 @@
 
 **The Problem:** Managing WireGuard manually means editing text files (`wg0.conf`), guessing which IPs are free, and restarting interfaces (dropping all active connections) just to add one user. It also lacks a clear history of who was granted access.
 
-**The Solution:** WGPL decouples peer management from your OS. It uses a local SQLite database to automatically handle IP allocation (IPAM), generates configurations natively, and applies changes to the Linux kernel with **zero downtime**. It features an immutable, append-only audit trail that simplifies SOC2 and ISO27001 access reviews by proving exactly who got access, when, and when it was revoked.
+**The Solution:** WGPL decouples peer management from your OS. It uses a local SQLite database to automatically handle IP allocation (IPAM), generates configurations natively, and applies changes to the Linux kernel with **zero downtime**. It features a robust, append-only audit trail built on SQLite triggers. When combined with proper OS-level access controls, it simplifies SOC2 and ISO27001 compliance by generating a centralized historical record of IP assignments and peer lifecycles, reducing overhead during access reviews.
 
 ## 1-Minute Quick Start
 
@@ -45,6 +45,7 @@ wgpl peer qr "Alice_Laptop"
 
 # Or get the config file for her desktop
 wgpl peer config "Alice_Laptop" > alice.conf
+# Note: Ensure your umask is set securely or run `chmod 600 alice.conf` to protect private keys.
 ```
 
 ## How it compares to wg-quick
@@ -54,8 +55,10 @@ wgpl peer config "Alice_Laptop" > alice.conf
 | **Peer Storage** | Text files (`.conf`) | Relational SQLite Database |
 | **IP Allocation** | Manual (Risk of collisions) | Automatic CIDR IPAM |
 | **Applying Changes** | Restarts interface (Drops connections) | Zero-downtime hot-reloads (`wg syncconf`) |
-| **Audit & History** | None | Immutable Append-Only Log |
+| **Audit & History** | None | Robust Append-Only Log |
 | **Expiration** | Manual cleanup | Built-in TTL (`--expires 24h`) |
+
+*Note on Network Topology:* WGPL is explicitly designed for **Hub-and-Spoke** Remote Access VPNs. If you need a Server-to-Server Full-Mesh overlay, we recommend using Netmaker or Tailscale instead.
 
 ## Table of Contents
 
@@ -70,6 +73,8 @@ wgpl peer config "Alice_Laptop" > alice.conf
 ## Decoupled Architectures (BYOI)
 
 WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. **It is not a network daemon, it does not route traffic, and it does not create the initial `wg0` interface.** You provide the interface; WGPL manages the peers.
+
+> **Why we don't manage your routing or `iptables`:** Tools that hijack system routing often break Docker, Kubernetes, or corporate firewalls. WGPL leaves you in full control of your infrastructure's network rules.
 
 ```mermaid
 graph TD
@@ -122,6 +127,25 @@ wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=w
 ```
 
 Then import `mikrotik_sync.rsc` into your router.
+
+### 4. Docker Containers (Ephemeral CI/CD)
+
+WGPL is available as a lightweight Docker container. To persist your database, mount a local directory to `/data`.
+
+```bash
+alias wgpl='docker run --rm -it -v $(pwd)/wgpl-data:/data ghcr.io/aleaz/wgpl'
+
+# Now you can use it exactly like the local CLI
+wgpl interface list
+```
+
+**Note for applying changes:** If you want the container to apply changes to the host's Linux kernel (via `wg syncconf`), you must grant it network administration capabilities and run it in the host's network namespace:
+
+```bash
+docker run --rm -v $(pwd)/wgpl-data:/data \
+  --cap-add NET_ADMIN --network host \
+  ghcr.io/aleaz/wgpl apply wg0
+```
 
 ## Features
 
@@ -176,6 +200,7 @@ Export the standard `.conf` file to be imported into the official WireGuard desk
 
 ```bash
 wgpl peer config <PEER_ID> > my_laptop.conf
+# Note: Ensure your umask is set securely or run `chmod 600 my_laptop.conf` to protect private keys.
 ```
 
 ### Linux Clients
@@ -216,9 +241,9 @@ wgpl peer prune wg0
 wgpl peer remove wg0 <PEER_ID> --hard
 ```
 
-### Immutable Audit Trail
+### Audit Trail
 
-WGPL uses SQLite Triggers to maintain an append-only audit log.
+WGPL uses SQLite Triggers to maintain a robust, append-only audit log.
 
 ```bash
 # View the lifecycle history of an interface
@@ -247,7 +272,7 @@ WGPL is designed to integrate seamlessly into modern DevOps and Cloud-Native sta
 - **[Ansible Playbook](examples/ansible-deployment.yml):** Centralize multi-server zero-downtime updates from an Ansible control node.
 - **[Terraform & Cloud Firewalls](examples/terraform-external-data.tf):** Dynamically whitelist WireGuard peer IPs in an AWS Security Group (or GCP/Azure) using Terraform's `external` data source.
 - **[GitHub Actions (GitOps)](examples/github-actions-gitops.yml):** Deploy VPN configuration seamlessly via CI/CD from a declarative YAML state.
-- **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** Embed WGPL inside a Python web API to generate and return QR codes to users automatically.
+- **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** Embed WGPL inside a Python web API to generate and return QR codes to users automatically. Perfect for delegating VPN access to non-technical HR or IT Support staff without building a heavy UI.
 
 ## Configuration
 
@@ -256,7 +281,7 @@ WGPL requires zero configuration, but respects the following environment variabl
 | Variable | Description | Default |
 | --- | --- | --- |
 | `WGPL_DB_PATH` | Path to the local SQLite database used to store cryptographic state. | `~/.wgpl.db` |
-| `WGPL_WG_BIN` | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent LPE) | `wg` (PATH) |
+| `WGPL_WG_BIN` | Path to the `wg` binary used by `apply` and `syncconf`. (**Security:** Ignored when running as root to prevent Privilege Escalation; safely defaults to `/usr/bin/wg`) | `wg` (PATH) |
 
 *Note: `wireguard-tools` (`wg`) is **only** necessary if you want to run `wgpl apply` on the same machine.*
 
