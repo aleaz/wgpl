@@ -236,8 +236,8 @@ All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer 
 
 - **`wgpl apply <INTERFACE_NAME_OR_ID>`**: Synchronizes the state to the WireGuard kernel seamlessly using `wg syncconf`.
 - **`wgpl validate [INTERFACE_NAME_OR_ID]`**: Verifies database integrity.
-- **`wgpl db dump`**: Extracts the entire DB as an SQL script.
-- **`wgpl db restore <FILE>`**: Safely restores the database from an SQL script.
+- **`wgpl db dump`**: Extracts the entire DB as a binary SQLite backup.
+- **`wgpl db restore <FILE>`**: Safely restores the database from a binary SQLite backup.
 
 ## Contributing
 

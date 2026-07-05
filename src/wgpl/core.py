@@ -10,7 +10,7 @@ import sqlite3
 import os
 import shutil
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from typing import Any, cast
 
 from . import db

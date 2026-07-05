@@ -1,6 +1,5 @@
 import subprocess
 from dataclasses import dataclass
-import tempfile
 import os
 import base64
 from cryptography.hazmat.primitives.asymmetric import x25519

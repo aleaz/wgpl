@@ -148,22 +148,6 @@ def transaction() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
-@contextmanager
-def exclusive_snapshot() -> Generator[sqlite3.Connection, None, None]:
-    """Exclusive read snapshot for consistent iterdump (rolls back, never commits)."""
-    conn = _create_connection()
-    try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.execute("BEGIN EXCLUSIVE")
-        yield conn
-        conn.rollback()
-    except BaseException:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
 def get_current_actor() -> str:
     """Resolve the true identity of the caller for audit logs."""
     actor = os.environ.get("SUDO_USER")
