@@ -8,6 +8,7 @@ Thank you for your interest in contributing. All documentation and code comments
 git clone https://github.com/aleaz/wgpl.git
 cd wgpl
 uv sync --dev
+uv tool run pre-commit install
 ```
 
 ## Validation (required before opening a PR)
