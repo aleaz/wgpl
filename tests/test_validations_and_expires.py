@@ -37,6 +37,7 @@ def test_update_peer_expires(wg0_interface: str) -> None:
     # Verify in DB
     with db.transaction() as conn:
         db_peer = db.get_peer(peer_id, conn=conn)
+    assert db_peer is not None
     assert db_peer["expires_at"] is not None
 
     # Clear expires

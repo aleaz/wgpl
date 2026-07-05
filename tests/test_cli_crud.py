@@ -181,7 +181,7 @@ def test_cli_interface_remove_force_with_peers(wgpl_db: str) -> None:
     result = runner.invoke(app, ["interface", "remove", "wg0", "--force"])
 
     assert result.exit_code == 0
-    assert db.get_interface("wg0") is None
+    assert not db.get_interfaces_by_name("wg0")
 
 
 def test_cli_peer_history_json(wgpl_db: str) -> None:

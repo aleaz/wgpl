@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from typing import Any
 
 from wgpl import core, db, wireguard
 from wgpl.core import validate_dns, allocate_peer_ip, resolve_peer_ref
@@ -34,14 +35,14 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
 
 def test_allocate_peer_ip_skips_gateway(wg0_interface: str) -> None:
     with db.transaction() as conn:
-        first_ip = allocate_peer_ip(wg0_interface, conn)
+        first_ip = allocate_peer_ip(int(wg0_interface), conn)
 
     assert first_ip == "10.0.0.2"
 
     core.add_peer(wg0_interface, "peer_one")
 
     with db.transaction() as conn:
-        second_ip = allocate_peer_ip(wg0_interface, conn)
+        second_ip = allocate_peer_ip(int(wg0_interface), conn)
 
     assert second_ip == "10.0.0.3"
 
@@ -214,7 +215,7 @@ def test_update_interface_endpoint(wg0_interface: str) -> None:
     hints = result["hints"]
     assert isinstance(hints, list)
     assert "re_export_clients" in hints
-    row = db.get_interface(wg0_interface)
+    row = db.get_interface(int(wg0_interface))
     assert row is not None
     assert row["endpoint"] == "vpn2.example.com"
 
@@ -456,8 +457,9 @@ def test_prune_keeps_active_peer(wg0_interface: str) -> None:
 
 def test_get_peer_status_and_effective_dns(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", dns="1.1.1.1")
-    assert peer["id"] is not None
-    assert core.get_peer_status(db.get_peer(str(peer["id"])))  # type: ignore == "Active"
+    db_peer = db.get_peer(str(peer["id"]))
+    assert db_peer is not None
+    assert core.get_peer_status(db_peer) == "Active"
     assert core.get_effective_dns(peer["dns"], "8.8.8.8") == "1.1.1.1"
     assert core.get_effective_dns(None, "8.8.8.8") == "8.8.8.8"
     assert core.get_effective_dns(None, None) is None
@@ -582,7 +584,7 @@ def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
 
 
 @patch("wgpl.wireguard.subprocess.run")
-def test_run_wg_command_raises_wireguard_config_error(mock_run: object) -> None:
+def test_run_wg_command_raises_wireguard_config_error(mock_run: Any) -> None:
     mock_run.side_effect = subprocess.CalledProcessError(
         1, ["wg", "syncconf"], stderr="invalid configuration"
     )
@@ -637,7 +639,9 @@ def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
     result = core.validate_state(wg0_interface)
 
     assert result["status"] == "error"
-    codes = {issue["code"] for issue in result["issues"]}
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    codes = {issue["code"] for issue in issues}
     assert "duplicate_ip" in codes
 
 

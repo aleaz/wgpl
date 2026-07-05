@@ -2,7 +2,6 @@ import glob
 import os
 import sqlite3
 import stat
-import datetime
 from pathlib import Path
 
 import pytest

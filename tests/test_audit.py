@@ -1,8 +1,6 @@
 """Audit log and interface remove guard tests."""
 
 import datetime
-import json
-from pathlib import Path
 
 import pytest
 
@@ -65,7 +63,9 @@ def test_reclaim_expired_logs_reclaimed_and_old_row_gone(wg0_interface: str) -> 
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, old_id))
         conn.commit()
 
-    assert core.get_peer_status(db.get_peer(old_id)) == "Expired"
+    old_peer = db.get_peer(old_id)
+    assert old_peer is not None
+    assert core.get_peer_status(old_peer) == "Expired"
 
     new_peer = core.add_peer(wg0_interface, "phone2", ip_address="10.0.0.3")
     old_peer_row = db.get_peer(old_id)
@@ -111,7 +111,7 @@ def test_interface_remove_blocked_with_peers(wg0_interface: str) -> None:
     core.add_peer(wg0_interface, "phone")
     with pytest.raises(InterfaceHasPeersError):
         core.remove_interface(wg0_interface)
-    assert db.get_interface(wg0_interface) is not None
+    assert db.get_interface(int(wg0_interface)) is not None
 
 
 def test_interface_remove_blocked_with_expired_peer_only(wg0_interface: str) -> None:
@@ -128,7 +128,7 @@ def test_interface_remove_force_audit_cascade(wg0_interface: str) -> None:
     p1 = core.add_peer(wg0_interface, "a", ip_address="10.0.0.2")
     p2 = core.add_peer(wg0_interface, "b", ip_address="10.0.0.3")
     core.remove_interface(wg0_interface, force=True)
-    assert db.get_interface(wg0_interface) is None
+    assert db.get_interface(int(wg0_interface)) is None
     assert db.get_peer(p1["id"]) is None
     assert db.get_peer(p2["id"]) is None
 
@@ -142,7 +142,7 @@ def test_interface_remove_force_audit_cascade(wg0_interface: str) -> None:
 
 def test_interface_remove_empty_no_force(wg0_interface: str) -> None:
     core.remove_interface(wg0_interface)
-    assert db.get_interface(wg0_interface) is None
+    assert db.get_interface(int(wg0_interface)) is None
     events = core.list_interface_audit_history(wg0_interface)
     assert len(events) == 1
     assert events[0]["event_type"] == AuditEventType.REMOVED
@@ -245,7 +245,7 @@ def test_add_peer_rolls_back_when_audit_fails_on_second_event(
 
     assert db.get_peer(old_id) is not None
     assert audit_calls == 2
-    peers = db.list_peers(wg0_interface)
+    peers = db.list_peers(int(wg0_interface))
     assert len([p for p in peers if p["ip_address"] == "10.0.0.3" and core.get_peer_status(p) == "Active"]) == 0
 
 

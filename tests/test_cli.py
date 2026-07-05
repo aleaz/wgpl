@@ -29,7 +29,7 @@ def test_public_peer_rows_redact_secrets() -> None:
     ]
 
     from typing import cast
-    public = _public_peer_rows(cast(list[sqlite3.Row], rows), {"wg0": "1.1.1.1"})
+    public = _public_peer_rows(cast(list[sqlite3.Row], rows), {1: "1.1.1.1"})
 
     assert public == [
         {
