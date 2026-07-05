@@ -157,8 +157,12 @@ def get_current_actor() -> str:
         try:
             actor = os.getlogin()
         except OSError:
-            actor = "unknown"
-    return os.environ.get("WGPL_ACTOR", actor)
+            try:
+                import pwd
+                actor = pwd.getpwuid(os.getuid()).pw_name
+            except Exception:
+                actor = "unknown"
+    return actor
 
 
 def init_db(path: str | None = None) -> None:
