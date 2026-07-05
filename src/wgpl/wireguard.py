@@ -11,9 +11,19 @@ class Keypair:
     private_key: str
     public_key: str
 
+def _get_wg_bin() -> str:
+    """
+    Resolves the wg binary path.
+    SECURITY NOTE: If running as root (UID 0), we ignore WGPL_WG_BIN to prevent 
+    Local Privilege Escalation (LPE) via environment injection when using `sudo -E`.
+    """
+    if os.getuid() == 0:
+        return "wg"
+    return os.environ.get("WGPL_WG_BIN", "wg")
+
 def run_wg_command(*args: str) -> str:
     """Wrapper to run wg commands securely."""
-    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
+    wg_bin = _get_wg_bin()
     cmd = [wg_bin] + list(args)
 
     try:
@@ -53,7 +63,7 @@ def generate_preshared_key() -> str:
 
 def syncconf(interface: str, conf_content: str) -> None:
     """Applies a declarative configuration to a WireGuard interface."""
-    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
+    wg_bin = _get_wg_bin()
     cmd = [wg_bin, "syncconf", interface, "/dev/stdin"]
     
     try:
