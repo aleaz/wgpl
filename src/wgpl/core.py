@@ -11,16 +11,19 @@ import os
 import shutil
 import json
 from collections.abc import Mapping
+from enum import StrEnum
 from typing import Any, cast
 
 from . import db
 from .db import UNSET, UnsetType
+from . import dbpath
 from . import integrity
 from . import wireformat
 from . import wireguard
 from .exceptions import (
     AmbiguousInterfaceError,
     AmbiguousPeerIdError,
+    InterfaceDisambiguationRequiredError,
     InterfaceHasPeersError,
     InterfaceNotFoundError,
     InvalidDnsError,
@@ -39,6 +42,12 @@ _MIN_PEER_ID_PREFIX_LEN = 4
 _PEER_ID_HEX_LEN = 32
 
 _MAX_EXEC_CMD_LEN = 2_048
+
+
+class PeerResolvePolicy(StrEnum):
+    EXPORT_SECRET = "export_secret"
+    MUTATE_INACTIVE = "mutate_inactive"
+    READ_ONLY = "read_only"
 
 
 def _sanitize_exec_cmd(exec_cmd: str) -> str:
@@ -189,7 +198,9 @@ def list_peer_audit_history(
 ) -> list[dict[str, Any]]:
     """Return audit events for a peer (full UUID or unique prefix)."""
     try:
-        canonical_id = resolve_peer_ref(peer_ref, interface, active_only=False)
+        canonical_id = resolve_peer_ref(
+            peer_ref, interface, policy=PeerResolvePolicy.MUTATE_INACTIVE
+        )
     except PeerNotFoundError:
         normalized = _normalize_peer_ref(peer_ref)
         if len(normalized) != _PEER_ID_HEX_LEN:
@@ -277,7 +288,7 @@ def resolve_peer_ref(
     ref: str,
     interface: str | None = None,
     *,
-    active_only: bool = True,
+    policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
     conn: sqlite3.Connection | None = None,
 ) -> str:
     """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
@@ -285,6 +296,15 @@ def resolve_peer_ref(
 
     if not normalized or not all(c in "0123456789abcdef" for c in normalized):
         raise PeerNotFoundError(f"Peer {ref} not found")
+
+    if policy == PeerResolvePolicy.EXPORT_SECRET and interface is None:
+        if len(db.list_interfaces(conn=conn)) > 1:
+            raise InterfaceDisambiguationRequiredError(
+                "Multiple interfaces in database; specify --interface / -i "
+                "when exporting client configuration or secrets."
+            )
+
+    active_only = policy != PeerResolvePolicy.MUTATE_INACTIVE
 
     iface_id = resolve_interface_ref(interface, conn=conn) if interface else None
 
@@ -958,7 +978,9 @@ def get_peer_config(
     interface_ref: str | None = None,
 ) -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
-    canonical_id = resolve_peer_ref(peer_id, interface_ref)
+    canonical_id = resolve_peer_ref(
+        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
+    )
     peer = db.get_peer(canonical_id)
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
@@ -1353,8 +1375,13 @@ def update_peer(
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
+        resolve_policy = (
+            PeerResolvePolicy.MUTATE_INACTIVE
+            if not active_only
+            else PeerResolvePolicy.READ_ONLY
+        )
         canonical_id = resolve_peer_ref(
-            peer_ref, str(iface_id), active_only=active_only, conn=conn
+            peer_ref, str(iface_id), policy=resolve_policy, conn=conn
         )
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:
@@ -1567,7 +1594,9 @@ def validate_state(
 def dump_database(target_path: str) -> None:
     """Creates a binary backup of the database to target_path."""
     with db.get_db() as conn:
-        target_conn = sqlite3.connect(target_path)
+        target_conn = dbpath.open_database(
+            target_path, create=True, exclusive_create=True
+        )
         try:
             with target_conn:
                 conn.backup(target_conn)
@@ -1649,14 +1678,13 @@ def restore_database(source_path: str) -> list[str]:
     _cleanup_tmp_files(tmp_path)
 
     # 2. Create tmp db with secure permissions
-    fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-    os.close(fd)
+    dbpath.open_database(tmp_path, create=True, exclusive_create=True).close()
 
     # 3. Execute binary backup to tmp DB and validate schema
     try:
-        tmp_conn = sqlite3.connect(tmp_path)
+        tmp_conn = dbpath.open_existing_database(tmp_path)
         try:
-            source_conn = sqlite3.connect(source_path)
+            source_conn = dbpath.open_existing_database(source_path)
             try:
                 with source_conn:
                     source_conn.backup(tmp_conn)
@@ -1690,7 +1718,7 @@ def restore_database(source_path: str) -> list[str]:
     # 4. Backup current db with WAL checkpoint for consistency
     try:
         if os.path.exists(db_path):
-            checkpoint_conn = sqlite3.connect(db_path)
+            checkpoint_conn = dbpath.open_existing_database(db_path)
             try:
                 result = checkpoint_conn.execute(
                     "PRAGMA wal_checkpoint(TRUNCATE)"

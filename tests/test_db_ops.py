@@ -107,7 +107,7 @@ def test_restore_database_failure_invalid_syntax(wgpl_db: str, tmp_path: Path) -
     with open(bad_path, "w") as f:
         f.write("This is not a sqlite database")
 
-    with pytest.raises(WgplException, match="Failed to restore"):
+    with pytest.raises(WgplException, match="not a database"):
         core.restore_database(bad_path)
 
 

@@ -64,6 +64,12 @@ class PeerInterfaceMismatchError(WgplException):
     pass
 
 
+class InterfaceDisambiguationRequiredError(WgplException):
+    """Raised when --interface is required to disambiguate peer resolution."""
+
+    pass
+
+
 class AmbiguousInterfaceError(WgplException):
     """Raised when an interface name matches multiple interfaces in the database."""
 

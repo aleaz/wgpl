@@ -2,7 +2,6 @@ import datetime
 import json
 import sqlite3
 import os
-import stat
 from contextlib import contextmanager
 from enum import StrEnum
 from typing import Any, Generator
@@ -15,6 +14,7 @@ from .exceptions import (
     IpAlreadyInUseError,
     WgplException,
 )
+from . import dbpath
 
 
 class _UnsetType:
@@ -42,45 +42,20 @@ class AuditEventType(StrEnum):
     CASCADE_REMOVED = "cascade_removed"
 
 
-def get_db_path() -> str:
-    """Returns the absolute path to the SQLite database file."""
-    default_path = os.path.expanduser("~/.wgpl.db")
-    path = os.environ.get("WGPL_DB_PATH", default_path)
-    return _normalize_db_path(path)
-
-
 _MAX_AUDIT_METADATA_BYTES = 16_384
 _MAX_AUDIT_METADATA_STRING_LEN = 2_048
 _MAX_AUDIT_METADATA_DEPTH = 10
 
 
+def get_db_path() -> str:
+    """Returns the absolute path to the SQLite database file."""
+    default_path = os.path.expanduser("~/.wgpl.db")
+    path = os.environ.get("WGPL_DB_PATH", default_path)
+    return dbpath.normalize_db_path(path)
+
+
 def _normalize_db_path(db_path: str) -> str:
-    """Normalize DB path and harden against symlink/invalid targets."""
-    if not isinstance(db_path, str) or not db_path.strip():
-        raise WgplException("Database path must be a non-empty string")
-    if "\x00" in db_path:
-        raise WgplException("Database path contains invalid null bytes")
-    expanded = os.path.expanduser(db_path)
-    return os.path.abspath(expanded)
-
-
-def _validate_regular_file_no_symlink(db_path: str) -> None:
-    try:
-        st = os.lstat(db_path)
-    except FileNotFoundError:
-        return
-
-    # Do not follow symlinks for the DB file (symlink-to-arbitrary-file attack).
-    if stat.S_ISLNK(st.st_mode):
-        raise WgplException(f"Database path must not be a symlink: {db_path}")
-
-    if stat.S_ISDIR(st.st_mode):
-        raise WgplException(f"Database path is a directory: {db_path}")
-
-    if not stat.S_ISREG(st.st_mode):
-        raise WgplException(
-            f"Database path must be a regular file (got mode {st.st_mode:o}): {db_path}"
-        )
+    return dbpath.normalize_db_path(db_path)
 
 
 _SCHEMA_CORRUPT_MSG = (
@@ -134,7 +109,7 @@ def enforce_audit_immutability(conn: sqlite3.Connection) -> None:
 
 def assert_schema_contract(path: str) -> None:
     """Verify a database file satisfies the WGPL schema contract."""
-    conn = sqlite3.connect(path)
+    conn = dbpath.open_existing_database(path)
     try:
         _assert_schema_contract_conn(conn)
     finally:
@@ -191,50 +166,7 @@ def _run_query(
 
 def _create_connection() -> sqlite3.Connection:
     """Creates a secure, atomic connection to the SQLite database."""
-    db_path = get_db_path()
-
-    _validate_regular_file_no_symlink(db_path)
-
-    try:
-        fd = os.open(db_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-        os.close(fd)
-    except FileExistsError:
-        pass
-    except FileNotFoundError:
-        parent = os.path.dirname(db_path) or "."
-        raise WgplException(f"Database directory does not exist: {parent}") from None
-    except IsADirectoryError:
-        raise WgplException(f"Database path is a directory: {db_path}") from None
-    except PermissionError:
-        raise WgplException(
-            f"Permission denied to access database at {db_path}. "
-            "Try running with sudo or check file permissions."
-        ) from None
-
-    # INVARIANT FIX: Always enforce 0o600, even if the file pre-existed.
-    try:
-        os.chmod(db_path, 0o600)
-    except PermissionError:
-        raise WgplException(
-            f"Permission denied to secure database at {db_path}. Try running with sudo or check file ownership."
-        )
-
-    try:
-        conn = sqlite3.connect(db_path)
-    except sqlite3.Error as e:
-        raise WgplException(f"Failed to connect to database at {db_path}: {e}") from e
-    # PRAGMAs for safety and performance
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA busy_timeout = 5000")
-    except sqlite3.Error as e:
-        conn.close()
-        raise WgplException(f"Failed to connect to database at {db_path}: {e}") from e
-
-    # We want dictionary-like rows
-    conn.row_factory = sqlite3.Row
-    return conn
+    return dbpath.open_database(get_db_path(), create=True, exclusive_create=True)
 
 
 @contextmanager

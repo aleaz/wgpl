@@ -379,7 +379,9 @@ def peer_show(
         # Fetching peer data
         peers = core.list_peers(interface, expired_only=False, show_all=True)
         # Resolve ID correctly
-        resolved_id = core.resolve_peer_ref(peer_id, interface, active_only=False)
+        resolved_id = core.resolve_peer_ref(
+            peer_id, interface, policy=core.PeerResolvePolicy.MUTATE_INACTIVE
+        )
         peer = next((p for p in peers if p["id"] == resolved_id), None)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_id} not found")
@@ -670,7 +672,9 @@ def peer_remove(
     ),
 ) -> None:
     try:
-        canonical_id = core.resolve_peer_ref(peer_id, interface, active_only=False)
+        canonical_id = core.resolve_peer_ref(
+            peer_id, interface, policy=core.PeerResolvePolicy.MUTATE_INACTIVE
+        )
         core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
@@ -899,7 +903,9 @@ def peer_qr(
             fd = os.open(output, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(png_bytes)
-            canonical_id = core.resolve_peer_ref(peer_id, interface)
+            canonical_id = core.resolve_peer_ref(
+                peer_id, interface, policy=core.PeerResolvePolicy.EXPORT_SECRET
+            )
             if ctx.obj.get("json"):
                 _output(
                     ctx,

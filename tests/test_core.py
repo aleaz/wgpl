@@ -8,9 +8,10 @@ import pytest
 from typing import Any
 
 from wgpl import core, db, wireguard
-from wgpl.core import validate_dns, allocate_peer_ip, resolve_peer_ref
+from wgpl.core import PeerResolvePolicy, validate_dns, allocate_peer_ip, resolve_peer_ref
 from wgpl.exceptions import (
     AmbiguousPeerIdError,
+    InterfaceDisambiguationRequiredError,
     InvalidDnsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
@@ -203,7 +204,7 @@ def test_get_peer_config_uses_interface_dns(wg0_interface: str) -> None:
     peer = core.add_peer("wg_dns", "phone")
 
     assert peer["id"] is not None
-    config = core.get_peer_config(peer["id"])
+    config = core.get_peer_config(peer["id"], interface_ref="wg_dns")
 
     assert "DNS = 1.1.1.1" in config
 
@@ -220,7 +221,7 @@ def test_get_peer_config_peer_dns_overrides_interface(wg0_interface: str) -> Non
     peer = core.add_peer("wg_dns2", "kids", dns="9.9.9.9")
 
     assert peer["id"] is not None
-    config = core.get_peer_config(peer["id"])
+    config = core.get_peer_config(peer["id"], interface_ref="wg_dns2")
 
     assert "DNS = 9.9.9.9" in config
     assert "1.1.1.1" not in config
@@ -244,6 +245,25 @@ def _insert_peer_on_interface(
     )
 
 
+def test_get_peer_config_requires_interface_with_multiple_interfaces(
+    wgpl_db: str,
+) -> None:
+    pk1 = wireguard.generate_keypair().public_key
+    pk2 = wireguard.generate_keypair().public_key
+    iface_a = db.add_interface("wg0", "vpn1.example.com", pk1, "10.0.0.0/24", 51820)
+    iface_b = db.add_interface("wg1", "vpn2.example.com", pk2, "10.0.1.0/24", 51821)
+    peer_a = "aaaaaaaa-bbbb-cccc-dddd-111111111111"
+    peer_b = "bbbbbbbb-bbbb-cccc-dddd-222222222222"
+    _insert_peer_on_interface(peer_a, iface_a, "phone", "10.0.0.2")
+    _insert_peer_on_interface(peer_b, iface_b, "laptop", "10.0.1.2")
+
+    with pytest.raises(InterfaceDisambiguationRequiredError, match="--interface"):
+        core.get_peer_config(peer_a)
+
+    config = core.get_peer_config(peer_a, interface_ref="wg0")
+    assert "vpn1.example.com:51820" in config
+
+
 def test_get_peer_config_interface_ref_disambiguates(wgpl_db: str) -> None:
     pk1 = wireguard.generate_keypair().public_key
     pk2 = wireguard.generate_keypair().public_key
@@ -254,7 +274,7 @@ def test_get_peer_config_interface_ref_disambiguates(wgpl_db: str) -> None:
     _insert_peer_on_interface(peer_a, iface_a, "phone", "10.0.0.2")
     _insert_peer_on_interface(peer_b, iface_b, "laptop", "10.0.1.2")
 
-    with pytest.raises(AmbiguousPeerIdError, match="ambiguous"):
+    with pytest.raises(InterfaceDisambiguationRequiredError, match="--interface"):
         core.get_peer_config("55c521ad")
 
     config_a = core.get_peer_config("55c521ad", interface_ref="wg0")
@@ -430,14 +450,17 @@ def test_resolve_peer_ref_excludes_soft_deleted_by_default(wg0_interface: str) -
         resolve_peer_ref(peer["id"])
 
 
-def test_resolve_peer_ref_includes_soft_deleted_when_active_only_false(
+def test_resolve_peer_ref_includes_soft_deleted_when_mutate_inactive(
     wg0_interface: str,
 ) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     assert peer["id"] is not None
     core.remove_peer(wg0_interface, peer["id"])
 
-    assert resolve_peer_ref(peer["id"], active_only=False) == peer["id"]
+    assert (
+        resolve_peer_ref(peer["id"], policy=PeerResolvePolicy.MUTATE_INACTIVE)
+        == peer["id"]
+    )
 
 
 def test_resolve_peer_ref_excludes_expired_by_default(wg0_interface: str) -> None:
@@ -554,7 +577,9 @@ def test_remove_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, active_only=True, conn=None: peer["id"],
+        lambda ref, iface=None, policy=PeerResolvePolicy.READ_ONLY, conn=None: peer[
+            "id"
+        ],
     )
 
     assert peer["id"] is not None
@@ -571,7 +596,9 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, active_only=True, conn=None: peer["id"],
+        lambda ref, iface=None, policy=PeerResolvePolicy.READ_ONLY, conn=None: peer[
+            "id"
+        ],
     )
 
     assert peer["id"] is not None
@@ -747,11 +774,11 @@ def test_update_peer_resolve_uses_transaction_connection(
         ref: str,
         interface: str | None = None,
         *,
-        active_only: bool = True,
+        policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
         conn: sqlite3.Connection | None = None,
     ) -> str:
         seen_conn.append(conn)
-        return original(ref, interface, active_only=active_only, conn=conn)
+        return original(ref, interface, policy=policy, conn=conn)
 
     monkeypatch.setattr(core, "resolve_peer_ref", tracking_resolve)
     core.update_peer(wg0_interface, str(peer["id"]), name="renamed")
