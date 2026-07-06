@@ -377,6 +377,9 @@ def peer_show(
             raise PeerNotFoundError(f"Peer {peer_id} not found")
 
         iface_dns = core.interface_dns_map()
+        ifaces = core.list_interfaces()
+        iface_map = {i["id"]: i["name"] for i in ifaces}
+        iface_name = iface_map.get(peer["interface_id"], peer["interface_id"])
 
         if ctx.obj.get("json"):
             _output(ctx, dict(peer))
@@ -384,7 +387,7 @@ def peer_show(
             rows = [
                 ("ID", str(peer["id"])),
                 ("Name", str(peer["name"])),
-                ("Interface", str(peer["interface"])),
+                ("Interface", str(iface_name)),
                 ("Status", str(core.get_peer_status(dict(peer)))),
                 ("IP Address", str(peer["ip_address"])),
                 ("Public Key", str(peer["public_key"])),
@@ -393,7 +396,7 @@ def peer_show(
                     "DNS (Effective)",
                     str(
                         core.get_effective_dns(
-                            dict(peer).get("dns"), iface_dns.get(peer["interface"])
+                            dict(peer).get("dns"), iface_dns.get(peer["interface_id"])
                         )
                         or "—"
                     ),
