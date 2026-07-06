@@ -90,10 +90,10 @@ WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. **It is not a netwo
 flowchart LR
     DB[(WGPL SQLite SSOT)] ==> CLI(wgpl CLI)
 
-    CLI -->|Zero-Downtime Reload| Linux[🐧 Linux Kernel wg0]
-    CLI -->|SSH / Ansible| Remote[🌐 Remote Servers]
-    CLI -->|JSON Export| Router[🖧 RouterOS / Edge]
-    CLI -->|QR Code PNG| Mobile[📱 iOS / Android]
+    CLI -->|Zero-Downtime Reload| Linux[Linux Kernel wg0]
+    CLI -->|SSH / Ansible| Remote[Remote Servers]
+    CLI -->|JSON Export| Router[RouterOS / Edge]
+    CLI -->|QR Code PNG| Mobile[iOS / Android]
 ```
 
 ### 1. Native Linux Server (Zero-Downtime Systemd)
