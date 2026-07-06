@@ -4,9 +4,11 @@ import stat
 import tempfile
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from wgpl import core, db
+import wgpl.cli as cli_module
 from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
 
 
@@ -301,6 +303,29 @@ def test_cli_db_restore_requires_yes(wgpl_db: str) -> None:
     payload = json.loads(result.stdout)
     assert payload["status"] == "error"
     assert "--yes" in payload["message"]
+
+
+def test_peer_history_limit_capped(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    result = runner.invoke(
+        app, ["peer", "history", wg0_interface, str(peer["id"]), "--limit", "1001"]
+    )
+
+    assert result.exit_code == 1
+    assert "limit must be <=" in result.stderr
+
+
+def test_db_restore_stdin_size_limit(wgpl_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_module, "_MAX_RESTORE_STDIN_BYTES", 16)
+    binary_db = b"x" * 17
+    result = runner.invoke(
+        app, ["--json", "db", "restore", "--yes", "-"], input=binary_db
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "exceeds" in payload["message"]
 
 
 def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:

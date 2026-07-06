@@ -480,6 +480,20 @@ def validate_public_key(key: str) -> str:
     return key
 
 
+def validate_peer_name(name: str) -> str:
+    """Validate and normalize peer names used in DB and CLI output."""
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("Peer name cannot be empty")
+    if len(normalized) > 64:
+        raise ValueError("Peer name must be at most 64 characters")
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", normalized):
+        raise ValueError(
+            "Peer name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
+        )
+    return normalized
+
+
 def add_interface(
     name: str,
     endpoint: str,
@@ -799,9 +813,7 @@ def add_peer(
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
     Returns a dictionary with the peer's essential information.
     """
-    peer_name = peer_name.strip()
-    if not peer_name:
-        raise ValueError("Peer name cannot be empty")
+    peer_name = validate_peer_name(peer_name)
     normalized_dns = validate_dns(dns) if dns is not None else None
     if mtu is not None and mtu < 576:
         raise ValueError(f"MTU must be >= 576, got {mtu}")
@@ -1298,9 +1310,7 @@ def update_peer(
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if name is not None:
-        name = name.strip()
-        if not name:
-            raise ValueError("Peer name cannot be empty")
+        name = validate_peer_name(name)
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:

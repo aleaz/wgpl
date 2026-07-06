@@ -9,11 +9,11 @@ All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer 
 - **`update <NAME_OR_ID> [options]`**: Modifies advanced network parameters (e.g., `--mtu 1360` or `--clear-mtu`).
 - **`export <NAME_OR_ID>`**: Prints standard `[Peer]` blocks compatible with the WireGuard server.
 - **`remove <NAME_OR_ID> [--force]`**: Deletes the interface (requires `--force` if peers exist).
-- **`history <NAME_OR_ID> [--limit N] [--offset N]`**: Shows append-only audit events.
+- **`history <NAME_OR_ID> [--limit N] [--offset N]`**: Shows append-only audit events (`--limit` max: 1000).
 
 ## Peer Management (`wgpl peer`)
 
-- **`add <INTERFACE_NAME_OR_ID> <NAME> [options]`**: Creates a new client. Accepts `--ip`, `--dns`, `--expires`, `--mtu`, `--keepalive`, and `--desc`.
+- **`add <INTERFACE_NAME_OR_ID> <NAME> [options]`**: Creates a new client. `<NAME>` must be alphanumeric with optional `_` / `-` and max length 64.
 - **`list [--all] [--expired]`**: Shows active/all clients.
 - **`show <ID> [--show-secrets]`**: Peer details; JSON omits private keys (same fields as `list --json`).
 - **`config <ID> [--interface NAME_OR_ID]`**: Shows the client configuration ready for consumption.
@@ -21,7 +21,7 @@ All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer 
 - **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies properties or uses `--clear-*` to inherit from the interface.
 - **`remove <INTERFACE_NAME_OR_ID> <ID> [--hard]`**: Soft-deletes a peer. Use `--hard` for physical deletion.
 - **`prune <INTERFACE_NAME_OR_ID>`**: Purges expired and soft-deleted peers.
-- **`history <INTERFACE_NAME_OR_ID> <ID> [--limit N] [--offset N]`**: Shows append-only audit events for a peer.
+- **`history <INTERFACE_NAME_OR_ID> <ID> [--limit N] [--offset N]`**: Shows append-only audit events for a peer (`--limit` max: 1000).
 
 ## General & Database
 

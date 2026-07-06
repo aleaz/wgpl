@@ -42,6 +42,11 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
     assert "preshared_key" not in result
 
 
+def test_add_peer_rejects_invalid_name(wg0_interface: str) -> None:
+    with pytest.raises(ValueError, match="invalid characters"):
+        core.add_peer(wg0_interface, "bad name with spaces")
+
+
 def test_allocate_peer_ip_skips_gateway(wg0_interface: str) -> None:
     with db.transaction() as conn:
         first_ip = allocate_peer_ip(int(wg0_interface), conn)

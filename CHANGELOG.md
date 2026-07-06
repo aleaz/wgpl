@@ -10,10 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `--show-secrets` on `peer show` to reveal preshared key in human-readable output
+- Peer name validation now enforces a safe character set and length limit
 
 ### Fixed
 
 - `peer show --json` redacts private keys and preshared keys (consistent with `peer list --json`)
+- `peer history` / `interface history` reject invalid pagination values and cap `--limit` at 1000
+- `db restore --yes -` now enforces a maximum stdin payload size
+- Rich table rendering now escapes user-controlled peer fields to prevent terminal markup injection
 
 - `wgpl db restore --yes` — confirmation required before destructive restore
 - `--interface` / `-i` on `peer config` and `peer qr` to disambiguate peer ID prefixes

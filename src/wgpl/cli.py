@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rich import box
+from rich.markup import escape
 from rich.console import Console
 from rich.table import Table
 
@@ -46,6 +47,8 @@ _STYLE_ID = typer_styles.STYLE_COMMANDS_TABLE_FIRST_COLUMN
 _STYLE_VALUE = typer_styles.STYLE_TYPES
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
+_MAX_HISTORY_LIMIT = 1000
+_MAX_RESTORE_STDIN_BYTES = 256 * 1024 * 1024
 
 
 def _styled(text: str, style: str = "") -> str:
@@ -74,6 +77,11 @@ def _truncate_desc(desc: str | None, max_len: int = 25) -> str:
     if len(desc) > max_len:
         return desc[: max_len - 3] + "..."
     return desc
+
+
+def _safe_markup(value: str) -> str:
+    """Escape user-provided values before inserting into Rich markup."""
+    return escape(value)
 
 
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
@@ -199,6 +207,30 @@ def _validate_allowed_ips(ctx: typer.Context, allowed_ips: str) -> None:
             ipaddress.ip_network(ip.strip(), strict=False)
         except ValueError:
             _exit_error(ctx, f"Invalid AllowedIPs format '{ip.strip()}'")
+
+
+def _validate_pagination(ctx: typer.Context, limit: int, offset: int) -> None:
+    if limit < 1:
+        _exit_error(ctx, "limit must be >= 1")
+    if limit > _MAX_HISTORY_LIMIT:
+        _exit_error(ctx, f"limit must be <= {_MAX_HISTORY_LIMIT}")
+    if offset < 0:
+        _exit_error(ctx, "offset must be >= 0")
+
+
+def _copy_stream_limited(src: Any, dst: Any, max_bytes: int) -> None:
+    """Copy bytes from src to dst enforcing a maximum size."""
+    copied = 0
+    while True:
+        chunk = src.read(1024 * 1024)
+        if not chunk:
+            break
+        copied += len(chunk)
+        if copied > max_bytes:
+            raise WgplException(
+                f"Restore input exceeds {max_bytes} bytes limit. Use a smaller backup file."
+            )
+        dst.write(chunk)
 
 
 # --- Interfaces ---
@@ -366,8 +398,8 @@ def peer_show(
             psk_display = str(psk) if show_secrets and psk else "—"
             rows = [
                 ("ID", str(peer["id"])),
-                ("Name", str(peer["name"])),
-                ("Interface", str(iface_name)),
+                ("Name", _safe_markup(str(peer["name"]))),
+                ("Interface", _safe_markup(str(iface_name))),
                 ("Status", str(core.get_peer_status(dict(peer)))),
                 ("IP Address", str(peer["ip_address"])),
                 ("Public Key", str(peer["public_key"])),
@@ -386,9 +418,9 @@ def peer_show(
                 ("Keepalive", str(dict(peer).get("keepalive") or "—")),
                 ("Expires At", str(dict(peer).get("expires_at") or "—")),
                 ("Deleted At", str(dict(peer).get("deleted_at") or "—")),
-                ("Description", str(dict(peer).get("desc") or "—")),
+                ("Description", _safe_markup(str(dict(peer).get("desc") or "—"))),
             ]
-            _print_show_table(f"Peer Details: {peer['name']}", rows)
+            _print_show_table(f"Peer Details: {_safe_markup(str(peer['name']))}", rows)
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -546,6 +578,7 @@ def interface_history(
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
     try:
+        _validate_pagination(ctx, limit, offset)
         events = core.list_interface_audit_history(name, limit=limit, offset=offset)
         if ctx.obj.get("json"):
             _output(ctx, events)
@@ -588,6 +621,7 @@ def peer_history(
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
     try:
+        _validate_pagination(ctx, limit, offset)
         events = core.list_peer_audit_history(
             peer_id, interface, limit=limit, offset=offset
         )
@@ -772,9 +806,9 @@ def peer_list(
                 [
                     _styled(_format_peer_id_display(p["id"], total_peers), _STYLE_ID),
                     _styled(
-                        str(iface_map.get(p["interface_id"], p["interface_id"])), ""
+                        _safe_markup(str(iface_map.get(p["interface_id"], p["interface_id"]))), ""
                     ),
-                    _styled(p["name"], _STYLE_ID),
+                    _styled(_safe_markup(p["name"]), _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
                     _styled(core.get_peer_status(p), _STYLE_META),
                     _styled(
@@ -787,7 +821,7 @@ def peer_list(
                     ),
                     _styled(str(p.get("mtu") or "—"), _STYLE_META),
                     _styled(str(p.get("keepalive") or "—"), _STYLE_META),
-                    _styled(_truncate_desc(p.get("desc")), ""),
+                    _styled(_safe_markup(_truncate_desc(p.get("desc"))), ""),
                 ]
                 for p in data
             ]
@@ -973,7 +1007,9 @@ def db_restore(
             fd, path = tempfile.mkstemp()
             try:
                 with os.fdopen(fd, "wb") as f:
-                    shutil.copyfileobj(sys.stdin.buffer, f)
+                    _copy_stream_limited(
+                        sys.stdin.buffer, f, max_bytes=_MAX_RESTORE_STDIN_BYTES
+                    )
                 warnings = core.restore_database(path)
             finally:
                 os.remove(path)
