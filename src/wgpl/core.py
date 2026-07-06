@@ -36,6 +36,24 @@ from .exceptions import (
 _MIN_PEER_ID_PREFIX_LEN = 4
 _PEER_ID_HEX_LEN = 32
 
+_MAX_EXEC_CMD_LEN = 2_048
+
+
+def _sanitize_exec_cmd(exec_cmd: str) -> str:
+    """Sanitize exec_cmd for storing into audit metadata.
+
+    We do not attempt secret redaction here; instead we prevent audit log
+    injection (control characters) and keep the payload bounded.
+    """
+    # Replace common control chars with spaces to avoid log/terminal injection.
+    sanitized = re.sub(r"[\r\n\t]+", " ", str(exec_cmd))
+    # Drop other non-printable characters.
+    sanitized = "".join(ch for ch in sanitized if ch.isprintable())
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    if len(sanitized) > _MAX_EXEC_CMD_LEN:
+        sanitized = sanitized[:_MAX_EXEC_CMD_LEN] + "..."
+    return sanitized
+
 
 def _parse_duration(duration: str) -> datetime.datetime:
     """Parses a duration string (e.g. '7d', '24h') and returns a future datetime."""
@@ -133,7 +151,7 @@ def _audit_peer_from_row(
     metadata_with_context = dict(metadata) if metadata else {}
     exec_cmd = os.environ.get("WGPL_EXEC_CMD")
     if exec_cmd:
-        metadata_with_context["exec_cmd"] = exec_cmd
+        metadata_with_context["exec_cmd"] = _sanitize_exec_cmd(exec_cmd)
 
     db.append_audit_event(
         entity_type=db.AuditEntityType.PEER,
@@ -159,7 +177,7 @@ def _audit_interface_event(
     metadata_with_context = dict(metadata) if metadata else {}
     exec_cmd = os.environ.get("WGPL_EXEC_CMD")
     if exec_cmd:
-        metadata_with_context["exec_cmd"] = exec_cmd
+        metadata_with_context["exec_cmd"] = _sanitize_exec_cmd(exec_cmd)
 
     iface = db.get_interface(interface_id, conn=conn)
     name = iface["name"] if iface else str(interface_id)

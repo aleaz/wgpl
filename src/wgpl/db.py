@@ -2,6 +2,7 @@ import datetime
 import json
 import sqlite3
 import os
+import stat
 from contextlib import contextmanager
 from enum import StrEnum
 from typing import Any, Generator
@@ -44,7 +45,42 @@ class AuditEventType(StrEnum):
 def get_db_path() -> str:
     """Returns the absolute path to the SQLite database file."""
     default_path = os.path.expanduser("~/.wgpl.db")
-    return os.environ.get("WGPL_DB_PATH", default_path)
+    path = os.environ.get("WGPL_DB_PATH", default_path)
+    return _normalize_db_path(path)
+
+
+_MAX_AUDIT_METADATA_BYTES = 16_384
+_MAX_AUDIT_METADATA_STRING_LEN = 2_048
+_MAX_AUDIT_METADATA_DEPTH = 10
+
+
+def _normalize_db_path(db_path: str) -> str:
+    """Normalize DB path and harden against symlink/invalid targets."""
+    if not isinstance(db_path, str) or not db_path.strip():
+        raise WgplException("Database path must be a non-empty string")
+    if "\x00" in db_path:
+        raise WgplException("Database path contains invalid null bytes")
+    expanded = os.path.expanduser(db_path)
+    return os.path.abspath(expanded)
+
+
+def _validate_regular_file_no_symlink(db_path: str) -> None:
+    try:
+        st = os.lstat(db_path)
+    except FileNotFoundError:
+        return
+
+    # Do not follow symlinks for the DB file (symlink-to-arbitrary-file attack).
+    if stat.S_ISLNK(st.st_mode):
+        raise WgplException(f"Database path must not be a symlink: {db_path}")
+
+    if stat.S_ISDIR(st.st_mode):
+        raise WgplException(f"Database path is a directory: {db_path}")
+
+    if not stat.S_ISREG(st.st_mode):
+        raise WgplException(
+            f"Database path must be a regular file (got mode {st.st_mode:o}): {db_path}"
+        )
 
 
 _SCHEMA_CORRUPT_MSG = (
@@ -69,8 +105,7 @@ def _create_connection() -> sqlite3.Connection:
     """Creates a secure, atomic connection to the SQLite database."""
     db_path = get_db_path()
 
-    if os.path.isdir(db_path):
-        raise WgplException(f"Database path is a directory: {db_path}")
+    _validate_regular_file_no_symlink(db_path)
 
     try:
         fd = os.open(db_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
@@ -180,7 +215,7 @@ def get_current_actor() -> str:
 def init_db(path: str | None = None) -> None:
     """Initializes the database schema and enforces restrictive permissions."""
     if path:
-        os.environ["WGPL_DB_PATH"] = path
+        os.environ["WGPL_DB_PATH"] = _normalize_db_path(path)
 
     db_path = get_db_path()
 
@@ -648,9 +683,52 @@ def update_peer(
 def _validate_audit_metadata(metadata: dict[str, Any] | None) -> None:
     if not metadata:
         return
-    for key in metadata:
-        if key.lower() in _FORBIDDEN_AUDIT_METADATA_KEYS:
-            raise WgplException(f"Audit metadata must not contain secret field '{key}'")
+
+    def _validate_value(value: Any, depth: int) -> None:
+        if depth > _MAX_AUDIT_METADATA_DEPTH:
+            raise WgplException("Audit metadata is too deeply nested")
+
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if not isinstance(k, str):
+                    raise WgplException("Audit metadata keys must be strings")
+                if k.lower() in _FORBIDDEN_AUDIT_METADATA_KEYS:
+                    raise WgplException(
+                        f"Audit metadata must not contain secret field '{k}'"
+                    )
+                _validate_value(v, depth + 1)
+            return
+
+        if isinstance(value, list):
+            for item in value:
+                _validate_value(item, depth + 1)
+            return
+
+        if isinstance(value, str):
+            if len(value) > _MAX_AUDIT_METADATA_STRING_LEN:
+                raise WgplException("Audit metadata string value is too large")
+            # Keep metadata JSON-safe and avoid control character injection.
+            if any(ord(ch) < 0x20 and ch not in {"\n", "\r", "\t"} for ch in value):
+                raise WgplException("Audit metadata contains unsafe control characters")
+            return
+
+        if value is None:
+            return
+        if isinstance(value, (int, float, bool)):
+            return
+
+        raise WgplException("Audit metadata must be JSON-serializable")
+
+    _validate_value(metadata, 0)
+
+    # Ensure total serialized metadata stays bounded.
+    try:
+        metadata_json = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+    except TypeError as exc:
+        raise WgplException("Audit metadata must be JSON-serializable") from exc
+
+    if len(metadata_json.encode("utf-8")) > _MAX_AUDIT_METADATA_BYTES:
+        raise WgplException("Audit metadata exceeds maximum allowed size")
 
 
 def append_audit_event(

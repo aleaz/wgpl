@@ -1,6 +1,7 @@
 import subprocess
 from dataclasses import dataclass
 import os
+import stat
 import base64
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization
@@ -21,7 +22,34 @@ def _get_wg_bin() -> str:
     """
     if os.getuid() == 0:
         return "wg"
-    return os.environ.get("WGPL_WG_BIN", "wg")
+    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
+    if wg_bin == "wg":
+        return "wg"
+
+    expanded = os.path.abspath(os.path.expanduser(wg_bin))
+    try:
+        st = os.lstat(expanded)
+    except FileNotFoundError:
+        raise WgBinaryNotFoundError(
+            f"WireGuard binary path configured via WGPL_WG_BIN not found: {expanded}"
+        )
+
+    if stat.S_ISLNK(st.st_mode):
+        raise WgBinaryNotFoundError(
+            f"WireGuard binary path must not be a symlink: {expanded}"
+        )
+
+    if stat.S_ISDIR(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise WgBinaryNotFoundError(
+            f"WireGuard binary path must be a regular file: {expanded}"
+        )
+
+    if not os.access(expanded, os.X_OK):
+        raise WgBinaryNotFoundError(
+            f"WireGuard binary path is not executable: {expanded}"
+        )
+
+    return expanded
 
 
 def run_wg_command(*args: str) -> str:
