@@ -60,9 +60,10 @@ wgpl interface export wg0 | ssh root@my-vpn-server "wg syncconf wg0 /dev/stdin"
 #   Local (server with wireguard-tools):
 wgpl apply wg0
 
-# 5. Database backup
-wgpl db dump > backup.sql
-wgpl db restore < backup.sql
+# 5. Database backup (binary SQLite)
+wgpl db dump -o backup.db
+chmod 600 backup.db
+wgpl db restore --yes backup.db
 ```
 
 ## Automation (M2M)

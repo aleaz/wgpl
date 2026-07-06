@@ -49,7 +49,7 @@ Out of scope:
   (key rotation is not available via `peer update`).
 - Run `wgpl validate` after bulk changes to confirm peer IPs still fit their pools.
 
-- `wgpl db dump` output contains **private keys** for all peers. Treat SQL backups like the database file (`chmod 600`, never commit to git).
-- `wgpl db restore` replaces the live database atomically after validation; it is destructive. Warnings (e.g. WAL checkpoint blocked) go to stderr.
+- `wgpl db dump` output is a **binary SQLite database** containing private keys for all peers. Treat backups like the live database file (`chmod 600`, never commit to git).
+- `wgpl db restore` replaces the live database atomically after validation; it is destructive and requires `--yes`. Warnings (e.g. WAL checkpoint blocked) go to stderr.
 - `peer history` and `interface history` store **public keys** only; `private_key` and `preshared_key` are blocked from audit metadata.
 - Append-only `audit_events` grows without automatic retention; plan disk usage on long-lived hosts.

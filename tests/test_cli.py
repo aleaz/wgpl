@@ -227,7 +227,9 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
         binary_db = f.read()
     os.remove(path)
 
-    result = runner.invoke(app, ["--json", "db", "restore", "-"], input=binary_db)
+    result = runner.invoke(
+        app, ["--json", "db", "restore", "--yes", "-"], input=binary_db
+    )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -237,3 +239,12 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
     restored = db.get_peer(peer_id)
     assert restored is not None
     assert restored["name"] == "phone"
+
+
+def test_cli_db_restore_requires_yes(wgpl_db: str) -> None:
+    result = runner.invoke(app, ["--json", "db", "restore", "/nonexistent.db"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "--yes" in payload["message"]

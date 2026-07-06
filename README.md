@@ -264,17 +264,20 @@ wgpl interface history wg0
 wgpl peer history wg0 <PEER_ID>
 ```
 
-### Backups & Point-in-Time Restore
+### Backups & disaster recovery
 
-To prevent data loss and ease migrations, WGPL provides an atomic backup system that verifies schema integrity before swapping out the database.
+WGPL provides an atomic binary backup system that validates schema integrity before swapping the live database.
 
 ```bash
-# Dump the SQLite database into a logical .sql file
-wgpl db dump > backup.sql
+# Binary SQLite backup (contains peers, private keys, and full audit history)
+wgpl db dump -o backup.db
+chmod 600 backup.db
 
-# Restore atomatically, preserving permissions and wiping out temp WAL files
-wgpl db restore backup.sql
+# Destructive restore (requires --yes)
+wgpl db restore --yes backup.db
 ```
+
+> **Multi-server note:** two interfaces may share the same name (e.g. `wg0`) if they differ by endpoint/port. Use the numeric **interface ID** from `wgpl interface list` when names are ambiguous.
 
 ## Advanced Integrations
 

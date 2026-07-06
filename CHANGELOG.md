@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `wgpl db restore --yes` — confirmation required before destructive restore
+
 - Tests: restore retry, chmod 600, JSON validate errors, pool rejection CLI, audit metadata asserts
 - Regression tests: audit rollback on failure, concurrent `add_peer`, dump/restore roundtrip, CLI `db restore`, peer update reclaim, audit metadata `preshared_key` guard
 - Append-only `audit_events` table; `peer history` and `interface history` commands (`--json` supported)
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `peer prune <interface>` — permanently removes soft-deleted and expired peers
 - `peer add --expires` — peer lifetime (`7d`, `24h`, etc.)
 - `peer list --expired`, `--all`; JSON fields `status`, `expires_at`, `deleted_at`
-- `wgpl db dump` / `wgpl db restore` — logical SQL backup with atomic restore
+- `wgpl db dump` / `wgpl db restore` — binary SQLite backup with atomic restore (`--yes` required)
 - `InterfaceConflictError` — global uniqueness of interface `port` and `address_pool`
 - Optional `desc`, `mtu`, and `keepalive` on interfaces and peers (add, update, and `--clear-*` flags)
 - Effective DNS, MTU, and PersistentKeepalive cascade (peer override → interface default) in client config
@@ -54,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README rewritten for upcoming 1.0 release
 - Strict layer boundaries: CLI reads go through `core` (`list_interfaces`, `list_peers`, `ensure_database`); no direct `db` imports in `cli.py`
 - Peer lifecycle SSOT in `core`: `get_peer_status`, `get_effective_dns`; expired peers release IPs for allocation
-- `wgpl db dump` hints on stderr; SQL script lines come from `core.dump_database_lines()` (no I/O in core)
+- `wgpl db dump` writes a binary SQLite backup; use `-o path.db` or redirect stdout (not SQL text)
 - `peer config` / `peer qr`: PersistentKeepalive and MTU come from the database (interface → peer cascade), not CLI flags
 - CONTRIBUTING: self-contained Conventional Commit messages (no internal process IDs)
 

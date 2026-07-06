@@ -959,9 +959,17 @@ def db_restore(
     file: str = typer.Argument(
         "-", help="Binary SQLite file to restore from (use '-' for stdin)"
     ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Confirm destructive restore of the live database"
+    ),
 ) -> None:
     """Restore the database from a binary SQLite backup (destructive)."""
     try:
+        if not yes:
+            _exit_error(
+                ctx,
+                "Refusing to restore without --yes (this replaces the live database)",
+            )
         if file == "-":
             fd, path = tempfile.mkstemp()
             try:
