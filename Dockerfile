@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir *.whl && rm *.whl
 # Configure the persistent data volume
 VOLUME ["/data"]
 ENV WGPL_DB_PATH=/data/wgpl.db
-RUN chown -R wgpl:wgpl /app /data
+RUN mkdir -p /data && chown -R wgpl:wgpl /app /data
 
 USER wgpl
 
