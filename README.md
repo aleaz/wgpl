@@ -3,7 +3,7 @@
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: Production Ready](https://img.shields.io/badge/Status-Production_Ready-success.svg)
+![Status: Work in Progress](https://img.shields.io/badge/Status-Work_in_Progress-orange.svg)
 
 **WGPL (WireGuard Peer Lite)** is a lightweight, database-backed CLI for managing WireGuard peers across multiple servers.
 
@@ -35,8 +35,10 @@ curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64
 chmod +x /usr/local/bin/wgpl
 ```
 
+*> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.*
+
 **Option B: Python / uv (Recommended for Developers)**
-Requires Python 3.12+.
+Requires Python 3.12+. Using `uv` is convenient as it makes it trivial to get the latest updates (by simply running `uv tool upgrade wgpl`) or to install the bleeding-edge version directly from the repository.
 
 ```bash
 uv tool install wgpl
