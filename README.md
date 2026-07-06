@@ -37,7 +37,7 @@ chmod +x /usr/local/bin/wgpl
 
 *> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.*
 
-**Option B: Python / uv (Recommended for Developers)**
+**Option B: Python / uv (Recommended for Developers & Admins)**
 Requires Python 3.12+. Using `uv` is convenient as it makes it trivial to get the latest updates (by simply running `uv tool upgrade wgpl`) or to install the bleeding-edge version directly from the repository.
 
 ```bash
@@ -87,12 +87,13 @@ WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. **It is not a netwo
 > **Why we don't manage your routing or `iptables`:** Tools that hijack system routing often break Docker, Kubernetes, or corporate firewalls. WGPL leaves you in full control of your infrastructure's network rules.
 
 ```mermaid
-graph TD
-    DB[(WGPL SQLite SSOT)] --> CLI(wgpl CLI)
-    CLI -->|Zero-Downtime Reload| Linux[Linux Kernel wg0]
-    CLI -->|SSH / Ansible| Remote[Remote Servers]
-    CLI -->|JSON Export| Router[RouterOS / Edge]
-    CLI -->|QR Code PNG| Mobile[iOS / Android]
+flowchart LR
+    DB[(WGPL SQLite SSOT)] ==> CLI(wgpl CLI)
+
+    CLI -->|Zero-Downtime Reload| Linux[🐧 Linux Kernel wg0]
+    CLI -->|SSH / Ansible| Remote[🌐 Remote Servers]
+    CLI -->|JSON Export| Router[🖧 RouterOS / Edge]
+    CLI -->|QR Code PNG| Mobile[📱 iOS / Android]
 ```
 
 ### 1. Native Linux Server (Zero-Downtime Systemd)
