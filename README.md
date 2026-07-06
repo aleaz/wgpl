@@ -1,4 +1,4 @@
-# WGPL (WireGuard Peer Lite) - Zero-Downtime Peer Management & IPAM
+# WGPL (WireGuard Peer Lite) - Database-backed CLI for Zero-Downtime Peer Management & IPAM
 
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -11,15 +11,35 @@
 
 **The Solution:** WGPL decouples peer management from your OS. It uses a local SQLite database to automatically handle IP allocation (IPAM), generates configurations natively, and applies changes to the Linux kernel with **zero downtime**. It features a robust, append-only audit trail built on SQLite triggers. When combined with proper OS-level access controls, it simplifies SOC2 and ISO27001 compliance by generating a centralized historical record of IP assignments and peer lifecycles, reducing overhead during access reviews.
 
+## How it compares to wg-quick
+
+| Feature | `wg-quick` (Manual) | `wgpl` |
+| --- | --- | --- |
+| **Peer Storage** | Text files (`.conf`) | Relational SQLite Database |
+| **IP Allocation** | Manual (Risk of collisions) | Automatic CIDR IPAM |
+| **Applying Changes** | Restarts interface (Drops connections) | Zero-downtime hot-reloads (`wg syncconf`) |
+| **Audit & History** | None | Robust Append-Only Log |
+| **Expiration** | Manual cleanup | Built-in TTL (`--expires 24h`) |
+
+*Note on Network Topology:* WGPL is explicitly designed for **Hub-and-Spoke** Remote Access VPNs. If you need a Server-to-Server Full-Mesh overlay, we recommend using Netmaker or Tailscale instead.
+
 ## 1-Minute Quick Start
 
-WGPL requires **Python 3.12+**.
+### 1. Install
 
-### 1. Install via uv
+**Option A: Standalone Binary (Recommended for Linux Routers)**
+No dependencies required.
+
+```bash
+curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 -o /usr/local/bin/wgpl
+chmod +x /usr/local/bin/wgpl
+```
+
+**Option B: Python / uv (Recommended for Developers)**
+Requires Python 3.12+.
 
 ```bash
 uv tool install wgpl
-wgpl --help
 ```
 
 ### 2. Register an Interface & Add a Peer
@@ -47,18 +67,6 @@ wgpl peer qr "Alice_Laptop"
 wgpl peer config "Alice_Laptop" > alice.conf
 # Note: Ensure your umask is set securely or run `chmod 600 alice.conf` to protect private keys.
 ```
-
-## How it compares to wg-quick
-
-| Feature | `wg-quick` (Manual) | `wgpl` |
-| --- | --- | --- |
-| **Peer Storage** | Text files (`.conf`) | Relational SQLite Database |
-| **IP Allocation** | Manual (Risk of collisions) | Automatic CIDR IPAM |
-| **Applying Changes** | Restarts interface (Drops connections) | Zero-downtime hot-reloads (`wg syncconf`) |
-| **Audit & History** | None | Robust Append-Only Log |
-| **Expiration** | Manual cleanup | Built-in TTL (`--expires 24h`) |
-
-*Note on Network Topology:* WGPL is explicitly designed for **Hub-and-Spoke** Remote Access VPNs. If you need a Server-to-Server Full-Mesh overlay, we recommend using Netmaker or Tailscale instead.
 
 ## Table of Contents
 
@@ -155,6 +163,7 @@ Manage an unlimited number of WireGuard servers from a single SQLite database.
 
 - **Composite Identity:** Interface names (e.g. `wg0`) can be repeated across different servers. WGPL identifies tunnels by their composite key (`Name + Endpoint + Port`).
 - **Global IPAM:** Automatic allocation of free IPv4 addresses within a CIDR block per server.
+- **Idempotent by Design:** Running `wgpl apply` repeatedly is completely safe. It only syncs deltas to the kernel.
 
 ### Safe Concurrency
 

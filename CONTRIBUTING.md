@@ -19,9 +19,23 @@ uv run mypy src/
 uv run pytest
 ```
 
+> **Safe by Design Testing:** You can run `pytest` fearlessly. The test suite runs entirely on `:memory:` SQLite databases and mocks the OS-level `wg` commands. It will **not** modify your host's `iptables` or `/etc/wireguard` configurations, and it does not require `root` privileges.
+
 ## Architecture invariants
 
-Read [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) before making changes. Key rules:
+Read [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc) before making changes.
+
+```mermaid
+graph TD
+    CLI[wgpl/cli.py] --> CORE[wgpl/core.py]
+    CORE --> DB[wgpl/db.py (SQLite)]
+    CORE --> WG[wgpl/wireguard.py (OS Sync)]
+
+    classDef boundary fill:transparent,stroke-dasharray: 5 5;
+    class DB,WG boundary;
+```
+
+Key rules:
 
 - SQLite is the SSOT; no auto-sync on `add_peer` / `remove_peer`
 - Strict layers: `cli.py` → `core.py` → `db.py` / `wireguard.py` (CLI must not import `db`)
