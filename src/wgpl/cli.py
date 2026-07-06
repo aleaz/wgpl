@@ -6,7 +6,6 @@ import sqlite3
 import sys
 import shutil
 import tempfile
-import ipaddress
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -202,11 +201,10 @@ def _print_hints(hints: list[str]) -> None:
 
 
 def _validate_allowed_ips(ctx: typer.Context, allowed_ips: str) -> None:
-    for ip in allowed_ips.split(","):
-        try:
-            ipaddress.ip_network(ip.strip(), strict=False)
-        except ValueError:
-            _exit_error(ctx, f"Invalid AllowedIPs format '{ip.strip()}'")
+    try:
+        core.validate_allowed_ips(allowed_ips)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
 
 
 def _validate_pagination(ctx: typer.Context, limit: int, offset: int) -> None:

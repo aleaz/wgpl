@@ -16,6 +16,7 @@ from typing import Any, cast
 from . import db
 from .db import UNSET, UnsetType
 from . import integrity
+from . import wireformat
 from . import wireguard
 from .exceptions import (
     AmbiguousInterfaceError,
@@ -423,6 +424,11 @@ def validate_dns(value: str) -> str:
             raise InvalidDnsError(f"Invalid DNS address '{part}'") from exc
         normalized.append(part)
     return ", ".join(normalized)
+
+
+def validate_allowed_ips(allowed_ips: str) -> str:
+    """Validate AllowedIPs for client configuration export."""
+    return wireformat.validate_allowed_ips(allowed_ips)
 
 
 def validate_endpoint(endpoint: str) -> str:
@@ -961,41 +967,7 @@ def get_peer_config(
     if not iface:
         raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
 
-    network = ipaddress.IPv4Network(iface["address_pool"], strict=False)
-
-    config_lines = [
-        "[Interface]",
-        f"PrivateKey = {peer['private_key']}",
-        f"Address = {peer['ip_address']}/{network.prefixlen}",
-    ]
-
-    effective_dns = _effective_peer_dns(peer, iface)
-    if effective_dns:
-        config_lines.append(f"DNS = {effective_dns}")
-
-    effective_mtu = _effective_peer_mtu(peer, iface)
-    if effective_mtu is not None:
-        config_lines.append(f"MTU = {effective_mtu}")
-
-    config_lines.extend(["", "[Peer]", f"PublicKey = {iface['public_key']}"])
-
-    if peer["preshared_key"]:
-        config_lines.append(f"PresharedKey = {peer['preshared_key']}")
-
-    config_lines.extend(
-        [
-            f"Endpoint = {iface['endpoint']}:{iface['port']}",
-            f"AllowedIPs = {allowed_ips}",
-        ]
-    )
-
-    effective_keepalive = _effective_peer_keepalive(peer, iface)
-    if effective_keepalive is not None:
-        config_lines.append(f"PersistentKeepalive = {effective_keepalive}")
-
-    config_lines.append("")
-
-    return "\n".join(config_lines)
+    return wireformat.build_client_config(peer, iface, allowed_ips)
 
 
 def get_peer_qr(
@@ -1048,27 +1020,26 @@ def get_interface_config(interface_ref: str) -> str:
         raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
 
     peers = db.list_peers(iface_id)
+    return wireformat.build_server_config(iface, peers)
 
-    conf_lines = []
-    if iface["mtu"] is not None:
-        conf_lines.append(f"MTU = {iface['mtu']}")
-        conf_lines.append("")
 
-    for peer in peers:
-        if not _is_peer_active(peer):
-            continue
-        conf_lines.append("[Peer]")
-        conf_lines.append(f"PublicKey = {peer['public_key']}")
-        if peer["preshared_key"]:
-            conf_lines.append(f"PresharedKey = {peer['preshared_key']}")
-        conf_lines.append(f"AllowedIPs = {peer['ip_address']}/32")
-        conf_lines.append("")
-
-    return "\n".join(conf_lines)
+def assert_database_valid(interface: str | None = None) -> None:
+    """Raise when the database fails consistency checks."""
+    result = validate_state(interface)
+    if result["status"] == "ok":
+        return
+    issues = cast(list[dict[str, str | None]], result["issues"])
+    details = "; ".join(
+        f"{issue.get('interface')}/{issue.get('peer')}: "
+        f"{issue.get('code')} — {issue.get('detail')}"
+        for issue in issues
+    )
+    raise WgplException(f"Database validation failed: {details}")
 
 
 def sync_interface(interface_ref: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
+    assert_database_valid(interface_ref)
     iface_id = resolve_interface_ref(interface_ref)
     iface = db.get_interface(iface_id)
     if not iface:
@@ -1573,6 +1544,18 @@ def validate_state(
                             "detail": str(exc),
                         }
                     )
+
+            try:
+                integrity.validate_wire_peer_fields(peer)
+            except WgplException as exc:
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "invalid_wire_fields",
+                        "detail": str(exc),
+                    }
+                )
 
     status = "ok" if not issues else "error"
     return {"status": status, "issues": issues}
