@@ -107,7 +107,8 @@ def open_database(
     except FileExistsError:
         fd = secure_open(path, create=False)
 
-    assert fd is not None
+    if fd is None:
+        raise WgplException(f"Failed to open database at {path}")
     try:
         os.chmod(path, 0o600)
     except PermissionError:

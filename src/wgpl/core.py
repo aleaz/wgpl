@@ -45,7 +45,7 @@ _MAX_EXEC_CMD_LEN = 2_048
 
 
 class PeerResolvePolicy(StrEnum):
-    EXPORT_SECRET = "export_secret"
+    EXPORT_SECRET = "export_secret"  # nosec B105 — resolve policy label, not a secret
     MUTATE_INACTIVE = "mutate_inactive"
     READ_ONLY = "read_only"
 
