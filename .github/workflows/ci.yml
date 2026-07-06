@@ -33,6 +33,12 @@ jobs:
     - name: Run Mypy (Type Checking)
       run: uv run mypy src/
 
+    - name: Run Bandit (SAST)
+      run: uv run bandit -q -r src/
+
+    - name: Run pip-audit (Dependency scan)
+      run: uv run pip-audit
+
     - name: Run Tests
       run: uv run pytest
 

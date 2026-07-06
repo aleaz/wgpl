@@ -1,4 +1,4 @@
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 import os
 import stat
@@ -58,7 +58,8 @@ def run_wg_command(*args: str) -> str:
     cmd = [wg_bin] + list(args)
 
     try:
-        result = subprocess.run(
+        # Command and arguments are explicit and never executed via shell.
+        result = subprocess.run(  # nosec B603
             cmd,
             text=True,
             capture_output=True,
@@ -104,7 +105,8 @@ def syncconf(interface: str, conf_content: str) -> None:
     cmd = [wg_bin, "syncconf", interface, "/dev/stdin"]
 
     try:
-        subprocess.run(
+        # Command and arguments are explicit and never executed via shell.
+        subprocess.run(  # nosec B603
             cmd,
             input=conf_content,
             text=True,

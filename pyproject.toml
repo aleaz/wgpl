@@ -33,7 +33,9 @@ wgpl = "wgpl.cli:app"
 
 [dependency-groups]
 dev = [
+    "bandit>=1.8.6",
     "mypy>=2.1.0",
+    "pip-audit>=2.9.0",
     "pytest>=8.0",
     "ruff>=0.14.0",
     "types-qrcode>=8.2.0.20260518",

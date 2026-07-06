@@ -2,20 +2,26 @@ import subprocess
 import json
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 
 app = FastAPI(title="WGPL Self-Service Portal")
 
 
 class OnboardRequest(BaseModel):
-    employee_name: str
-    department: str
-    interface_name: str = "wg0"
+    employee_name: str = Field(
+        min_length=1, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    )
+    department: str = Field(
+        min_length=1, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    )
+    interface_name: str = Field(
+        default="wg0", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
     # We allow onboarding temporary access
     # e.g., '8h' for contractors, '30d' for normal employees
-    expires: str = "30d"
+    expires: str = Field(default="30d", pattern=r"^[1-9][0-9]*(d|h)$")
 
 
 @app.post("/api/vpn/onboard")
@@ -25,7 +31,7 @@ async def onboard_employee(req: OnboardRequest, background_tasks: BackgroundTask
     This demonstrates WGPL being used as the backend Control Plane engine.
     """
     # 1. Clean the employee name to be used as a peer name
-    safe_name = f"{req.department}_{req.employee_name}".replace(" ", "_")
+    safe_name = f"{req.department}_{req.employee_name}"
 
     try:
         # 2. Add the peer using WGPL CLI (JSON output for easy parsing)
@@ -40,7 +46,9 @@ async def onboard_employee(req: OnboardRequest, background_tasks: BackgroundTask
             req.expires,
         ]
 
-        result = subprocess.run(add_cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            add_cmd, capture_output=True, text=True, check=True, timeout=10
+        )
         peer_data = json.loads(result.stdout)
         peer_id = peer_data.get("id")
 
@@ -50,8 +58,8 @@ async def onboard_employee(req: OnboardRequest, background_tasks: BackgroundTask
         fd, qr_path = tempfile.mkstemp(suffix=".png")
         os.close(fd)  # Close the file descriptor, wgpl will write to the path
 
-        qr_cmd = ["wgpl", "peer", "qr", peer_id, "-o", qr_path]
-        subprocess.run(qr_cmd, check=True)
+        qr_cmd = ["wgpl", "peer", "qr", peer_id, "--interface", req.interface_name, "-o", qr_path]
+        subprocess.run(qr_cmd, check=True, timeout=10)
 
         # 4. Return the PNG image back to the user's browser/app
         if os.path.exists(qr_path):
@@ -67,6 +75,8 @@ async def onboard_employee(req: OnboardRequest, background_tasks: BackgroundTask
         else:
             raise HTTPException(status_code=500, detail="QR Code generation failed")
 
-    except subprocess.CalledProcessError as e:
-        # WGPL prints the error inside the Exception
-        raise HTTPException(status_code=400, detail=f"WGPL Error: {e.stderr}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="WGPL command timed out")
+    except subprocess.CalledProcessError:
+        # Do not return raw stderr details to untrusted clients.
+        raise HTTPException(status_code=400, detail="WGPL command failed")

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--show-secrets` on `peer show` to reveal preshared key in human-readable output
 - Peer name validation now enforces a safe character set and length limit
+- Trust-boundary regression tests for DB path symlink rejection, `WGPL_WG_BIN` validation, and audit metadata constraints
+- CI security scanners: `bandit` (SAST) and `pip-audit` (dependency vulnerabilities)
 
 ### Fixed
 
@@ -18,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `peer history` / `interface history` reject invalid pagination values and cap `--limit` at 1000
 - `db restore --yes -` now enforces a maximum stdin payload size
 - Rich table rendering now escapes user-controlled peer fields to prevent terminal markup injection
+- `WGPL_DB_PATH` is normalized and hardened against symlink/non-regular file targets
+- `WGPL_WG_BIN` custom paths now require existing, non-symlink, executable regular files
+- Audit `exec_cmd` metadata is sanitized and bounded to prevent control-character injection
+- Audit metadata validation now enforces JSON-safe types plus size/depth limits
+- Example FastAPI onboarding validates input and avoids returning raw subprocess stderr
+- Example Ansible deployment avoids `shell:` for `wg syncconf`/`wg-quick save` execution
 
 - `wgpl db restore --yes` — confirmation required before destructive restore
 - `--interface` / `-i` on `peer config` and `peer qr` to disambiguate peer ID prefixes

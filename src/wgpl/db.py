@@ -364,7 +364,8 @@ def add_interface(
                     keepalive,
                 ),
             )
-            assert cursor.lastrowid is not None
+            if cursor.lastrowid is None:
+                raise WgplException("Failed to persist interface: missing row id")
             return cursor.lastrowid
     except sqlite3.IntegrityError as exc:
         msg = str(exc).lower()
@@ -461,8 +462,9 @@ def update_interface(
     params.append(id)
     try:
         with _ensure_conn(conn, commit=True) as c:
+            # SQL field names come from internal fixed update clauses only.
             c.execute(
-                f"UPDATE interfaces SET {', '.join(updates)} WHERE id = ?",
+                f"UPDATE interfaces SET {', '.join(updates)} WHERE id = ?",  # nosec B608
                 params,
             )
     except sqlite3.IntegrityError as exc:
@@ -660,8 +662,9 @@ def update_peer(
     params.append(peer_id)
     try:
         with _ensure_conn(conn, commit=True) as c:
+            # SQL field names come from internal fixed update clauses only.
             c.execute(
-                f"UPDATE peers SET {', '.join(updates)} WHERE id = ?",
+                f"UPDATE peers SET {', '.join(updates)} WHERE id = ?",  # nosec B608
                 params,
             )
     except sqlite3.IntegrityError as exc:
@@ -798,8 +801,9 @@ def list_audit_events(
         params.append(interface)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.extend([limit, offset])
+    # WHERE is assembled from constant fragments with bound params for values.
     sql = (
-        f"SELECT * FROM audit_events {where} "
+        f"SELECT * FROM audit_events {where} "  # nosec B608
         "ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?"
     )
     with _ensure_conn(conn) as c:

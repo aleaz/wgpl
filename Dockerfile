@@ -24,6 +24,9 @@ LABEL org.opencontainers.image.description="WireGuard Peer Lite (WGPL)"
 # Install wireguard-tools and essential networking utilities (iproute2)
 RUN apk add --no-cache wireguard-tools iproute2
 
+# Create an unprivileged runtime user.
+RUN addgroup -S wgpl && adduser -S -G wgpl -h /home/wgpl wgpl
+
 WORKDIR /app
 
 # Copy ONLY the built wheel from the builder stage
@@ -35,6 +38,9 @@ RUN pip install --no-cache-dir *.whl && rm *.whl
 # Configure the persistent data volume
 VOLUME ["/data"]
 ENV WGPL_DB_PATH=/data/wgpl.db
+RUN chown -R wgpl:wgpl /app /data
+
+USER wgpl
 
 # Expose the CLI natively
 ENTRYPOINT ["wgpl"]

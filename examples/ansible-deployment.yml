@@ -19,13 +19,23 @@
       changed_when: false
 
     - name: Apply Zero-Downtime state via wg syncconf
-      # The config is securely piped directly into the kernel module
-      # Existing active connections (TCP/UDP) will NOT be dropped.
-      shell: echo "{{ wg_config.stdout }}" | wg syncconf {{ inventory_hostname }} /dev/stdin
+      # Feed config through stdin to avoid shell interpolation/injection risks.
+      command:
+        argv:
+          - wg
+          - syncconf
+          - "{{ inventory_hostname }}"
+          - /dev/stdin
+      args:
+        stdin: "{{ wg_config.stdout }}"
       when: wg_status.rc == 0
       notify: Save WireGuard config
 
   handlers:
     - name: Save WireGuard config
       # Persist the running kernel state to disk for reboots
-      shell: wg-quick save {{ inventory_hostname }}
+      command:
+        argv:
+          - wg-quick
+          - save
+          - "{{ inventory_hostname }}"

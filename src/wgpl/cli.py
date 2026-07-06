@@ -944,7 +944,8 @@ def validate_cmd(
             console.print(f"[green]Validation passed for {scope}[/green]")
         else:
             issues = result["issues"]
-            assert isinstance(issues, list)
+            if not isinstance(issues, list):
+                raise WgplException("Invalid validate_state response: issues must be a list")
             for issue in issues:
                 peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
                 console.print(
