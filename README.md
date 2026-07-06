@@ -21,7 +21,7 @@
 | **Audit & History** | None | Robust Append-Only Log |
 | **Expiration** | Manual cleanup | Built-in TTL (`--expires 24h`) |
 
-*Note on Network Topology:* WGPL is explicitly designed for **Hub-and-Spoke** Remote Access VPNs. If you need a Server-to-Server Full-Mesh overlay, we recommend using Netmaker or Tailscale instead.
+> **Note on Network Topology:** WGPL is explicitly designed for **Hub-and-Spoke** Remote Access VPNs. If you need a Server-to-Server Full-Mesh overlay, we recommend using Netmaker or Tailscale instead.
 
 ## 1-Minute Quick Start
 
@@ -35,7 +35,7 @@ curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64
 chmod +x /usr/local/bin/wgpl
 ```
 
-*> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.*
+> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.
 
 **Option B: Python / uv (Recommended for Developers & Admins)**
 Requires Python 3.12+. Using `uv` is convenient as it makes it trivial to get the latest updates (by simply running `uv tool upgrade wgpl`) or to install the bleeding-edge version directly from the repository.
@@ -87,9 +87,8 @@ WGPL follows a "Bring Your Own Interface" (BYOI) philosophy. **It is not a netwo
 > **Why we don't manage your routing or `iptables`:** Tools that hijack system routing often break Docker, Kubernetes, or corporate firewalls. WGPL leaves you in full control of your infrastructure's network rules.
 
 ```mermaid
-flowchart LR
-    DB[(WGPL SQLite SSOT)] ==> CLI(wgpl CLI)
-
+graph TD
+    DB[(WGPL SQLite SSOT)] --> CLI(wgpl CLI)
     CLI -->|Zero-Downtime Reload| Linux[Linux Kernel wg0]
     CLI -->|SSH / Ansible| Remote[Remote Servers]
     CLI -->|JSON Export| Router[RouterOS / Edge]
