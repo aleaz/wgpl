@@ -88,6 +88,94 @@ _SCHEMA_CORRUPT_MSG = (
     "Run 'wgpl db restore' from a backup or remove the file and re-init."
 )
 
+SCHEMA_USER_VERSION = 1
+
+_REQUIRED_TABLES = frozenset({"interfaces", "peers", "audit_events"})
+_REQUIRED_INDEXES = frozenset(
+    {
+        "idx_peers_active_ip",
+        "idx_peers_active_name",
+        "idx_audit_entity",
+        "idx_audit_interface",
+    }
+)
+_REQUIRED_AUDIT_TRIGGERS = frozenset(
+    {
+        "trg_audit_immutable_update",
+        "trg_audit_immutable_delete",
+    }
+)
+_SUPPORTED_SCHEMA_VERSIONS = frozenset({0, SCHEMA_USER_VERSION})
+
+
+def enforce_audit_immutability(conn: sqlite3.Connection) -> None:
+    """Recreate audit immutability triggers (never IF NOT EXISTS)."""
+    conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_update")
+    conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_delete")
+    conn.execute(
+        """
+        CREATE TRIGGER trg_audit_immutable_update
+        BEFORE UPDATE ON audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be updated');
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER trg_audit_immutable_delete
+        BEFORE DELETE ON audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be deleted');
+        END;
+        """
+    )
+
+
+def assert_schema_contract(path: str) -> None:
+    """Verify a database file satisfies the WGPL schema contract."""
+    conn = sqlite3.connect(path)
+    try:
+        _assert_schema_contract_conn(conn)
+    finally:
+        conn.close()
+
+
+def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
+    user_version = conn.execute("PRAGMA user_version").fetchone()
+    version = int(user_version[0]) if user_version else 0
+    if version not in _SUPPORTED_SCHEMA_VERSIONS:
+        raise WgplException(
+            f"Restored database has unsupported schema version {version} "
+            f"(supported: {sorted(_SUPPORTED_SCHEMA_VERSIONS)})"
+        )
+
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    missing_tables = _REQUIRED_TABLES - tables
+    if missing_tables:
+        raise WgplException(
+            "Restored database is missing required tables: "
+            f"{', '.join(sorted(missing_tables))}"
+        )
+
+    indexes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL"
+        ).fetchall()
+    }
+    missing_indexes = _REQUIRED_INDEXES - indexes
+    if missing_indexes:
+        raise WgplException(
+            "Restored database is missing required indexes: "
+            f"{', '.join(sorted(missing_indexes))}"
+        )
+
 
 def _run_query(
     conn: sqlite3.Connection,
@@ -304,24 +392,8 @@ def init_db(path: str | None = None) -> None:
                 ON audit_events(interface, occurred_at);
             """
             )
-            conn.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS trg_audit_immutable_update
-                BEFORE UPDATE ON audit_events
-                BEGIN
-                    SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be updated');
-                END;
-            """
-            )
-            conn.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS trg_audit_immutable_delete
-                BEFORE DELETE ON audit_events
-                BEGIN
-                    SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be deleted');
-                END;
-            """
-            )
+            enforce_audit_immutability(conn)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_USER_VERSION}")
             conn.commit()
         except sqlite3.Error as e:
             raise WgplException(

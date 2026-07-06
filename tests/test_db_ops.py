@@ -6,13 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from wgpl import core, db
+from wgpl import core, db, wireguard
 from wgpl.exceptions import WgplException
 
 
 @pytest.fixture
 def valid_backup_path(tmp_path: Path) -> str:
     path = str(tmp_path / "valid_backup.db")
+    public_key = wireguard.generate_keypair().public_key
     conn = sqlite3.connect(path)
     try:
         conn.execute(
@@ -68,7 +69,9 @@ def valid_backup_path(tmp_path: Path) -> str:
             "CREATE INDEX IF NOT EXISTS idx_audit_interface ON audit_events(interface, occurred_at);"
         )
         conn.execute(
-            "INSERT INTO \"interfaces\" VALUES(1, 'wg0','vpn.example.com',51820,'pubkey','10.0.0.0/24',NULL,NULL,NULL,NULL);"
+            "INSERT INTO \"interfaces\" VALUES(1, 'wg0','vpn.example.com',51820,?,"
+            "'10.0.0.0/24',NULL,NULL,NULL,NULL);",
+            (public_key,),
         )
         conn.commit()
     finally:

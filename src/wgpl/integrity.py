@@ -124,6 +124,19 @@ def validate_wire_peer_fields(peer: sqlite3.Row | Mapping[str, object]) -> None:
         validate_wire_safe_text(str(psk), "preshared_key")
 
 
+def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) -> None:
+    """Validate interface fields embedded in WireGuard configuration output."""
+    name = str(iface["name"])
+    if not _PEER_NAME_RE.match(name):
+        raise WgplException(f"Interface name '{name}' is not valid for export")
+    validate_wire_public_key(str(iface["public_key"]))
+    validate_wire_safe_text(str(iface["endpoint"]), "endpoint")
+    validate_wire_safe_text(str(iface["address_pool"]), "address_pool")
+    port = int(str(iface["port"]))
+    if not (1 <= port <= 65535):
+        raise WgplException(f"Port must be between 1 and 65535, got {port}")
+
+
 def _validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
     try:
         ipaddress.IPv4Address(ip)
@@ -205,3 +218,51 @@ def validate_non_deleted_peers_in_pool(
 
     if conflicts:
         raise PeersOutsidePoolError(interface_name, conflicts)
+
+
+def validate_database(
+    conn: sqlite3.Connection | None = None,
+    *,
+    full: bool = False,
+) -> dict[str, str | list[dict[str, str | None]]]:
+    """Validate stored wire-format fields; full=True checks every row."""
+    issues: list[dict[str, str | None]] = []
+
+    for iface in db.list_interfaces(conn=conn):
+        iface_name = str(iface["name"])
+        iface_id = int(str(iface["id"]))
+
+        if full:
+            try:
+                validate_wire_interface_fields(iface)
+            except WgplException as exc:
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": None,
+                        "code": "invalid_wire_fields",
+                        "detail": str(exc),
+                    }
+                )
+
+        for peer in db.list_peers(iface_id, conn=conn):
+            peer_name = str(peer["name"])
+            if not full:
+                if peer["deleted_at"] is not None:
+                    continue
+                if not is_peer_active(peer):
+                    continue
+            try:
+                validate_wire_peer_fields(peer)
+            except WgplException as exc:
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "invalid_wire_fields",
+                        "detail": str(exc),
+                    }
+                )
+
+    status = "ok" if not issues else "error"
+    return {"status": status, "issues": issues}

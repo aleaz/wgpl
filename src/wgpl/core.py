@@ -1573,6 +1573,7 @@ def dump_database(target_path: str) -> None:
                 conn.backup(target_conn)
         finally:
             target_conn.close()
+    os.chmod(target_path, 0o600)
 
 
 def _cleanup_tmp_files(tmp_path: str) -> None:
@@ -1600,35 +1601,29 @@ def _rotate_backups(db_path: str, keep: int = 3) -> None:
             pass
 
 
-def _validate_restored_data() -> None:
-    """Run validate_state on the current WGPL_DB_PATH; raise if inconsistent."""
-    result = validate_state()
-    if result["status"] == "ok":
-        return
-    issues = cast(list[dict[str, str | None]], result["issues"])
-    details = "; ".join(
+def _format_validation_issues(
+    issues: list[dict[str, str | None]],
+) -> str:
+    return "; ".join(
         f"{issue.get('interface')}/{issue.get('peer')}: "
         f"{issue.get('code')} — {issue.get('detail')}"
         for issue in issues
     )
-    raise WgplException(f"Restored database failed validation: {details}")
 
 
-def _validate_restored_schema(path: str) -> None:
-    """Verify the restored database contains the required WGPL tables."""
-    conn = sqlite3.connect(path)
-    try:
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name IN ('interfaces', 'peers')"
-        )
-        found = {row[0] for row in cursor.fetchall()}
-    finally:
-        conn.close()
-    missing = {"interfaces", "peers"} - found
-    if missing:
+def _validate_restored_data() -> None:
+    """Run consistency and full wire-format checks on WGPL_DB_PATH."""
+    results = (
+        validate_state(),
+        integrity.validate_database(full=True),
+    )
+    issues: list[dict[str, str | None]] = []
+    for result in results:
+        if result["status"] != "ok":
+            issues.extend(cast(list[dict[str, str | None]], result["issues"]))
+    if issues:
         raise WgplException(
-            f"Restored database is missing required tables: {', '.join(sorted(missing))}"
+            f"Restored database failed validation: {_format_validation_issues(issues)}"
         )
 
 
@@ -1669,7 +1664,7 @@ def restore_database(source_path: str) -> list[str]:
                 source_conn.close()
         finally:
             tmp_conn.close()
-        _validate_restored_schema(tmp_path)
+        db.assert_schema_contract(tmp_path)
     except WgplException:
         _cleanup_tmp_files(tmp_path)
         raise
