@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from . import db
 from .db import UNSET, UnsetType
+from . import integrity
 from . import wireguard
 from .exceptions import (
     AmbiguousInterfaceError,
@@ -55,44 +56,9 @@ def _sanitize_exec_cmd(exec_cmd: str) -> str:
     return sanitized
 
 
-def _parse_duration(duration: str) -> datetime.datetime:
-    """Parses a duration string (e.g. '7d', '24h') and returns a future datetime."""
-    match = re.match(r"^(\d+)([dh])$", duration)
-    if not match:
-        raise WgplException(
-            f"Invalid duration format: '{duration}'. Expected format like '7d' or '24h'."
-        )
-
-    value = int(match.group(1))
-    unit = match.group(2)
-
-    delta = (
-        datetime.timedelta(days=value)
-        if unit == "d"
-        else datetime.timedelta(hours=value)
-    )
-    return datetime.datetime.now(datetime.timezone.utc) + delta
-
-
-def _parse_expires_at(value: str) -> datetime.datetime:
-    """Parse expires_at from DB; treat naive timestamps as UTC."""
-    parsed = datetime.datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=datetime.timezone.utc)
-    return parsed
-
-
 def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
     """Returns True if the peer is not soft-deleted and not expired."""
-    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
-    if deleted_at is not None:
-        return False
-    expires_at_str = peer["expires_at"] if "expires_at" in peer.keys() else None
-    if expires_at_str is not None:
-        expires_at = _parse_expires_at(str(expires_at_str))
-        if expires_at <= datetime.datetime.now(datetime.timezone.utc):
-            return False
-    return True
+    return integrity.is_peer_active(peer)
 
 
 def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
@@ -858,7 +824,25 @@ def add_peer(
 
         expires_at = None
         if expires:
-            expires_at = _parse_duration(expires).isoformat()
+            expires_at = integrity.parse_future_duration(expires).isoformat()
+
+        iface = db.get_interface(iface_id, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
+
+        prospective_peer: dict[str, object] = {
+            "id": peer_id,
+            "interface_id": iface_id,
+            "name": peer_name,
+            "ip_address": allocated_ip,
+            "public_key": keypair.public_key,
+            "preshared_key": preshared_key,
+            "deleted_at": None,
+            "expires_at": expires_at,
+        }
+        integrity.assert_peer_activation(
+            prospective_peer, iface, conn=conn, exclude_peer_id=peer_id
+        )
 
         db.add_peer(
             id=peer_id,
@@ -888,10 +872,6 @@ def add_peer(
                 conn,
                 metadata=meta or None,
             )
-
-        iface = db.get_interface(iface_id, conn=conn)
-        if not iface:
-            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
     effective_dns = normalized_dns or (str(iface["dns"]) if iface["dns"] else None)
 
@@ -1269,7 +1249,12 @@ def update_interface(
         name = str(iface["name"])
 
         if normalized_pool is not None and normalized_pool != iface["address_pool"]:
-            validate_peers_in_pool(name, normalized_pool, conn)
+            integrity.validate_non_deleted_peers_in_pool(
+                name,
+                normalized_pool,
+                conn,
+                resolve_interface_ref=resolve_interface_ref,
+            )
 
         db.update_interface(
             iface_id,
@@ -1375,7 +1360,8 @@ def update_peer(
     normalized_keepalive = _resolve_optional(keepalive, clear_keepalive)
 
     normalized_expires = _resolve_optional(
-        _parse_duration(expires).isoformat() if expires else None, clear_expires
+        integrity.parse_future_duration(expires).isoformat() if expires else None,
+        clear_expires,
     )
 
     changed_fields: list[str] = []
@@ -1429,6 +1415,24 @@ def update_peer(
                 replaced_by_peer_id=canonical_id,
             )
 
+        iface = db.get_interface(iface_id, conn=conn)
+        if not iface:
+            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
+
+        prospective_peer = dict(peer)
+        if name is not None:
+            prospective_peer["name"] = name
+        if ip_address is not None:
+            prospective_peer["ip_address"] = str(validated_ip)
+        if normalized_expires is not UNSET:
+            prospective_peer["expires_at"] = normalized_expires
+        integrity.assert_peer_activation(
+            prospective_peer,
+            iface,
+            conn=conn,
+            exclude_peer_id=canonical_id,
+        )
+
         try:
             db.update_peer(
                 canonical_id,
@@ -1456,10 +1460,6 @@ def update_peer(
                 conn,
                 metadata={"fields": actual_changes},
             )
-
-        iface = db.get_interface(iface_id, conn=conn)
-        if not iface:
-            raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
     effective_dns = _effective_peer_dns(updated, iface)
     return {
@@ -1514,6 +1514,15 @@ def validate_state(
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
         for peer in db.list_peers(iface["id"]):
+            if integrity.corrupt_expires_at(peer):
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": str(peer["name"]),
+                        "code": "corrupt_expires_at",
+                        "detail": f"Peer {peer['name']} has invalid expires_at",
+                    }
+                )
             if not _is_peer_active(peer):
                 continue
             peer_name = str(peer["name"])
