@@ -279,6 +279,18 @@ wgpl db restore --yes backup.db
 
 > **Multi-server note:** two interfaces may share the same name (e.g. `wg0`) if they differ by endpoint/port. Use the numeric **interface ID** from `wgpl interface list` when names are ambiguous.
 
+### Audit retention
+
+The `audit_events` table is **append-only** (SQLite triggers block UPDATE/DELETE). It grows with every peer and interface change.
+
+| Goal | Tool |
+|---|---|
+| Archive history for compliance | `wgpl db dump -o archive-YYYY-MM.db` periodically; store off-host with `chmod 600` |
+| Remove inactive peer rows (not audit) | `wgpl peer prune <interface>` |
+| Query past events | `wgpl peer history` / `wgpl interface history` |
+
+There is no `audit prune` command — audit rows are never deleted in-place by design.
+
 ## Advanced Integrations
 
 WGPL is designed to integrate seamlessly into modern DevOps and Cloud-Native stacks. To keep this README clean, we have provided fully working examples in the `examples/` directory:

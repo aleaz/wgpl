@@ -326,6 +326,15 @@ def resolve_interface_ref(
     raise AmbiguousInterfaceError(_ambiguous_interface_message(ref, matches))
 
 
+def get_interface_by_ref(ref: str) -> dict[str, Any]:
+    """Resolve an interface name or ID and return its row as a dict."""
+    iface_id = resolve_interface_ref(ref)
+    iface = db.get_interface(iface_id)
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface {ref} not found")
+    return dict(iface)
+
+
 def _peer_actual_changed_fields(
     before: sqlite3.Row,
     after: sqlite3.Row,

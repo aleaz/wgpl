@@ -50,11 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CLI no longer imports `db` for `interface show` (lookup via `core.get_interface_by_ref`)
 - **Breaking:** `interface remove` fails if the interface has any peers unless `--force` is passed
 - Reclaiming an expired peer's IP or name logs `reclaimed` and soft-deletes the old row (audit preserved in `audit_events`)
 - `get_peer_status()` delegates expiration checks to `_is_peer_active()`
 - `peer update` logs an `updated` audit event with changed field names
-- `peer history` / `interface history` accept `--limit` (default 100)
+- `peer history` / `interface history` accept `--limit` (default 100) and `--offset`
+- README, SECURITY, and CLI reference updated for binary backups and append-only audit retention
 - README rewritten for upcoming 1.0 release
 - Strict layer boundaries: CLI reads go through `core` (`list_interfaces`, `list_peers`, `ensure_database`); no direct `db` imports in `cli.py`
 - Peer lifecycle SSOT in `core`: `get_peer_status`, `get_effective_dns`; expired peers release IPs for allocation

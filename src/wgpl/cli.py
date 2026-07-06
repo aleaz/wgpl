@@ -15,11 +15,9 @@ from rich.console import Console
 from rich.table import Table
 
 from . import core
-from . import db
 from .exceptions import (
     AmbiguousInterfaceError,
     InterfaceAlreadyExistsError,
-    InterfaceNotFoundError,
     PeerAlreadyExistsError,
     PeerNotFoundError,
     WgBinaryNotFoundError,
@@ -419,10 +417,7 @@ def interface_show(
     name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
 ) -> None:
     try:
-        iface_id = core.resolve_interface_ref(name)
-        interface = db.get_interface(iface_id)
-        if not interface:
-            raise InterfaceNotFoundError(f"Interface {name} not found")
+        interface = core.get_interface_by_ref(name)
 
         if ctx.obj.get("json"):
             _output(ctx, dict(interface))

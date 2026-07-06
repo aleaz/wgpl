@@ -13,7 +13,7 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 `cli.py` (Typer / presentation) → `core.py` (business) → `db.py` / `wireguard.py` (infra).
 
 - `cli.py` MUST NOT import `db.py`; use `core.ensure_database()`, `core.list_interfaces()`, `core.list_peers()`, etc.
-- `core.py` MUST NOT import Typer or format output (no stdout/stderr writes; use iterators such as `dump_database_lines()` and return values such as `restore_database() -> list[str]` warnings).
+- `core.py` MUST NOT import Typer or format output (no stdout/stderr writes; use return values such as `dump_database(path)` and `restore_database(source_path) -> list[str]` warnings).
 - `db.py` / `wireguard.py` MUST NOT contain business logic.
 
 ## Peer lifecycle and IP allocation
@@ -23,7 +23,7 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 - SQLite partial unique indexes only know `deleted_at IS NULL`; expired peers still block INSERT until reclaimed — this is a permanent invariant unless schema changes.
 - Expired peers release their IP and name for new allocations; `peer prune` physically removes all inactive peers.
 - `core.prune_peers()` uses `_is_peer_active()` (not SQL timestamp comparison) to decide what to hard-delete; log one `pruned` audit event per peer.
-- When reusing an IP or name held by an inactive (expired) peer, `add_peer` / `peer update` call `_reclaim_inactive_peer_slots()`: append `reclaimed` audit event, then `hard_remove_peer`.
+- When reusing an IP or name held by an inactive (expired) peer, `add_peer` / `peer update` call `_reclaim_inactive_peer_slots()`: append `reclaimed` audit event, then soft-delete via `db.remove_peer` (sets `deleted_at`).
 - `get_peer_status()` MUST delegate expiration to `_is_peer_active()`; `get_effective_dns()` lives in `core.py`; the CLI must not duplicate lifecycle or DNS cascade logic.
 
 ## Audit log
@@ -31,8 +31,8 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 - `audit_events` is append-only; NEVER store `private_key` or `preshared_key` in audit rows or metadata.
 - Append audit events in the SAME `db.transaction()` as the operational mutation (before destructive deletes).
 - Event types: `created`, `updated`, `removed`, `reclaimed`, `pruned`, `cascade_removed` (use `db.AuditEventType` / `AuditEntityType`).
-- `peer update` and `interface update` append `updated` events with `metadata.fields` listing changed columns.
-- `list_audit_events` / history commands default to `limit=100`; expose `--limit` in CLI.
+- `peer update` and `interface update` append `updated` events with `metadata.fields.{field}.{old,new}` diffs.
+- `list_audit_events` / history commands default to `limit=100`; expose `--limit` and `--offset` in CLI.
 
 ## Interface remove guard
 

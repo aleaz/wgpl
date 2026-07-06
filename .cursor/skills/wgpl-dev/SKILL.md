@@ -79,8 +79,8 @@ wgpl db restore --yes backup.db
 - Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
   use `peer remove --hard` to physically delete a soft-deleted peer.
 - A peer occupies an IP and name in the pool only while active (not soft-deleted and not expired).
-  Reclaiming an expired peer's slot logs `reclaimed` and hard-deletes the old row; history remains in `audit_events`.
-  `peer prune` hard-deletes inactive rows with a `pruned` audit event each.
+  Reclaiming an expired peer's slot logs `reclaimed` and soft-deletes the old row; history remains in `audit_events`.
+  `peer prune` hard-deletes inactive peer rows with a `pruned` audit event each (audit log itself is never pruned).
 - `interface remove` fails if any peer rows exist; use `peer prune` / `peer remove` first, or `--force` (audited cascade).
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 

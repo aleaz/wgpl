@@ -52,4 +52,4 @@ Out of scope:
 - `wgpl db dump` output is a **binary SQLite database** containing private keys for all peers. Treat backups like the live database file (`chmod 600`, never commit to git).
 - `wgpl db restore` replaces the live database atomically after validation; it is destructive and requires `--yes`. Warnings (e.g. WAL checkpoint blocked) go to stderr.
 - `peer history` and `interface history` store **public keys** only; `private_key` and `preshared_key` are blocked from audit metadata.
-- Append-only `audit_events` grows without automatic retention; plan disk usage on long-lived hosts.
+- Append-only `audit_events` grows without in-place deletion (SQLite triggers enforce immutability). Archive periodically with `wgpl db dump -o archive.db`; use `wgpl peer prune` to remove inactive peer rows only (audit history is preserved).
