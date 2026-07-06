@@ -329,6 +329,32 @@ def test_list_peer_audit_history_limit_returns_most_recent(wg0_interface: str) -
     assert limited[0]["event_type"] == AuditEventType.UPDATED
 
 
+def test_list_peer_audit_history_offset_skips_newest(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.transaction() as conn:
+        for _ in range(10):
+            db.append_audit_event(
+                entity_type=AuditEntityType.PEER,
+                entity_id=peer_id,
+                event_type=AuditEventType.UPDATED,
+                interface=wg0_interface,
+                metadata={"fields": ["name"]},
+                conn=conn,
+            )
+
+    page0 = core.list_peer_audit_history(peer_id, wg0_interface, limit=5, offset=0)
+    page1 = core.list_peer_audit_history(peer_id, wg0_interface, limit=5, offset=5)
+    tail = core.list_peer_audit_history(peer_id, wg0_interface, limit=5, offset=10)
+
+    assert len(page0) == 5
+    assert len(page1) == 5
+    assert len(tail) == 1
+    assert tail[0]["event_type"] == AuditEventType.CREATED
+    assert {e["id"] for e in page0}.isdisjoint({e["id"] for e in page1})
+
+
 def test_peer_update_no_audit_when_value_unchanged(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])

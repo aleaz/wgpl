@@ -566,9 +566,10 @@ def interface_history(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
+    offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
     try:
-        events = core.list_interface_audit_history(name, limit=limit)
+        events = core.list_interface_audit_history(name, limit=limit, offset=offset)
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:
@@ -607,9 +608,12 @@ def peer_history(
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
+    offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
     try:
-        events = core.list_peer_audit_history(peer_id, interface, limit=limit)
+        events = core.list_peer_audit_history(
+            peer_id, interface, limit=limit, offset=offset
+        )
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:
@@ -837,10 +841,18 @@ def peer_config(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
     ),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
+    interface: str | None = typer.Option(
+        None,
+        "--interface",
+        "-i",
+        help="Interface name or ID (disambiguates peer prefix)",
+    ),
 ) -> None:
     try:
         _validate_allowed_ips(ctx, allowed_ips)
-        config = core.get_peer_config(peer_id, allowed_ips=allowed_ips)
+        config = core.get_peer_config(
+            peer_id, allowed_ips=allowed_ips, interface_ref=interface
+        )
         if ctx.obj.get("json"):
             _output(ctx, {"config": config})
         else:
@@ -859,15 +871,23 @@ def peer_qr(
         None, "--output", "-o", help="Write QR code as PNG to this file"
     ),
     allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
+    interface: str | None = typer.Option(
+        None,
+        "--interface",
+        "-i",
+        help="Interface name or ID (disambiguates peer prefix)",
+    ),
 ) -> None:
     try:
         _validate_allowed_ips(ctx, allowed_ips)
         if output is not None:
-            png_bytes = core.get_peer_qr_png_bytes(peer_id, allowed_ips=allowed_ips)
+            png_bytes = core.get_peer_qr_png_bytes(
+                peer_id, allowed_ips=allowed_ips, interface_ref=interface
+            )
             fd = os.open(output, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(png_bytes)
-            canonical_id = core.resolve_peer_ref(peer_id)
+            canonical_id = core.resolve_peer_ref(peer_id, interface)
             if ctx.obj.get("json"):
                 _output(
                     ctx,
@@ -879,7 +899,9 @@ def peer_qr(
                     "[yellow](contains private keys; keep file permissions restricted)[/yellow]"
                 )
         else:
-            qr = core.get_peer_qr(peer_id, allowed_ips=allowed_ips)
+            qr = core.get_peer_qr(
+                peer_id, allowed_ips=allowed_ips, interface_ref=interface
+            )
             if ctx.obj.get("json"):
                 _output(ctx, {"qr": qr})
             else:

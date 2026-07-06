@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `wgpl db restore --yes` — confirmation required before destructive restore
+- `--interface` / `-i` on `peer config` and `peer qr` to disambiguate peer ID prefixes
+- `--offset` on `peer history` and `interface history` for paginated audit queries
 
 - Tests: restore retry, chmod 600, JSON validate errors, pool rejection CLI, audit metadata asserts
 - Regression tests: audit rollback on failure, concurrent `add_peer`, dump/restore roundtrip, CLI `db restore`, peer update reclaim, audit metadata `preshared_key` guard

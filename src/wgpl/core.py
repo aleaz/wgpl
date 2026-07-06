@@ -164,6 +164,7 @@ def list_peer_audit_history(
     interface: str | None = None,
     *,
     limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Return audit events for a peer (full UUID or unique prefix)."""
     try:
@@ -189,12 +190,17 @@ def list_peer_audit_history(
         entity_type=db.AuditEntityType.PEER,
         entity_id=canonical_id,
         limit=limit,
+        offset=offset,
     )
     return [audit_event_to_dict(row) for row in rows]
 
 
 def list_interface_audit_history(
-    ref: str, *, limit: int = 100, conn: sqlite3.Connection | None = None
+    ref: str,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    conn: sqlite3.Connection | None = None,
 ) -> list[dict[str, Any]]:
     """Return audit events for an interface (including after it was removed)."""
     try:
@@ -203,6 +209,7 @@ def list_interface_audit_history(
             entity_type=db.AuditEntityType.INTERFACE,
             entity_id=str(iface_id),
             limit=limit,
+            offset=offset,
             conn=conn,
         )
     except InterfaceNotFoundError:
@@ -212,6 +219,7 @@ def list_interface_audit_history(
                 entity_type=db.AuditEntityType.INTERFACE,
                 entity_id=ref,
                 limit=limit,
+                offset=offset,
                 conn=conn,
             )
         else:
@@ -219,6 +227,7 @@ def list_interface_audit_history(
                 entity_type=db.AuditEntityType.INTERFACE,
                 interface=ref,
                 limit=limit,
+                offset=offset,
                 conn=conn,
             )
     return [audit_event_to_dict(row) for row in rows]
@@ -881,9 +890,14 @@ def prune_peers(interface_ref: str) -> int:
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
 
-def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
+def get_peer_config(
+    peer_id: str,
+    allowed_ips: str = "0.0.0.0/0",
+    *,
+    interface_ref: str | None = None,
+) -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
-    canonical_id = resolve_peer_ref(peer_id)
+    canonical_id = resolve_peer_ref(peer_id, interface_ref)
     peer = db.get_peer(canonical_id)
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")
@@ -929,9 +943,16 @@ def get_peer_config(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     return "\n".join(config_lines)
 
 
-def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
+def get_peer_qr(
+    peer_id: str,
+    allowed_ips: str = "0.0.0.0/0",
+    *,
+    interface_ref: str | None = None,
+) -> str:
     """Generates an ASCII-art QR code for the given peer configuration."""
-    config = get_peer_config(peer_id, allowed_ips=allowed_ips)
+    config = get_peer_config(
+        peer_id, allowed_ips=allowed_ips, interface_ref=interface_ref
+    )
     qr = qrcode.QRCode()
     qr.add_data(config)
     f = io.StringIO()
@@ -940,9 +961,16 @@ def get_peer_qr(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> str:
     return f.read()
 
 
-def get_peer_qr_png_bytes(peer_id: str, allowed_ips: str = "0.0.0.0/0") -> bytes:
+def get_peer_qr_png_bytes(
+    peer_id: str,
+    allowed_ips: str = "0.0.0.0/0",
+    *,
+    interface_ref: str | None = None,
+) -> bytes:
     """Generates a PNG QR code image for the given peer configuration."""
-    config = get_peer_config(peer_id, allowed_ips=allowed_ips)
+    config = get_peer_config(
+        peer_id, allowed_ips=allowed_ips, interface_ref=interface_ref
+    )
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,

@@ -221,6 +221,44 @@ def test_get_peer_config_peer_dns_overrides_interface(wg0_interface: str) -> Non
     assert "1.1.1.1" not in config
 
 
+def _insert_peer_on_interface(
+    peer_id: str,
+    interface_id: int,
+    name: str,
+    ip_address: str,
+) -> None:
+    keypair = wireguard.generate_keypair()
+    db.add_peer(
+        id=peer_id,
+        interface_id=interface_id,
+        name=name,
+        ip_address=ip_address,
+        public_key=keypair.public_key,
+        private_key=keypair.private_key,
+        created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    )
+
+
+def test_get_peer_config_interface_ref_disambiguates(wgpl_db: str) -> None:
+    pk1 = wireguard.generate_keypair().public_key
+    pk2 = wireguard.generate_keypair().public_key
+    iface_a = db.add_interface("wg0", "vpn1.example.com", pk1, "10.0.0.0/24", 51820)
+    iface_b = db.add_interface("wg1", "vpn2.example.com", pk2, "10.0.1.0/24", 51821)
+    peer_a = "55c521ad-2d94-4689-8abc-111111111111"
+    peer_b = "55c521ad-ff94-4689-8abc-222222222222"
+    _insert_peer_on_interface(peer_a, iface_a, "phone", "10.0.0.2")
+    _insert_peer_on_interface(peer_b, iface_b, "laptop", "10.0.1.2")
+
+    with pytest.raises(AmbiguousPeerIdError, match="ambiguous"):
+        core.get_peer_config("55c521ad")
+
+    config_a = core.get_peer_config("55c521ad", interface_ref="wg0")
+    config_b = core.get_peer_config("55c521ad", interface_ref="wg1")
+
+    assert "vpn1.example.com:51820" in config_a
+    assert "vpn2.example.com:51821" in config_b
+
+
 def test_update_interface_endpoint(wg0_interface: str) -> None:
     result = core.update_interface(wg0_interface, endpoint="vpn2.example.com")
 

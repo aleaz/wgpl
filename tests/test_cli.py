@@ -248,3 +248,40 @@ def test_cli_db_restore_requires_yes(wgpl_db: str) -> None:
     payload = json.loads(result.stdout)
     assert payload["status"] == "error"
     assert "--yes" in payload["message"]
+
+
+def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:
+    from wgpl import wireguard
+
+    pk1 = wireguard.generate_keypair().public_key
+    pk2 = wireguard.generate_keypair().public_key
+    iface_a = db.add_interface("wg0", "vpn1.example.com", pk1, "10.0.0.0/24", 51820)
+    iface_b = db.add_interface("wg1", "vpn2.example.com", pk2, "10.0.1.0/24", 51821)
+    keypair = wireguard.generate_keypair()
+    db.add_peer(
+        id="55c521ad-2d94-4689-8abc-111111111111",
+        interface_id=iface_a,
+        name="phone",
+        ip_address="10.0.0.2",
+        public_key=keypair.public_key,
+        private_key=keypair.private_key,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    keypair_b = wireguard.generate_keypair()
+    db.add_peer(
+        id="55c521ad-ff94-4689-8abc-222222222222",
+        interface_id=iface_b,
+        name="laptop",
+        ip_address="10.0.1.2",
+        public_key=keypair_b.public_key,
+        private_key=keypair_b.private_key,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    ambiguous = runner.invoke(app, ["peer", "config", "55c521ad"])
+    assert ambiguous.exit_code == 1
+
+    result = runner.invoke(app, ["peer", "config", "55c521ad", "--interface", "wg0"])
+    assert result.exit_code == 0
+    assert "vpn1.example.com:51820" in result.stdout
+    assert "vpn2.example.com" not in result.stdout
