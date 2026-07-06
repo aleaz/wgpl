@@ -15,6 +15,7 @@ All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer 
 
 - **`add <INTERFACE_NAME_OR_ID> <NAME> [options]`**: Creates a new client. Accepts `--ip`, `--dns`, `--expires`, `--mtu`, `--keepalive`, and `--desc`.
 - **`list [--all] [--expired]`**: Shows active/all clients.
+- **`show <ID> [--show-secrets]`**: Peer details; JSON omits private keys (same fields as `list --json`).
 - **`config <ID> [--interface NAME_OR_ID]`**: Shows the client configuration ready for consumption.
 - **`qr <ID> [-o <PNG_PATH>] [--interface NAME_OR_ID]`**: Generates the QR code.
 - **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies properties or uses `--clear-*` to inherit from the interface.

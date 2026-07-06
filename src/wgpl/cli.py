@@ -47,15 +47,6 @@ _STYLE_VALUE = typer_styles.STYLE_TYPES
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
 
-_BASE_PUBLIC_PEER_FIELDS = (
-    "id",
-    "interface_id",
-    "name",
-    "ip_address",
-    "public_key",
-    "created_at",
-)
-
 
 def _styled(text: str, style: str = "") -> str:
     """Wrap text in Rich markup for a given style (empty = no markup)."""
@@ -70,23 +61,7 @@ def _public_peer_rows(
 ) -> list[dict[str, str | None]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
     iface_dns_map = iface_dns or {}
-    rows: list[dict[str, str | None]] = []
-    for peer in peers:
-        peer_dns = peer["dns"]
-        row = {
-            field: str(peer[field]) if peer[field] is not None else None
-            for field in _BASE_PUBLIC_PEER_FIELDS
-        }
-        row["dns"] = core.get_effective_dns(
-            peer_dns, iface_dns_map.get(peer["interface_id"])
-        )
-        row["interface_id"] = str(peer["interface_id"])
-        row["dns_override"] = peer_dns
-        row["status"] = core.get_peer_status(peer)
-        row["expires_at"] = peer["expires_at"] if "expires_at" in peer.keys() else None
-        row["deleted_at"] = peer["deleted_at"] if "deleted_at" in peer.keys() else None
-        rows.append(row)
-    return rows
+    return [core.peer_row_to_public_dict(peer, iface_dns_map) for peer in peers]
 
 
 def _display_dns(value: str | None) -> str:
@@ -364,6 +339,11 @@ def peer_show(
         None, help="Interface name or ID (e.g. wg0 or 1)"
     ),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+    show_secrets: bool = typer.Option(
+        False,
+        "--show-secrets",
+        help="Include preshared key in human-readable output",
+    ),
 ) -> None:
     try:
         # Fetching peer data
@@ -380,8 +360,10 @@ def peer_show(
         iface_name = iface_map.get(peer["interface_id"], peer["interface_id"])
 
         if ctx.obj.get("json"):
-            _output(ctx, dict(peer))
+            _output(ctx, core.peer_row_to_public_dict(peer, iface_dns))
         else:
+            psk = dict(peer).get("preshared_key")
+            psk_display = str(psk) if show_secrets and psk else "—"
             rows = [
                 ("ID", str(peer["id"])),
                 ("Name", str(peer["name"])),
@@ -389,7 +371,7 @@ def peer_show(
                 ("Status", str(core.get_peer_status(dict(peer)))),
                 ("IP Address", str(peer["ip_address"])),
                 ("Public Key", str(peer["public_key"])),
-                ("Preshared Key", str(dict(peer).get("preshared_key") or "—")),
+                ("Preshared Key", psk_display),
                 (
                     "DNS (Effective)",
                     str(

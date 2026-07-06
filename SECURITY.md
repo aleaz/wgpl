@@ -37,6 +37,7 @@ Out of scope:
 - The database file (default `~/.wgpl.db`) contains **private keys**. WGPL enforces `chmod 600` on every connection.
 - Never commit `*.db` or `*.sqlite3` files to version control.
 - `wgpl peer list --json` returns only public fields; use `wgpl peer config <id>` (full UUID or unique short prefix from `peer list`) when a client private key is required.
+- `wgpl peer show --json` returns the same redacted fields as `peer list --json` (no private keys). Human output hides the preshared key by default; use `--show-secrets` to display it, or `peer config` / `peer qr` for full client export.
 - QR PNG files from `wgpl peer qr -o` encode the full client config (including private keys). WGPL sets `chmod 600` on the output file; do not commit or share QR images in public channels.
 - `wgpl apply` requires an existing WireGuard interface in the kernel; WGPL does not create network interfaces.
 

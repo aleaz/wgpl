@@ -64,6 +64,59 @@ def test_peer_list_json_redacts_secrets(wg0_interface: str) -> None:
     assert peers[0]["name"] == "json_peer"
 
 
+def test_peer_show_json_redacts_private_key(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "show_peer")
+    peer_id = str(peer["id"])
+
+    result = runner.invoke(app, ["--json", "peer", "show", peer_id])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "private_key" not in payload
+    assert "preshared_key" not in payload
+    assert payload["name"] == "show_peer"
+
+
+def test_peer_show_human_hides_psk_by_default(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "psk_peer")
+    peer_id = str(peer["id"])
+    full = db.get_peer(peer_id)
+    assert full is not None
+    assert full["preshared_key"]
+
+    result = runner.invoke(app, ["peer", "show", peer_id])
+
+    assert result.exit_code == 0
+    assert full["preshared_key"] not in result.stdout
+
+
+def test_peer_show_show_secrets_reveals_psk(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "psk_peer2")
+    peer_id = str(peer["id"])
+    full = db.get_peer(peer_id)
+    assert full is not None
+    assert full["preshared_key"]
+
+    result = runner.invoke(app, ["peer", "show", peer_id, "--show-secrets"])
+
+    assert result.exit_code == 0
+    assert full["preshared_key"] in result.stdout
+
+
+def test_peer_row_to_public_dict_matches_list_json(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "match_peer")
+    peer_id = str(peer["id"])
+
+    list_result = runner.invoke(app, ["--json", "peer", "list"])
+    show_result = runner.invoke(app, ["--json", "peer", "show", peer_id])
+
+    assert list_result.exit_code == 0
+    assert show_result.exit_code == 0
+    list_payload = json.loads(list_result.stdout)[0]
+    show_payload = json.loads(show_result.stdout)
+    assert show_payload == list_payload
+
+
 def test_format_peer_id_full_when_single_peer() -> None:
     uid = "55c521ad-2d94-4689-8abc-123456789abc"
     assert _format_peer_id_display(uid, 1) == uid

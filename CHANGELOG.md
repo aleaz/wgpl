@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--show-secrets` on `peer show` to reveal preshared key in human-readable output
+
+### Fixed
+
+- `peer show --json` redacts private keys and preshared keys (consistent with `peer list --json`)
+
 - `wgpl db restore --yes` — confirmation required before destructive restore
 - `--interface` / `-i` on `peer config` and `peer qr` to disambiguate peer ID prefixes
 - `--offset` on `peer history` and `interface history` for paginated audit queries

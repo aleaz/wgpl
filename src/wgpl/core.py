@@ -87,6 +87,42 @@ def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
     return "Active"
 
 
+def _peer_optional_field(
+    peer: sqlite3.Row | Mapping[str, object], field: str
+) -> Any:
+    if isinstance(peer, sqlite3.Row):
+        return peer[field] if field in peer.keys() else None
+    if field in peer.keys():
+        return peer[field]
+    return None
+
+
+def peer_row_to_public_dict(
+    peer: sqlite3.Row | Mapping[str, object],
+    iface_dns: dict[int, str | None] | None = None,
+) -> dict[str, Any]:
+    """Return a JSON-safe peer record without private_key or preshared_key."""
+    iface_dns_map = iface_dns or {}
+    interface_id = int(str(peer["interface_id"]))
+    peer_dns = _peer_optional_field(peer, "dns")
+    if peer_dns is not None:
+        peer_dns = str(peer_dns)
+    created_at = peer["created_at"]
+    return {
+        "id": str(peer["id"]),
+        "interface_id": str(interface_id),
+        "name": str(peer["name"]),
+        "ip_address": str(peer["ip_address"]),
+        "public_key": str(peer["public_key"]),
+        "created_at": str(created_at) if created_at is not None else None,
+        "dns": get_effective_dns(peer_dns, iface_dns_map.get(interface_id)),
+        "dns_override": peer_dns,
+        "status": get_peer_status(peer),
+        "expires_at": _peer_optional_field(peer, "expires_at"),
+        "deleted_at": _peer_optional_field(peer, "deleted_at"),
+    }
+
+
 def _audit_peer_from_row(
     peer: sqlite3.Row,
     event_type: db.AuditEventType,
