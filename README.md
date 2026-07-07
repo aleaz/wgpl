@@ -78,6 +78,7 @@ wgpl peer config "Alice_Laptop" > alice.conf
 - [Enterprise Lifecycle & Audit (SRE)](#enterprise-lifecycle--audit-sre)
 - [Advanced Integrations](#advanced-integrations)
 - [Configuration](#configuration)
+- [Upgrading](#upgrading)
 - [Contributing](#contributing)
 
 ## Decoupled Architectures (BYOI)
@@ -299,6 +300,21 @@ WGPL is designed to integrate seamlessly into modern DevOps and Cloud-Native sta
 - **[Terraform & Cloud Firewalls](examples/terraform-external-data.tf):** Dynamically whitelist WireGuard peer IPs in an AWS Security Group (or GCP/Azure) using Terraform's `external` data source.
 - **[GitHub Actions (GitOps)](examples/github-actions-gitops.yml):** Deploy VPN configuration seamlessly via CI/CD from a declarative YAML state.
 - **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** Embed WGPL inside a Python web API to generate and return QR codes to users automatically. Perfect for delegating VPN access to non-technical HR or IT Support staff without building a heavy UI.
+
+## Upgrading
+
+Recent releases enforce a **minimum MTU of 1280** on export, apply, and mutations
+(was 576). Before upgrading, check for low MTU values and fix them:
+
+```bash
+wgpl validate
+wgpl interface list --json | jq '.[] | select(.mtu != null and .mtu < 1280)'
+wgpl peer list --json | jq '.[] | select(.mtu != null and .mtu < 1280)'
+```
+
+Update affected rows (`interface update --mtu 1280`, `peer update --mtu 1280`, or
+`--clear-mtu`), then upgrade the tool. See [docs/runbook.md](docs/runbook.md#upgrading-wgpl)
+for the full checklist.
 
 ## Configuration
 

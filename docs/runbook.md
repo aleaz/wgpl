@@ -3,6 +3,33 @@
 Operational procedures for running WGPL in production. Complements
 [SECURITY.md](../SECURITY.md) and the [CLI reference](cli.md).
 
+## Upgrading WGPL
+
+When upgrading to a release that enforces wire-safe MTU (minimum **1280**):
+
+1. **Before** replacing the binary or package, list MTU values on live data:
+
+   ```bash
+   wgpl interface list --json | jq '.[] | {name, mtu}'
+   wgpl peer list --json | jq '.[] | {name, mtu}'
+   ```
+
+2. Fix any interface or peer with MTU below 1280 (or null is fine — only
+   explicit low values block export/apply):
+
+   ```bash
+   wgpl interface update wg0 --mtu 1280
+   wgpl peer update wg0 <PEER_ID> --mtu 1280
+   # or remove the override:
+   wgpl peer update wg0 <PEER_ID> --clear-mtu
+   ```
+
+3. Run `wgpl validate` — it must pass before you rely on `apply` or client
+   export after the upgrade.
+
+4. Upgrade the tool (`uv tool upgrade wgpl`, package manager, or standalone
+   binary), then `wgpl validate` again and `sudo wgpl apply` as usual.
+
 ## Post-mutation checklist
 
 Every change that should reach WireGuard requires two steps after the mutation:

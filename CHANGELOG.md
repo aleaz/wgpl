@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI job `permissions: contents: read` (least privilege)
 - Tests: restore schema adversarial cases, output path hardening, wireformat MTU/keepalive, FastAPI guard
 
+### Migration
+
+- **MTU minimum raised to 1280:** before upgrading, find interfaces or peers with
+  MTU below 1280 (`wgpl interface list --json`, `wgpl peer list --json`) and
+  update or clear them (`interface update --mtu 1280`, `peer update --mtu 1280`,
+  or `--clear-mtu`). Until fixed, `validate`, `apply`, `interface export`, and
+  `peer config` / `peer qr` will fail closed on those rows.
+
 ### Changed
 
 - **Breaking:** minimum MTU for mutations and export is **1280** (was 576)
