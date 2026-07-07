@@ -1,0 +1,4 @@
+# Bandit discovers this file when scanning src/ (-r src/).
+# B608: dynamic SQL in db.py uses fixed column fragments; values are bound.
+[bandit]
+skips = B608
