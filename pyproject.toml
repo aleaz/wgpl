@@ -37,6 +37,7 @@ dev = [
     "mypy>=2.1.0",
     "pip-audit>=2.9.0",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "ruff>=0.14.0",
     "types-qrcode>=8.2.0.20260518",
 ]
@@ -62,3 +63,4 @@ mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=wgpl --cov-report=term-missing --cov-fail-under=80"

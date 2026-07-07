@@ -88,6 +88,22 @@ def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
 
 
+def _attach_fd_cleanup(conn: sqlite3.Connection, fd: int) -> None:
+    """Keep the backing fd open until conn.close() (required on macOS /dev/fd)."""
+    _original_close = conn.close
+
+    def close() -> None:
+        try:
+            _original_close()
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    conn.close = close  # type: ignore[method-assign]
+
+
 def open_database(
     db_path: str,
     *,
@@ -118,19 +134,31 @@ def open_database(
             "Try running with sudo or check file ownership."
         ) from None
 
-    try:
-        conn = _connect_via_fd(fd)
-    except sqlite3.Error as exc:
-        os.close(fd)
-        raise WgplException(f"Failed to connect to database at {path}: {exc}") from exc
+    if sys.platform.startswith("linux"):
+        try:
+            conn = _connect_via_fd(fd)
+        except sqlite3.Error as exc:
+            os.close(fd)
+            raise WgplException(
+                f"Failed to connect to database at {path}: {exc}"
+            ) from exc
+        try:
+            _configure_connection(conn)
+        except sqlite3.Error as exc:
+            os.close(fd)
+            raise WgplException(
+                f"Failed to connect to database at {path}: {exc}"
+            ) from exc
+        _attach_fd_cleanup(conn, fd)
+        return conn
 
+    # macOS/BSD: WAL needs a path-based open; fd was used only to validate O_NOFOLLOW target.
     os.close(fd)
     try:
+        conn = sqlite3.connect(path)
         _configure_connection(conn)
     except sqlite3.Error as exc:
-        conn.close()
         raise WgplException(f"Failed to connect to database at {path}: {exc}") from exc
-
     return conn
 
 

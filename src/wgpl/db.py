@@ -151,6 +151,19 @@ def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
             f"{', '.join(sorted(missing_indexes))}"
         )
 
+    triggers = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IS NOT NULL"
+        ).fetchall()
+    }
+    missing_triggers = _REQUIRED_AUDIT_TRIGGERS - triggers
+    if missing_triggers:
+        raise WgplException(
+            "Restored database is missing required audit triggers: "
+            f"{', '.join(sorted(missing_triggers))}"
+        )
+
 
 def _run_query(
     conn: sqlite3.Connection,

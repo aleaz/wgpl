@@ -237,7 +237,10 @@ def test_add_peer_rolls_back_when_audit_fails_on_second_event(
         conn.commit()
 
     audit_calls = 0
-    original = core._audit_peer_from_row
+    from wgpl import audit as audit_mod
+    from wgpl import ipam as ipam_mod
+
+    original = audit_mod._audit_peer_from_row
 
     def failing_audit(*args, **kwargs):
         nonlocal audit_calls
@@ -246,6 +249,8 @@ def test_add_peer_rolls_back_when_audit_fails_on_second_event(
             raise WgplException("audit failed")
         return original(*args, **kwargs)
 
+    monkeypatch.setattr(audit_mod, "_audit_peer_from_row", failing_audit)
+    monkeypatch.setattr(ipam_mod, "_audit_peer_from_row", failing_audit)
     monkeypatch.setattr(core, "_audit_peer_from_row", failing_audit)
 
     with pytest.raises(WgplException, match="audit failed"):

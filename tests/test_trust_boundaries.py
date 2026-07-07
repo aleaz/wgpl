@@ -93,4 +93,3 @@ def test_wg_bin_rejects_symlink(
         monkeypatch.setenv("WGPL_WG_BIN", link)
         with pytest.raises(WgBinaryNotFoundError, match="symlink"):
             wireguard._get_wg_bin()
-

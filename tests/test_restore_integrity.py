@@ -86,3 +86,21 @@ def test_restore_rejects_unsupported_schema_version(
 
     with pytest.raises(WgplException, match="unsupported schema version"):
         core.restore_database(backup)
+
+
+def test_restore_rejects_missing_audit_triggers(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_update")
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_delete")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="missing required audit triggers"):
+        core.restore_database(backup)

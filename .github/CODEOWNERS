@@ -1,0 +1,10 @@
+# Security-sensitive paths require maintainer review.
+/src/wgpl/dbpath.py @aleaz
+/src/wgpl/integrity.py @aleaz
+/src/wgpl/wireformat.py @aleaz
+/src/wgpl/wireguard.py @aleaz
+/src/wgpl/db.py @aleaz
+/src/wgpl/restore.py @aleaz
+/src/wgpl/consistency.py @aleaz
+/SECURITY.md @aleaz
+/.github/workflows/ @aleaz
