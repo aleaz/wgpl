@@ -328,6 +328,23 @@ def test_update_interface_no_fields_raises(wg0_interface: str) -> None:
         core.update_interface(wg0_interface)
 
 
+def test_add_interface_rejects_invalid_mtu(wg0_interface: str) -> None:
+    pubkey = wireguard.generate_keypair().public_key
+    with pytest.raises(ValueError, match="1280"):
+        core.add_interface(
+            "wg_mtu",
+            "vpn.example.com",
+            pubkey,
+            "10.0.0.0/24",
+            mtu=100,
+        )
+
+
+def test_add_peer_rejects_invalid_keepalive(wg0_interface: str) -> None:
+    with pytest.raises(ValueError, match="between 0 and"):
+        core.add_peer(wg0_interface, "bad", keepalive=-1)
+
+
 def test_update_peer_name(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "old_name")
 
@@ -691,8 +708,12 @@ def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
             core.allocate_peer_ip(iface["id"], conn)
 
 
+@patch("wgpl.wireguard._assert_wg_bin_unchanged")
+@patch("wgpl.wireguard._get_wg_bin", return_value="/usr/bin/wg")
 @patch("wgpl.wireguard.subprocess.run")
-def test_run_wg_command_raises_wireguard_config_error(mock_run: Any) -> None:
+def test_run_wg_command_raises_wireguard_config_error(
+    mock_run: Any, _mock_wg_bin: Any, _mock_assert: Any
+) -> None:
     mock_run.side_effect = subprocess.CalledProcessError(
         1, ["wg", "syncconf"], stderr="invalid configuration"
     )

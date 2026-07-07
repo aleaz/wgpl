@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import core
+from . import dbpath
 from .exceptions import (
     AmbiguousInterfaceError,
     InterfaceAlreadyExistsError,
@@ -320,7 +321,7 @@ def interface_list(ctx: typer.Context) -> None:
                     _styled(_display_dns(i.get("dns")), _STYLE_META),
                     _styled(str(i.get("mtu") or "—"), _STYLE_META),
                     _styled(str(i.get("keepalive") or "—"), _STYLE_META),
-                    _styled(_truncate_desc(i.get("desc")), ""),
+                    _styled(_safe_markup(_truncate_desc(i.get("desc"))), ""),
                 ]
                 for i in data
             ]
@@ -445,7 +446,7 @@ def interface_show(
                 ("DNS", str(dict(interface).get("dns") or "—")),
                 ("MTU", str(dict(interface).get("mtu") or "—")),
                 ("Keepalive", str(dict(interface).get("keepalive") or "—")),
-                ("Description", str(dict(interface).get("desc") or "—")),
+                ("Description", _safe_markup(str(dict(interface).get("desc") or "—"))),
             ]
             _print_show_table(f"Interface Details: {name}", rows)
     except WgplException as e:
@@ -903,7 +904,7 @@ def peer_qr(
             png_bytes = core.get_peer_qr_png_bytes(
                 peer_id, allowed_ips=allowed_ips, interface_ref=interface
             )
-            fd = os.open(output, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
+            fd = dbpath.open_exclusive_output(str(output))
             with os.fdopen(fd, "wb") as f:
                 f.write(png_bytes)
             canonical_id = core.resolve_peer_ref(
@@ -983,8 +984,6 @@ def db_dump(
             "[yellow]Warning: Output is a binary SQLite database file.[/yellow]"
         )
         if output:
-            fd = os.open(output, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-            os.close(fd)
             core.dump_database(str(output))
         else:
             fd, path = tempfile.mkstemp()

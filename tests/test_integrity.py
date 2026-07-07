@@ -107,3 +107,26 @@ def test_clear_expires_allowed_when_ip_still_in_pool(wg0_interface: str) -> None
     row = db.get_peer(peer_id)
     assert row is not None
     assert core.get_peer_status(row) == "Active"
+
+
+def test_validate_wire_mtu_rejects_out_of_range() -> None:
+    from wgpl import integrity
+    from wgpl.exceptions import WgplException
+
+    with pytest.raises(WgplException, match="1280"):
+        integrity.validate_wire_mtu(100)
+    with pytest.raises(WgplException, match="65535"):
+        integrity.validate_wire_mtu(99999)
+    assert integrity.validate_wire_mtu(1420) == 1420
+
+
+def test_validate_wire_keepalive_rejects_out_of_range() -> None:
+    from wgpl import integrity
+    from wgpl.exceptions import WgplException
+
+    with pytest.raises(WgplException, match="between 0 and"):
+        integrity.validate_wire_keepalive(-1)
+    with pytest.raises(WgplException, match="between 0 and"):
+        integrity.validate_wire_keepalive(70000)
+    assert integrity.validate_wire_keepalive(0) == 0
+    assert integrity.validate_wire_keepalive(25) == 25

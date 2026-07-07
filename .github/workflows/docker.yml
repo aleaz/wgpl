@@ -10,6 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  LOCAL_SCAN_TAG: wgpl:ci-scan
 
 jobs:
   build-and-push-image:
@@ -39,8 +40,25 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
 
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.LOCAL_SCAN_TAG }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_SCAN_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
       - name: Build and push Docker image
-        id: build
+        if: success()
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -48,17 +66,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v4
-        if: always() && steps.build.outputs.digest != ''
+        if: always()
         with:
           sarif_file: trivy-results.sarif

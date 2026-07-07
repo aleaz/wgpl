@@ -50,6 +50,18 @@ def validate_state(
                     }
                 )
 
+        try:
+            integrity.validate_wire_interface_fields(iface)
+        except WgplException as exc:
+            issues.append(
+                {
+                    "interface": iface_name,
+                    "peer": None,
+                    "code": "invalid_wire_fields",
+                    "detail": str(exc),
+                }
+            )
+
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
         for peer in db.list_peers(iface["id"]):

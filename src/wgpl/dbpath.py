@@ -81,6 +81,32 @@ def secure_open(
         ) from None
 
 
+def open_exclusive_output(output_path: str) -> int:
+    """Create an exclusive output file (O_NOFOLLOW, O_EXCL, mode 0o600)."""
+    path = normalize_db_path(output_path)
+    validate_path_target(path)
+    parent = os.path.dirname(path) or "."
+    if not os.path.isdir(parent):
+        raise WgplException(f"Output directory does not exist: {parent}")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if _O_NOFOLLOW:
+        flags |= _O_NOFOLLOW
+
+    try:
+        return os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise WgplException(f"Output file already exists: {path}") from None
+    except IsADirectoryError:
+        raise WgplException(f"Output path is a directory: {path}") from None
+    except OSError as exc:
+        if exc.errno == getattr(os, "ELOOP", 0):
+            raise WgplException(
+                f"Output path must not be a symlink: {path}"
+            ) from exc
+        raise WgplException(f"Failed to create output file at {path}: {exc}") from exc
+
+
 def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -88,20 +114,14 @@ def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
 
 
-def _attach_fd_cleanup(conn: sqlite3.Connection, fd: int) -> None:
-    """Keep the backing fd open until conn.close() (required on macOS /dev/fd)."""
-    _original_close = conn.close
-
-    def close() -> None:
-        try:
-            _original_close()
-        finally:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-    conn.close = close  # type: ignore[method-assign]
+def _fchmod_path(fd: int, path: str) -> None:
+    try:
+        os.fchmod(fd, 0o600)
+    except PermissionError:
+        raise WgplException(
+            f"Permission denied to secure database at {path}. "
+            "Try running with sudo or check file ownership."
+        ) from None
 
 
 def open_database(
@@ -125,14 +145,8 @@ def open_database(
 
     if fd is None:
         raise WgplException(f"Failed to open database at {path}")
-    try:
-        os.chmod(path, 0o600)
-    except PermissionError:
-        os.close(fd)
-        raise WgplException(
-            f"Permission denied to secure database at {path}. "
-            "Try running with sudo or check file ownership."
-        ) from None
+
+    _fchmod_path(fd, path)
 
     if sys.platform.startswith("linux"):
         try:
@@ -149,11 +163,20 @@ def open_database(
             raise WgplException(
                 f"Failed to connect to database at {path}: {exc}"
             ) from exc
-        _attach_fd_cleanup(conn, fd)
+        os.close(fd)
         return conn
 
-    # macOS/BSD: WAL needs a path-based open; fd was used only to validate O_NOFOLLOW target.
+    # macOS/BSD: WAL needs a path-based open; fd validates O_NOFOLLOW target.
+    fd_stat = os.fstat(fd)
     os.close(fd)
+    try:
+        path_stat = os.stat(path)
+    except OSError as exc:
+        raise WgplException(f"Failed to stat database at {path}: {exc}") from exc
+    if (path_stat.st_dev, path_stat.st_ino) != (fd_stat.st_dev, fd_stat.st_ino):
+        raise WgplException(
+            f"Database path changed between validation and open: {path}"
+        )
     try:
         conn = sqlite3.connect(path)
         _configure_connection(conn)

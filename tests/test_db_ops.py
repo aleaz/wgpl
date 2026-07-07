@@ -21,7 +21,7 @@ def valid_backup_path(tmp_path: Path) -> str:
         CREATE TABLE IF NOT EXISTS "interfaces" (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL, endpoint TEXT NOT NULL,
-            port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL UNIQUE,
             address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
             UNIQUE(name, endpoint, port)
         );

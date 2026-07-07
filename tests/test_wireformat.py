@@ -71,3 +71,34 @@ def test_sync_interface_succeeds_when_database_valid(
     core.sync_interface(wg0_interface)
 
     mock_syncconf.assert_called_once()
+
+
+def test_get_interface_config_rejects_invalid_mtu(wg0_interface: str) -> None:
+    with db.get_db() as conn:
+        conn.execute("UPDATE interfaces SET mtu = ? WHERE name = ?", (0, "wg0"))
+        conn.commit()
+
+    with pytest.raises(WgplException, match="mtu must be between"):
+        core.get_interface_config(wg0_interface)
+
+
+def test_sync_interface_fails_on_invalid_mtu(
+    wg0_interface: str,
+) -> None:
+    with db.get_db() as conn:
+        conn.execute("UPDATE interfaces SET mtu = ? WHERE name = ?", (99999, "wg0"))
+        conn.commit()
+
+    with pytest.raises(WgplException, match="Database validation failed"):
+        core.sync_interface(wg0_interface)
+
+
+def test_get_peer_config_rejects_invalid_keepalive(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET keepalive = ? WHERE id = ?", (-1, peer["id"]))
+        conn.commit()
+
+    with pytest.raises(WgplException, match="keepalive must be between"):
+        core.get_peer_config(peer["id"])

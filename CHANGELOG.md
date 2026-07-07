@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exact SQLite schema contract on restore (reject extra tables, indexes, triggers, or views)
+- Wire-safe MTU (1280–65535) and keepalive (0–65535) validation on export, apply preflight, and mutations
+- `dbpath.open_exclusive_output()` for hardened CLI secret output paths
+- `wg` binary resolution via fixed allowlist (PATH hijack mitigation for root)
+- FastAPI self-service example: fail-closed `WGPL_PORTAL_API_KEY` guard with `secrets.compare_digest`
+- Docker workflow: Trivy scans local image before registry push
+- CI job `permissions: contents: read` (least privilege)
+- Tests: restore schema adversarial cases, output path hardening, wireformat MTU/keepalive, FastAPI guard
+
+### Changed
+
+- **Breaking:** minimum MTU for mutations and export is **1280** (was 576)
+- `validate_state` delegates interface wire-field checks to `integrity.validate_wire_interface_fields`
+- `dbpath` on Linux closes validation fd after connect; macOS re-checks inode before path-based open
+- Interface descriptions escaped in Rich CLI output (`interface list` / `show`)
 - `integrity` module: peer activation gate, wire-field validators, `validate_database(full=True)`
 - `wireformat` module: wire-safe `build_server_config` / `build_client_config` and `validate_allowed_ips`
 - `dbpath` module: unified SQLite opener (`O_NOFOLLOW`, fd-based connect, `chmod 600`)

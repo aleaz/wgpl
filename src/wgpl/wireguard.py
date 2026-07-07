@@ -14,37 +14,60 @@ class Keypair:
     public_key: str
 
 
-def _get_wg_bin() -> str:
-    """
-    Resolves the wg binary path.
-    SECURITY NOTE: If running as root (UID 0), we ignore WGPL_WG_BIN to prevent
-    Local Privilege Escalation (LPE) via environment injection when using `sudo -E`.
-    """
-    if os.getuid() == 0:
-        return "wg"
-    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
-    if wg_bin == "wg":
-        return "wg"
+_WG_BIN_ALLOWLIST = ("/usr/bin/wg", "/bin/wg", "/usr/local/bin/wg")
 
-    expanded = os.path.abspath(os.path.expanduser(wg_bin))
+
+def _wg_candidate_valid(path: str) -> bool:
     try:
-        st = os.lstat(expanded)
+        st = os.lstat(path)
     except FileNotFoundError:
-        raise WgBinaryNotFoundError(
-            f"WireGuard binary path configured via WGPL_WG_BIN not found: {expanded}"
-        )
+        return False
 
     if stat.S_ISLNK(st.st_mode):
-        raise WgBinaryNotFoundError(
-            f"WireGuard binary path must not be a symlink: {expanded}"
-        )
+        return False
 
     if stat.S_ISDIR(st.st_mode) or not stat.S_ISREG(st.st_mode):
-        raise WgBinaryNotFoundError(
-            f"WireGuard binary path must be a regular file: {expanded}"
-        )
+        return False
 
-    if not os.access(expanded, os.X_OK):
+    return os.access(path, os.X_OK)
+
+
+def _resolve_wg_from_allowlist() -> str:
+    for candidate in _WG_BIN_ALLOWLIST:
+        if _wg_candidate_valid(candidate):
+            return candidate
+    raise WgBinaryNotFoundError(
+        "The 'wg' command was not found in standard paths "
+        f"({', '.join(_WG_BIN_ALLOWLIST)}). "
+        "Install wireguard-tools or set WGPL_WG_BIN to a trusted executable."
+    )
+
+
+def _resolve_wg_bin_override() -> str:
+    wg_bin = os.environ.get("WGPL_WG_BIN", "wg")
+    if wg_bin == "wg":
+        return _resolve_wg_from_allowlist()
+
+    expanded = os.path.abspath(os.path.expanduser(wg_bin))
+    if not _wg_candidate_valid(expanded):
+        if not os.path.exists(expanded):
+            raise WgBinaryNotFoundError(
+                f"WireGuard binary path configured via WGPL_WG_BIN not found: {expanded}"
+            )
+        try:
+            st = os.lstat(expanded)
+        except FileNotFoundError:
+            raise WgBinaryNotFoundError(
+                f"WireGuard binary path configured via WGPL_WG_BIN not found: {expanded}"
+            )
+        if stat.S_ISLNK(st.st_mode):
+            raise WgBinaryNotFoundError(
+                f"WireGuard binary path must not be a symlink: {expanded}"
+            )
+        if stat.S_ISDIR(st.st_mode) or not stat.S_ISREG(st.st_mode):
+            raise WgBinaryNotFoundError(
+                f"WireGuard binary path must be a regular file: {expanded}"
+            )
         raise WgBinaryNotFoundError(
             f"WireGuard binary path is not executable: {expanded}"
         )
@@ -52,9 +75,28 @@ def _get_wg_bin() -> str:
     return expanded
 
 
+def _get_wg_bin() -> str:
+    """
+    Resolves the wg binary path.
+    SECURITY NOTE: If running as root (UID 0), we ignore WGPL_WG_BIN to prevent
+    Local Privilege Escalation (LPE) via environment injection when using `sudo -E`.
+    """
+    if os.getuid() == 0:
+        return _resolve_wg_from_allowlist()
+    return _resolve_wg_bin_override()
+
+
+def _assert_wg_bin_unchanged(resolved: str) -> None:
+    if not _wg_candidate_valid(resolved):
+        raise WgBinaryNotFoundError(
+            f"WireGuard binary path became invalid before execution: {resolved}"
+        )
+
+
 def run_wg_command(*args: str) -> str:
     """Wrapper to run wg commands securely."""
     wg_bin = _get_wg_bin()
+    _assert_wg_bin_unchanged(wg_bin)
     cmd = [wg_bin] + list(args)
 
     try:
@@ -102,6 +144,7 @@ def generate_preshared_key() -> str:
 def syncconf(interface: str, conf_content: str) -> None:
     """Applies a declarative configuration to a WireGuard interface."""
     wg_bin = _get_wg_bin()
+    _assert_wg_bin_unchanged(wg_bin)
     cmd = [wg_bin, "syncconf", interface, "/dev/stdin"]
 
     try:

@@ -26,7 +26,6 @@ def dump_database(target_path: str) -> None:
                 conn.backup(target_conn)
         finally:
             target_conn.close()
-    os.chmod(target_path, 0o600)
 
 
 def _cleanup_tmp_files(tmp_path: str) -> None:
