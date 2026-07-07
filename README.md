@@ -3,7 +3,7 @@
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: Work in Progress](https://img.shields.io/badge/Status-Work_in_Progress-orange.svg)
+![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)
 
 **WGPL (WireGuard Peer Lite)** is a lightweight, database-backed CLI for managing WireGuard peers across multiple servers.
 

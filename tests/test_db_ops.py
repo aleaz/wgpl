@@ -68,6 +68,8 @@ def valid_backup_path(tmp_path: Path) -> str:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_interface ON audit_events(interface, occurred_at);"
         )
+        db.enforce_audit_immutability(conn)
+        conn.execute("PRAGMA user_version = 1")
         conn.execute(
             "INSERT INTO \"interfaces\" VALUES(1, 'wg0','vpn.example.com',51820,?,"
             "'10.0.0.0/24',NULL,NULL,NULL,NULL);",

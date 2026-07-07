@@ -89,7 +89,13 @@ wgpl db restore --yes backup.db
 | File | Responsibility |
 |---|---|
 | `src/wgpl/cli.py` | Typer commands, Rich/JSON formatting; no direct `db` access |
-| `src/wgpl/core.py` | IP allocation, lifecycle rules, list reads, config and QR generation |
+| `src/wgpl/core.py` | Business orchestration (CRUD, export, sync); re-exports from helper modules |
+| `src/wgpl/refs.py` | Peer and interface reference resolution |
+| `src/wgpl/ipam.py` | IPv4 pool allocation and inactive slot reclamation |
+| `src/wgpl/audit.py` | Audit trail append and history queries |
+| `src/wgpl/consistency.py` | `validate_state` and `assert_database_valid` |
+| `src/wgpl/restore.py` | `dump_database` and `restore_database` |
+| `src/wgpl/validators.py` | Input validation helpers (DNS, endpoint, keys) |
 | `src/wgpl/db.py` | Secure connection, transactions, SQLite CRUD |
 | `src/wgpl/wireguard.py` | x25519 keys, PSK, `wg syncconf` |
 | `src/wgpl/exceptions.py` | `WgplException` hierarchy |

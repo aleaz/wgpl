@@ -66,7 +66,7 @@ Out of scope:
 
 ## Residual risks (accepted)
 
-- **Stale WireGuard kernel state** until `apply` — by design; document in runbooks.
+- **Stale WireGuard kernel state** until `apply` — by design; see [docs/runbook.md](docs/runbook.md).
 - **Audit `actor` field** may reflect `SUDO_USER` / `USER` from the environment on shared hosts.
 - **`examples/fastapi-self-service.py`** is illustrative only; do not deploy without authentication and network controls.
 

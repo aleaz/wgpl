@@ -19,7 +19,9 @@ def _expire_peer(peer_id: str, hours_ago: int = 2) -> None:
 
 
 def test_pool_shrink_rejects_expired_peer_outside_new_pool(wg0_interface: str) -> None:
-    expired = core.add_peer(wg0_interface, "victim", ip_address="10.0.0.200", expires="7d")
+    expired = core.add_peer(
+        wg0_interface, "victim", ip_address="10.0.0.200", expires="7d"
+    )
     _expire_peer(str(expired["id"]))
 
     with pytest.raises(PeersOutsidePoolError):
@@ -27,7 +29,9 @@ def test_pool_shrink_rejects_expired_peer_outside_new_pool(wg0_interface: str) -
 
 
 def test_clear_expires_blocked_when_ip_outside_pool(wg0_interface: str) -> None:
-    expired = core.add_peer(wg0_interface, "victim", ip_address="10.0.0.200", expires="7d")
+    expired = core.add_peer(
+        wg0_interface, "victim", ip_address="10.0.0.200", expires="7d"
+    )
     peer_id = str(expired["id"])
     _expire_peer(peer_id)
 
@@ -87,7 +91,9 @@ def test_validate_state_reports_corrupt_expires_at(wg0_interface: str) -> None:
 
 
 def test_clear_expires_allowed_when_ip_still_in_pool(wg0_interface: str) -> None:
-    expired = core.add_peer(wg0_interface, "phone", ip_address="10.0.0.50", expires="7d")
+    expired = core.add_peer(
+        wg0_interface, "phone", ip_address="10.0.0.50", expires="7d"
+    )
     peer_id = str(expired["id"])
     _expire_peer(peer_id)
 

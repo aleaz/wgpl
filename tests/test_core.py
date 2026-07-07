@@ -8,7 +8,12 @@ import pytest
 from typing import Any
 
 from wgpl import core, db, wireguard
-from wgpl.core import PeerResolvePolicy, validate_dns, allocate_peer_ip, resolve_peer_ref
+from wgpl.core import (
+    PeerResolvePolicy,
+    validate_dns,
+    allocate_peer_ip,
+    resolve_peer_ref,
+)
 from wgpl.exceptions import (
     AmbiguousPeerIdError,
     InterfaceDisambiguationRequiredError,

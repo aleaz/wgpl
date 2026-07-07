@@ -137,7 +137,7 @@ def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) ->
         raise WgplException(f"Port must be between 1 and 65535, got {port}")
 
 
-def _validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
+def validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
     try:
         ipaddress.IPv4Address(ip)
     except ValueError as exc:
@@ -169,7 +169,7 @@ def assert_peer_activation(
 
     network = ipaddress.IPv4Network(str(iface["address_pool"]), strict=False)
     ip = str(peer["ip_address"])
-    _validate_peer_ip_in_pool(ip, network)
+    validate_peer_ip_in_pool(ip, network)
 
     iface_id = int(str(peer["interface_id"]))
     peer_id = str(peer["id"])
@@ -210,7 +210,7 @@ def validate_non_deleted_peers_in_pool(
             continue
         ip = str(peer["ip_address"])
         try:
-            _validate_peer_ip_in_pool(ip, network)
+            validate_peer_ip_in_pool(ip, network)
         except InvalidPeerIpError as exc:
             conflicts.append(
                 {"name": str(peer["name"]), "ip_address": ip, "detail": str(exc)}

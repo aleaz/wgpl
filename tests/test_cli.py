@@ -315,7 +315,9 @@ def test_peer_history_limit_capped(wg0_interface: str) -> None:
     assert "limit must be <=" in result.stderr
 
 
-def test_db_restore_stdin_size_limit(wgpl_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_db_restore_stdin_size_limit(
+    wgpl_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(cli_module, "_MAX_RESTORE_STDIN_BYTES", 16)
     binary_db = b"x" * 17
     result = runner.invoke(

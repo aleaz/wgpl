@@ -811,7 +811,10 @@ def peer_list(
                 [
                     _styled(_format_peer_id_display(p["id"], total_peers), _STYLE_ID),
                     _styled(
-                        _safe_markup(str(iface_map.get(p["interface_id"], p["interface_id"]))), ""
+                        _safe_markup(
+                            str(iface_map.get(p["interface_id"], p["interface_id"]))
+                        ),
+                        "",
                     ),
                     _styled(_safe_markup(p["name"]), _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
@@ -949,7 +952,9 @@ def validate_cmd(
         else:
             issues = result["issues"]
             if not isinstance(issues, list):
-                raise WgplException("Invalid validate_state response: issues must be a list")
+                raise WgplException(
+                    "Invalid validate_state response: issues must be a list"
+                )
             for issue in issues:
                 peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
                 console.print(
