@@ -503,7 +503,7 @@ def update_interface(
         with _ensure_conn(conn, commit=True) as c:
             # SQL field names come from internal fixed update clauses only.
             c.execute(
-                f"UPDATE interfaces SET {', '.join(updates)} WHERE id = ?",  # nosec B608
+                f"UPDATE interfaces SET {', '.join(updates)} WHERE id = ?",
                 params,
             )
     except sqlite3.IntegrityError as exc:
@@ -703,7 +703,7 @@ def update_peer(
         with _ensure_conn(conn, commit=True) as c:
             # SQL field names come from internal fixed update clauses only.
             c.execute(
-                f"UPDATE peers SET {', '.join(updates)} WHERE id = ?",  # nosec B608
+                f"UPDATE peers SET {', '.join(updates)} WHERE id = ?",
                 params,
             )
     except sqlite3.IntegrityError as exc:
@@ -842,7 +842,7 @@ def list_audit_events(
     params.extend([limit, offset])
     # WHERE is assembled from constant fragments with bound params for values.
     sql = (
-        f"SELECT * FROM audit_events {where} "  # nosec B608
+        f"SELECT * FROM audit_events {where} "
         "ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?"
     )
     with _ensure_conn(conn) as c:
