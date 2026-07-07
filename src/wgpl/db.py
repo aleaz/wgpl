@@ -80,6 +80,9 @@ _REQUIRED_AUDIT_TRIGGERS = frozenset(
         "trg_audit_immutable_delete",
     }
 )
+# SQLite internal objects from AUTOINCREMENT and UNIQUE constraints.
+_ALLOWED_TABLES = _REQUIRED_TABLES | frozenset({"sqlite_sequence"})
+_ALLOWED_VIEWS: frozenset[str] = frozenset()
 _SUPPORTED_SCHEMA_VERSIONS = frozenset({0, SCHEMA_USER_VERSION})
 
 
@@ -116,6 +119,57 @@ def assert_schema_contract(path: str) -> None:
         conn.close()
 
 
+def _schema_objects(conn: sqlite3.Connection, object_type: str) -> set[str]:
+    return {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = ? AND name IS NOT NULL",
+            (object_type,),
+        ).fetchall()
+    }
+
+
+def _assert_exact_schema_objects(
+    conn: sqlite3.Connection,
+    object_type: str,
+    allowed: frozenset[str],
+    *,
+    label: str,
+) -> None:
+    present = _schema_objects(conn, object_type)
+    missing = allowed - present
+    if missing:
+        raise WgplException(
+            f"Restored database is missing required {label}: "
+            f"{', '.join(sorted(missing))}"
+        )
+    extra = present - allowed
+    if extra:
+        raise WgplException(
+            f"Restored database contains unauthorized {label}: "
+            f"{', '.join(sorted(extra))}"
+        )
+
+
+def _assert_index_contract(conn: sqlite3.Connection) -> None:
+    present = _schema_objects(conn, "index")
+    missing = _REQUIRED_INDEXES - present
+    if missing:
+        raise WgplException(
+            "Restored database is missing required indexes: "
+            f"{', '.join(sorted(missing))}"
+        )
+    extra = present - _REQUIRED_INDEXES
+    unauthorized = {
+        name for name in extra if not name.startswith("sqlite_autoindex_")
+    }
+    if unauthorized:
+        raise WgplException(
+            "Restored database contains unauthorized indexes: "
+            f"{', '.join(sorted(unauthorized))}"
+        )
+
+
 def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
     user_version = conn.execute("PRAGMA user_version").fetchone()
     version = int(user_version[0]) if user_version else 0
@@ -125,44 +179,12 @@ def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
             f"(supported: {sorted(_SUPPORTED_SCHEMA_VERSIONS)})"
         )
 
-    tables = {
-        row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    missing_tables = _REQUIRED_TABLES - tables
-    if missing_tables:
-        raise WgplException(
-            "Restored database is missing required tables: "
-            f"{', '.join(sorted(missing_tables))}"
-        )
-
-    indexes = {
-        row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL"
-        ).fetchall()
-    }
-    missing_indexes = _REQUIRED_INDEXES - indexes
-    if missing_indexes:
-        raise WgplException(
-            "Restored database is missing required indexes: "
-            f"{', '.join(sorted(missing_indexes))}"
-        )
-
-    triggers = {
-        row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IS NOT NULL"
-        ).fetchall()
-    }
-    missing_triggers = _REQUIRED_AUDIT_TRIGGERS - triggers
-    if missing_triggers:
-        raise WgplException(
-            "Restored database is missing required audit triggers: "
-            f"{', '.join(sorted(missing_triggers))}"
-        )
+    _assert_exact_schema_objects(conn, "table", _ALLOWED_TABLES, label="tables")
+    _assert_index_contract(conn)
+    _assert_exact_schema_objects(
+        conn, "trigger", _REQUIRED_AUDIT_TRIGGERS, label="triggers"
+    )
+    _assert_exact_schema_objects(conn, "view", _ALLOWED_VIEWS, label="views")
 
 
 def _run_query(

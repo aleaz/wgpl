@@ -48,7 +48,7 @@ def build_server_config(
     conf_lines: list[str] = []
     mtu = iface["mtu"] if "mtu" in iface.keys() else None
     if mtu is not None:
-        conf_lines.append(f"MTU = {mtu}")
+        conf_lines.append(f"MTU = {integrity.validate_wire_mtu(mtu)}")
         conf_lines.append("")
 
     for peer in peers:
@@ -99,7 +99,7 @@ def build_client_config(
     iface_mtu = iface["mtu"] if "mtu" in iface.keys() else None
     effective_mtu = peer_mtu if peer_mtu is not None else iface_mtu
     if effective_mtu is not None:
-        config_lines.append(f"MTU = {effective_mtu}")
+        config_lines.append(f"MTU = {integrity.validate_wire_mtu(effective_mtu)}")
 
     config_lines.extend(["", "[Peer]", f"PublicKey = {iface['public_key']}"])
 
@@ -120,7 +120,8 @@ def build_client_config(
         peer_keepalive if peer_keepalive is not None else iface_keepalive
     )
     if effective_keepalive is not None:
-        config_lines.append(f"PersistentKeepalive = {effective_keepalive}")
+        validated_keepalive = integrity.validate_wire_keepalive(effective_keepalive)
+        config_lines.append(f"PersistentKeepalive = {validated_keepalive}")
 
     config_lines.append("")
 

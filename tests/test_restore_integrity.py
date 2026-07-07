@@ -102,5 +102,98 @@ def test_restore_rejects_missing_audit_triggers(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="missing required audit triggers"):
+    with pytest.raises(WgplException, match="missing required triggers"):
+        core.restore_database(backup)
+
+
+def test_restore_rejects_extra_index(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute("CREATE INDEX evil_idx ON peers(name)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="unauthorized indexes"):
+        core.restore_database(backup)
+
+
+def test_restore_rejects_extra_trigger(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute(
+            """
+            CREATE TRIGGER trg_malicious_insert
+            AFTER INSERT ON peers
+            BEGIN
+                SELECT 1;
+            END;
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="unauthorized triggers"):
+        core.restore_database(backup)
+
+
+def test_restore_rejects_extra_table(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute("CREATE TABLE evil (id INTEGER PRIMARY KEY)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="unauthorized tables"):
+        core.restore_database(backup)
+
+
+def test_restore_rejects_extra_view(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute("CREATE VIEW peer_secrets AS SELECT private_key FROM peers")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="unauthorized views"):
+        core.restore_database(backup)
+
+
+def test_restore_rejects_invalid_mtu(
+    wg0_interface: str, tmp_path: Path
+) -> None:
+    backup = str(tmp_path / "backup.db")
+    core.dump_database(backup)
+
+    conn = sqlite3.connect(backup)
+    try:
+        conn.execute("UPDATE interfaces SET mtu = ? WHERE name = 'wg0'", (100,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(WgplException, match="Restored database failed validation"):
         core.restore_database(backup)

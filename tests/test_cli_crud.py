@@ -238,7 +238,7 @@ def test_cli_peer_add_invalid_mtu_exits_cleanly(wgpl_db: str) -> None:
 
     assert result.exit_code == 1
     assert "WGPL Error" in result.stderr
-    assert "576" in result.stderr
+    assert "1280" in result.stderr
 
 
 def test_cli_peer_history_respects_limit(wgpl_db: str) -> None:

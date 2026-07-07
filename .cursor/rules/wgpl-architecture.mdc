@@ -40,7 +40,7 @@ Business invariants live in `integrity.py` and `wireformat.py` (called from `cor
 ## Schema contract and restore
 
 - `db.init_db()` sets `PRAGMA user_version` and calls `enforce_audit_immutability()` (DROP + CREATE triggers, never `IF NOT EXISTS` for security triggers).
-- `assert_schema_contract()` validates tables, indexes, audit triggers, and supported schema version on restore.
+- `assert_schema_contract()` validates an **exact** schema: allowed tables, required indexes (custom indexes rejected; `sqlite_autoindex_*` allowed), exact audit triggers, no views, and supported schema version on restore.
 - `restore_database()` runs `validate_state()` plus `integrity.validate_database(full=True)` before swapping the live DB.
 
 ## Database path opener

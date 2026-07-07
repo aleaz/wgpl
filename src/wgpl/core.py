@@ -43,7 +43,19 @@ from .exceptions import (
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
+    WgplException,
 )
+
+
+def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
+    """Reject mtu/keepalive values outside wire-safe ranges at mutation time."""
+    try:
+        if mtu is not None:
+            integrity.validate_wire_mtu(mtu)
+        if keepalive is not None:
+            integrity.validate_wire_keepalive(keepalive)
+    except WgplException as exc:
+        raise ValueError(str(exc)) from exc
 
 __all__ = [
     "PeerResolvePolicy",
@@ -221,10 +233,7 @@ def add_interface(
         raise ValueError(f"Invalid address pool '{address_pool}'") from exc
 
     normalized_dns = validate_dns(dns) if dns is not None else None
-    if mtu is not None and mtu < 576:
-        raise ValueError(f"MTU must be >= 576, got {mtu}")
-    if keepalive is not None and not (0 <= keepalive <= 65535):
-        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
+    _validate_mtu_keepalive(mtu, keepalive)
 
     with db.transaction() as conn:
         iface_id = db.add_interface(
@@ -385,10 +394,7 @@ def add_peer(
     """
     peer_name = validate_peer_name(peer_name)
     normalized_dns = validate_dns(dns) if dns is not None else None
-    if mtu is not None and mtu < 576:
-        raise ValueError(f"MTU must be >= 576, got {mtu}")
-    if keepalive is not None and not (0 <= keepalive <= 65535):
-        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
+    _validate_mtu_keepalive(mtu, keepalive)
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_name, conn=conn)
@@ -694,10 +700,7 @@ def update_interface(
 
     if port is not None and not (1 <= port <= 65535):
         raise ValueError(f"Port must be between 1 and 65535, got {port}")
-    if mtu is not None and mtu < 576:
-        raise ValueError(f"MTU must be >= 576, got {mtu}")
-    if keepalive is not None and not (0 <= keepalive <= 65535):
-        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
+    _validate_mtu_keepalive(mtu, keepalive)
 
     normalized_pool: str | None = None
     if address_pool is not None:
@@ -862,10 +865,7 @@ def update_peer(
     ):
         hints.append("re_export_client")
 
-    if mtu is not None and mtu < 576:
-        raise ValueError(f"MTU must be >= 576, got {mtu}")
-    if keepalive is not None and not (0 <= keepalive <= 65535):
-        raise ValueError(f"Keepalive must be between 0 and 65535, got {keepalive}")
+    _validate_mtu_keepalive(mtu, keepalive)
 
     normalized_dns = _resolve_optional(validate_dns(dns) if dns else None, clear_dns)
     normalized_desc = _resolve_optional(desc, clear_desc)

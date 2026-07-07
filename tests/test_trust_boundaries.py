@@ -93,3 +93,26 @@ def test_wg_bin_rejects_symlink(
         monkeypatch.setenv("WGPL_WG_BIN", link)
         with pytest.raises(WgBinaryNotFoundError, match="symlink"):
             wireguard._get_wg_bin()
+
+
+def test_resolve_wg_from_allowlist_ignores_path_hijack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import patch
+
+    from wgpl import wireguard as wg_mod
+
+    if os.getuid() == 0:
+        pytest.skip("Root uses allowlist only")
+
+    with tempfile.TemporaryDirectory() as td:
+        fake = os.path.join(td, "wg")
+        with open(fake, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nexit 1\n")
+        os.chmod(fake, 0o700)
+        monkeypatch.setenv("PATH", td)
+        monkeypatch.delenv("WGPL_WG_BIN", raising=False)
+
+        with patch.object(wg_mod, "_WG_BIN_ALLOWLIST", ("/nonexistent/wg",)):
+            with pytest.raises(WgBinaryNotFoundError, match="standard paths"):
+                wg_mod._resolve_wg_from_allowlist()

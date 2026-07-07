@@ -19,6 +19,9 @@ from .exceptions import (
 )
 
 _PEER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+_WIRE_MTU_MIN = 1280
+_WIRE_MTU_MAX = 65535
+_WIRE_KEEPALIVE_MAX = 65535
 
 
 def _peer_keys(peer: sqlite3.Row | Mapping[str, object]) -> Any:
@@ -98,6 +101,46 @@ def validate_wire_safe_text(value: str, field: str) -> None:
         raise WgplException(f"{field} must not contain newlines")
 
 
+def validate_wire_mtu(value: object, *, field: str = "mtu") -> int:
+    """Validate MTU for WireGuard configuration export."""
+    try:
+        mtu = int(str(value))
+    except (TypeError, ValueError) as exc:
+        raise WgplException(f"{field} must be an integer") from exc
+    if not (_WIRE_MTU_MIN <= mtu <= _WIRE_MTU_MAX):
+        raise WgplException(
+            f"{field} must be between {_WIRE_MTU_MIN} and {_WIRE_MTU_MAX}, got {mtu}"
+        )
+    return mtu
+
+
+def validate_wire_keepalive(value: object, *, field: str = "keepalive") -> int:
+    """Validate PersistentKeepalive for WireGuard configuration export."""
+    try:
+        keepalive = int(str(value))
+    except (TypeError, ValueError) as exc:
+        raise WgplException(f"{field} must be an integer") from exc
+    if not (0 <= keepalive <= _WIRE_KEEPALIVE_MAX):
+        raise WgplException(
+            f"{field} must be between 0 and {_WIRE_KEEPALIVE_MAX}, got {keepalive}"
+        )
+    return keepalive
+
+
+def _validate_optional_wire_mtu(
+    row: sqlite3.Row | Mapping[str, object], field: str
+) -> None:
+    if field in _peer_keys(row) and row[field] is not None:
+        validate_wire_mtu(row[field], field=field)
+
+
+def _validate_optional_wire_keepalive(
+    row: sqlite3.Row | Mapping[str, object], field: str
+) -> None:
+    if field in _peer_keys(row) and row[field] is not None:
+        validate_wire_keepalive(row[field], field=field)
+
+
 def validate_wire_public_key(key: str) -> None:
     """Validate public key format and wire-safe encoding."""
     validate_wire_safe_text(key, "public_key")
@@ -122,6 +165,8 @@ def validate_wire_peer_fields(peer: sqlite3.Row | Mapping[str, object]) -> None:
     psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
     if psk:
         validate_wire_safe_text(str(psk), "preshared_key")
+    _validate_optional_wire_mtu(peer, "mtu")
+    _validate_optional_wire_keepalive(peer, "keepalive")
 
 
 def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) -> None:
@@ -135,6 +180,8 @@ def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) ->
     port = int(str(iface["port"]))
     if not (1 <= port <= 65535):
         raise WgplException(f"Port must be between 1 and 65535, got {port}")
+    _validate_optional_wire_mtu(iface, "mtu")
+    _validate_optional_wire_keepalive(iface, "keepalive")
 
 
 def validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:

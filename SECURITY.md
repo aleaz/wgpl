@@ -51,24 +51,27 @@ Out of scope:
 
 ## Export and apply boundaries
 
-- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) passes through the **wireformat** boundary: fields with control characters or invalid Base64 keys are rejected before emission.
-- `wgpl apply` runs a database consistency preflight (`validate_state`) and aborts before `wg syncconf` if active peers are invalid.
+- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) passes through the **wireformat** boundary: fields with control characters, invalid Base64 keys, or out-of-range MTU (1280–65535) / keepalive (0–65535) are rejected before emission.
+- `wgpl apply` runs a database consistency preflight (`validate_state`, including interface wire fields) and aborts before `wg syncconf` if active peers or interfaces are invalid.
 - Mutations update the SQLite SSOT only. The kernel may remain stale until you run `wgpl apply` (or `interface export | ssh … wg syncconf`). Treat post-mutation `apply` as part of your operational checklist.
 
 ## Restore integrity
 
 - `wgpl db restore` treats backups as **untrusted input**:
-  - Schema contract check (required tables, indexes, supported `PRAGMA user_version`).
+  - **Exact schema contract**: only WGPL tables (`interfaces`, `peers`, `audit_events`, `sqlite_sequence`), required named indexes plus SQLite `sqlite_autoindex_*` entries from UNIQUE constraints, the two audit immutability triggers, and **no views** or other custom schema objects.
+  - Supported `PRAGMA user_version` only.
   - Row-level validation (`validate_state` plus full wire-format scan of every peer/interface row).
   - `enforce_audit_immutability()` recreates append-only audit triggers (no `IF NOT EXISTS` bypass).
-- Malformed keys or weakened audit triggers in a backup are rejected or repaired before the live database is replaced.
-- `wgpl db dump` output is written at `chmod 600`.
+- Malformed keys, unauthorized schema objects, or weakened audit triggers in a backup are rejected before the live database is replaced.
+- `wgpl peer qr -o` and `wgpl db dump -o` create output via `O_NOFOLLOW` and `O_EXCL` at mode `0600`.
+- `wg` is resolved from a fixed allowlist (`/usr/bin/wg`, `/bin/wg`, `/usr/local/bin/wg`); root ignores `WGPL_WG_BIN`. Non-root may set `WGPL_WG_BIN` to a trusted regular file (re-validated before each invocation).
 
 ## Residual risks (accepted)
 
 - **Stale WireGuard kernel state** until `apply` — by design; see [docs/runbook.md](docs/runbook.md).
 - **Audit `actor` field** may reflect `SUDO_USER` / `USER` from the environment on shared hosts.
-- **`examples/fastapi-self-service.py`** is illustrative only; do not deploy without authentication and network controls.
+- **macOS/BSD database path**: a brief TOCTOU window may remain between fd validation and path-based SQLite open (inode re-check on open).
+- **`examples/fastapi-self-service.py`** requires `WGPL_PORTAL_API_KEY` at startup and uses constant-time comparison; still illustrative only — not production-ready.
 
 ## Secure usage
 
