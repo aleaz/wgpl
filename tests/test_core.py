@@ -768,8 +768,7 @@ def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
             ),
         )
         conn.commit()
-
-    result = core.validate_state(wg0_interface)
+        result = core.validate_state(wg0_interface, conn=conn)
 
     assert result["status"] == "error"
     issues = result["issues"]

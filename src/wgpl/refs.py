@@ -14,6 +14,7 @@ from .exceptions import (
     AmbiguousPeerIdError,
     InterfaceDisambiguationRequiredError,
     InterfaceNotFoundError,
+    PeerInterfaceMismatchError,
     PeerNotFoundError,
 )
 
@@ -21,10 +22,38 @@ _MIN_PEER_ID_PREFIX_LEN = 4
 _PEER_ID_HEX_LEN = 32
 
 
+class PeerAccess(StrEnum):
+    READ_PUBLIC = "read_public"
+    READ_SENSITIVE = "read_sensitive"
+    EXPORT_SECRET = "export_secret"
+    MUTATE = "mutate"
+
+
 class PeerResolvePolicy(StrEnum):
-    EXPORT_SECRET = "export_secret"  # nosec B105
+    """Backward-compatible alias; prefer PeerAccess for new code."""
+
+    EXPORT_SECRET = "export_secret"
     MUTATE_INACTIVE = "mutate_inactive"
     READ_ONLY = "read_only"
+
+
+def _access_from_policy(policy: PeerResolvePolicy) -> PeerAccess:
+    if policy == PeerResolvePolicy.EXPORT_SECRET:
+        return PeerAccess.EXPORT_SECRET
+    if policy == PeerResolvePolicy.MUTATE_INACTIVE:
+        return PeerAccess.MUTATE
+    return PeerAccess.READ_PUBLIC
+
+
+def _requires_interface_disambiguation(access: PeerAccess) -> bool:
+    return access in {
+        PeerAccess.READ_SENSITIVE,
+        PeerAccess.EXPORT_SECRET,
+    }
+
+
+def _active_only(access: PeerAccess) -> bool:
+    return access in {PeerAccess.READ_PUBLIC, PeerAccess.EXPORT_SECRET}
 
 
 def _normalize_peer_ref(ref: str) -> str:
@@ -56,39 +85,67 @@ def _ambiguous_peer_message(ref: str, matches: list[sqlite3.Row]) -> str:
     return f"Peer ID prefix '{ref}' is ambiguous. Matches: {candidates}"
 
 
+def _assert_peer_belongs_to_interface(
+    peer_id: str,
+    iface_id: int | None,
+    *,
+    interface_label: str | None,
+    conn: sqlite3.Connection | None,
+) -> None:
+    if iface_id is None:
+        return
+    peer = db.get_peer(peer_id, conn=conn)
+    if not peer:
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+    if int(peer["interface_id"]) != iface_id:
+        label = interface_label or str(iface_id)
+        raise PeerInterfaceMismatchError(
+            f"Peer {peer_id} does not belong to interface {label}"
+        )
+
+
 def resolve_peer_ref(
     ref: str,
     interface: str | None = None,
     *,
+    access: PeerAccess | None = None,
     policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
     conn: sqlite3.Connection | None = None,
 ) -> str:
     """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
+    resolved_access = access if access is not None else _access_from_policy(policy)
     normalized = _normalize_peer_ref(ref)
 
     if not normalized or not all(c in "0123456789abcdef" for c in normalized):
         raise PeerNotFoundError(f"Peer {ref} not found")
 
-    if policy == PeerResolvePolicy.EXPORT_SECRET and interface is None:
+    if _requires_interface_disambiguation(resolved_access) and interface is None:
         if len(db.list_interfaces(conn=conn)) > 1:
             raise InterfaceDisambiguationRequiredError(
                 "Multiple interfaces in database; specify --interface / -i "
-                "when exporting client configuration or secrets."
+                "when accessing peer secrets or sensitive data."
             )
 
-    active_only = policy != PeerResolvePolicy.MUTATE_INACTIVE
-
+    active_only = _active_only(resolved_access)
     iface_id = resolve_interface_ref(interface, conn=conn) if interface else None
 
     if len(normalized) == _PEER_ID_HEX_LEN:
-        matches = db.find_peers_by_id_prefix(normalized, iface_id, conn=conn)
+        global_matches = db.find_peers_by_id_prefix(normalized, None, conn=conn)
         if active_only:
-            matches = [peer for peer in matches if integrity.is_peer_active(peer)]
+            global_matches = [
+                peer for peer in global_matches if integrity.is_peer_active(peer)
+            ]
         exact = [
-            peer for peer in matches if _normalize_peer_ref(peer["id"]) == normalized
+            peer
+            for peer in global_matches
+            if _normalize_peer_ref(peer["id"]) == normalized
         ]
         if len(exact) == 1:
-            return str(exact[0]["id"])
+            peer_id = str(exact[0]["id"])
+            _assert_peer_belongs_to_interface(
+                peer_id, iface_id, interface_label=interface, conn=conn
+            )
+            return peer_id
         if len(exact) > 1:
             raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, exact))
 
@@ -101,7 +158,11 @@ def resolve_peer_ref(
     if not matches:
         raise PeerNotFoundError(f"Peer {ref} not found")
     if len(matches) == 1:
-        return str(matches[0]["id"])
+        peer_id = str(matches[0]["id"])
+        _assert_peer_belongs_to_interface(
+            peer_id, iface_id, interface_label=interface, conn=conn
+        )
+        return peer_id
     raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, matches))
 
 

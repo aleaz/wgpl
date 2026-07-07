@@ -20,6 +20,7 @@ Business invariants live in `integrity.py` and `wireformat.py` (called from `cor
 ## Peer lifecycle and IP allocation
 
 - `_is_peer_active()` delegates to `integrity.is_peer_active()` — SSOT for whether a peer occupies resources (not soft-deleted and not expired).
+- `integrity.is_peer_deleted()` is SSOT for soft-delete (`deleted_at` non-null and non-empty).
 - Corrupt `expires_at` values treat the peer as **inactive**; `validate_state` reports `corrupt_expires_at` (no CLI crash).
 - **Activation gate** (`integrity.assert_peer_activation`): every transition to active (`add_peer`, `update_peer` with future `--expires` or `--clear-expires`) validates IP in pool, wire-safe keys, valid name, and no active IP/name collision.
 - IP pool reservation (`_pool_used_ips`, `allocate_peer_ip`) MUST use `_is_peer_active()`, not `deleted_at IS NULL` alone.
@@ -33,15 +34,17 @@ Business invariants live in `integrity.py` and `wireformat.py` (called from `cor
 
 ## Wireformat and export boundaries
 
-- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) goes through `wireformat` builders with wire-safe validation before emission.
+- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) enters emit gates in `core.py`: `assert_database_valid()` → `integrity.assert_exportable_*()` → `wireformat` (formatting only; no business validation).
 - `allowed_ips` is validated in `core.validate_allowed_ips()` (shared with CLI).
-- `sync_interface` / `apply` calls `assert_database_valid()` before `wg syncconf` — fail-closed.
+- `wireformat` MUST NOT interpolate DB values without prior `assert_exportable_*` validation in the emit gate.
 
 ## Schema contract and restore
 
-- `db.init_db()` sets `PRAGMA user_version` and calls `enforce_audit_immutability()` (DROP + CREATE triggers, never `IF NOT EXISTS` for security triggers).
-- `assert_schema_contract()` validates an **exact** schema: allowed tables, required indexes (custom indexes rejected; `sqlite_autoindex_*` allowed), exact audit triggers, no views, and supported schema version on restore.
-- `restore_database()` runs `validate_state()` plus `integrity.validate_database(full=True)` before swapping the live DB.
+- `db.init_db()` sets `PRAGMA user_version`, normalizes `deleted_at=''` to NULL, and calls `enforce_audit_immutability()` (DROP + CREATE triggers, never `IF NOT EXISTS` for security triggers).
+- Live DB opens call `assert_trusted_connection()`: exact schema objects plus audit trigger body verification (fail-closed).
+- `assert_schema_contract()` validates an **exact** schema on restore backups (objects only; `init_db()` reinstalls trigger bodies).
+- `restore_database()` runs `validate_state()` plus `integrity.validate_database(full=True)` before swapping the live DB; re-validates immediately before `os.replace`.
+- `wgpl db doctor` diagnoses schema/consistency issues; `wgpl db doctor --repair` reinstalls triggers and normalizes `deleted_at`.
 
 ## Database path opener
 
@@ -50,8 +53,10 @@ Business invariants live in `integrity.py` and `wireformat.py` (called from `cor
 
 ## Peer reference resolution
 
-- `resolve_peer_ref()` uses `PeerResolvePolicy`: `EXPORT_SECRET` (active only, requires `interface_ref` when >1 interface), `MUTATE_INACTIVE` (expired/soft-deleted), `READ_ONLY` (active only, default).
-- `get_peer_config` / `get_peer_qr*` use `EXPORT_SECRET`; CLI delegates — rules live in `core` for wrappers.
+- `resolve_peer_ref()` uses `PeerAccess`: `READ_PUBLIC` (active only), `READ_SENSITIVE` (includes inactive; requires `interface` when >1 interface), `EXPORT_SECRET` (active only; requires `interface` when >1 interface), `MUTATE` (includes inactive).
+- `PeerResolvePolicy` remains as backward-compatible aliases mapping to `PeerAccess`.
+- Post-resolve binding: when `interface` is specified, verify `peer.interface_id` matches — no cross-interface fallbacks.
+- `get_peer_config` / `get_peer_qr*` use `EXPORT_SECRET`; `peer show --show-secrets` and `peer history` use `READ_SENSITIVE`.
 
 ## Audit log
 

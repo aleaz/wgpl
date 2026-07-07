@@ -67,7 +67,7 @@ def _reclaim_inactive_peer_slots(
     if ip is None and name is None:
         return
     for peer in db.list_peers(iface_id, conn=conn):
-        if integrity.is_peer_active(peer) or peer["deleted_at"] is not None:
+        if integrity.is_peer_active(peer) or integrity.is_peer_deleted(peer):
             continue
         blocks_ip = ip is not None and peer["ip_address"] == ip
         blocks_name = name is not None and peer["name"] == name

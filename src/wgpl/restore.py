@@ -114,8 +114,8 @@ def restore_database(source_path: str) -> list[str]:
     try:
         os.environ["WGPL_DB_PATH"] = tmp_path
         try:
-            _validate_restored_data()
             db.init_db()
+            _validate_restored_data()
         except BaseException:
             _cleanup_tmp_files(tmp_path)
             raise
@@ -157,7 +157,22 @@ def restore_database(source_path: str) -> list[str]:
                     except OSError:
                         pass
 
-        os.rename(tmp_path, db_path)
+        saved_revalidate = os.environ.get("WGPL_DB_PATH")
+        os.environ["WGPL_DB_PATH"] = tmp_path
+        try:
+            pre_conn = dbpath.open_existing_database(tmp_path)
+            try:
+                db.assert_trusted_connection(pre_conn)
+            finally:
+                pre_conn.close()
+            _validate_restored_data()
+        finally:
+            if saved_revalidate is None:
+                os.environ.pop("WGPL_DB_PATH", None)
+            else:
+                os.environ["WGPL_DB_PATH"] = saved_revalidate
+
+        os.replace(tmp_path, db_path)
         os.chmod(db_path, 0o600)
     except Exception:
         _cleanup_tmp_files(tmp_path)

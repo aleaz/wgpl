@@ -58,9 +58,14 @@ def _normalize_db_path(db_path: str) -> str:
     return dbpath.normalize_db_path(db_path)
 
 
+_SCHEMA_CONTRACT_MSG = (
+    "Database failed schema contract. "
+    "Restore from backup or run 'wgpl db doctor' for diagnosis."
+)
+
 _SCHEMA_CORRUPT_MSG = (
     "Database schema is invalid or corrupted. "
-    "Run 'wgpl db restore' from a backup or remove the file and re-init."
+    "Run 'wgpl db restore' from a backup or 'wgpl db doctor'."
 )
 
 SCHEMA_USER_VERSION = 1
@@ -90,28 +95,67 @@ def enforce_audit_immutability(conn: sqlite3.Connection) -> None:
     """Recreate audit immutability triggers (never IF NOT EXISTS)."""
     conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_update")
     conn.execute("DROP TRIGGER IF EXISTS trg_audit_immutable_delete")
-    conn.execute(
-        """
+    conn.execute(_AUDIT_TRIGGER_UPDATE_BODY)
+    conn.execute(_AUDIT_TRIGGER_DELETE_BODY)
+
+
+_AUDIT_TRIGGER_UPDATE_BODY = """
         CREATE TRIGGER trg_audit_immutable_update
         BEFORE UPDATE ON audit_events
         BEGIN
             SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be updated');
         END;
         """
-    )
-    conn.execute(
-        """
+
+_AUDIT_TRIGGER_DELETE_BODY = """
         CREATE TRIGGER trg_audit_immutable_delete
         BEFORE DELETE ON audit_events
         BEGIN
             SELECT RAISE(ABORT, 'audit_events is an append-only log and cannot be deleted');
         END;
         """
-    )
+
+_EXPECTED_TRIGGER_SQL = {
+    "trg_audit_immutable_update": _AUDIT_TRIGGER_UPDATE_BODY,
+    "trg_audit_immutable_delete": _AUDIT_TRIGGER_DELETE_BODY,
+}
+
+
+def _normalize_trigger_sql(sql: str) -> str:
+    normalized = " ".join(sql.split())
+    return normalized.rstrip(";")
+
+
+def _is_database_initialized(conn: sqlite3.Connection) -> bool:
+    return "interfaces" in _schema_objects(conn, "table")
+
+
+def _assert_trigger_bodies(conn: sqlite3.Connection) -> None:
+    for name, expected_body in _EXPECTED_TRIGGER_SQL.items():
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+            (name,),
+        ).fetchone()
+        if not row or not row[0]:
+            raise WgplException(f"{_SCHEMA_CONTRACT_MSG} Missing trigger body: {name}")
+        actual = _normalize_trigger_sql(str(row[0]))
+        expected = _normalize_trigger_sql(expected_body.strip())
+        if actual != expected:
+            raise WgplException(
+                f"{_SCHEMA_CONTRACT_MSG} Trigger {name} body does not match contract."
+            )
+
+
+def assert_trusted_connection(conn: sqlite3.Connection) -> None:
+    """Validate schema contract and trigger bodies on an open connection."""
+    if not _is_database_initialized(conn):
+        return
+    _assert_schema_contract_conn(conn)
+    _assert_trigger_bodies(conn)
 
 
 def assert_schema_contract(path: str) -> None:
-    """Verify a database file satisfies the WGPL schema contract."""
+    """Verify a database file satisfies the WGPL schema object contract."""
     conn = dbpath.open_existing_database(path)
     try:
         _assert_schema_contract_conn(conn)
@@ -140,14 +184,13 @@ def _assert_exact_schema_objects(
     missing = allowed - present
     if missing:
         raise WgplException(
-            f"Restored database is missing required {label}: "
+            f"{_SCHEMA_CONTRACT_MSG} Missing required {label}: "
             f"{', '.join(sorted(missing))}"
         )
     extra = present - allowed
     if extra:
         raise WgplException(
-            f"Restored database contains unauthorized {label}: "
-            f"{', '.join(sorted(extra))}"
+            f"{_SCHEMA_CONTRACT_MSG} Unauthorized {label}: {', '.join(sorted(extra))}"
         )
 
 
@@ -156,16 +199,14 @@ def _assert_index_contract(conn: sqlite3.Connection) -> None:
     missing = _REQUIRED_INDEXES - present
     if missing:
         raise WgplException(
-            "Restored database is missing required indexes: "
+            f"{_SCHEMA_CONTRACT_MSG} Missing required indexes: "
             f"{', '.join(sorted(missing))}"
         )
     extra = present - _REQUIRED_INDEXES
-    unauthorized = {
-        name for name in extra if not name.startswith("sqlite_autoindex_")
-    }
+    unauthorized = {name for name in extra if not name.startswith("sqlite_autoindex_")}
     if unauthorized:
         raise WgplException(
-            "Restored database contains unauthorized indexes: "
+            f"{_SCHEMA_CONTRACT_MSG} Unauthorized indexes: "
             f"{', '.join(sorted(unauthorized))}"
         )
 
@@ -175,7 +216,7 @@ def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
     version = int(user_version[0]) if user_version else 0
     if version not in _SUPPORTED_SCHEMA_VERSIONS:
         raise WgplException(
-            f"Restored database has unsupported schema version {version} "
+            f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version {version} "
             f"(supported: {sorted(_SUPPORTED_SCHEMA_VERSIONS)})"
         )
 
@@ -199,9 +240,12 @@ def _run_query(
         raise WgplException(f"{_SCHEMA_CORRUPT_MSG} ({e})") from e
 
 
-def _create_connection() -> sqlite3.Connection:
+def _create_connection(*, verify: bool = True) -> sqlite3.Connection:
     """Creates a secure, atomic connection to the SQLite database."""
-    return dbpath.open_database(get_db_path(), create=True, exclusive_create=True)
+    conn = dbpath.open_database(get_db_path(), create=True, exclusive_create=True)
+    if verify:
+        assert_trusted_connection(conn)
+    return conn
 
 
 @contextmanager
@@ -234,9 +278,9 @@ def _ensure_conn(
 
 
 @contextmanager
-def transaction() -> Generator[sqlite3.Connection, None, None]:
+def transaction(*, verify: bool = True) -> Generator[sqlite3.Connection, None, None]:
     """Provides an exclusive transaction context for multiple operations."""
-    conn = _create_connection()
+    conn = _create_connection(verify=verify)
     try:
         # Prevent concurrent writes entirely
         conn.execute("BEGIN EXCLUSIVE TRANSACTION")
@@ -274,7 +318,8 @@ def init_db(path: str | None = None) -> None:
 
     db_path = get_db_path()
 
-    with get_db() as conn:
+    conn = dbpath.open_database(db_path, create=True, exclusive_create=False)
+    try:
         try:
             conn.execute(
                 """
@@ -360,12 +405,15 @@ def init_db(path: str | None = None) -> None:
             """
             )
             enforce_audit_immutability(conn)
+            conn.execute("UPDATE peers SET deleted_at = NULL WHERE deleted_at = ''")
             conn.execute(f"PRAGMA user_version = {SCHEMA_USER_VERSION}")
             conn.commit()
         except sqlite3.Error as e:
             raise WgplException(
                 f"Failed to initialize database at {db_path}: {e}"
             ) from e
+    finally:
+        conn.close()
 
     if os.path.exists(db_path):
         os.chmod(db_path, 0o600)
@@ -609,21 +657,106 @@ def find_peers_by_id_prefix(
 
 def find_deleted_peer_id_from_audit(
     prefix: str,
+    interface_id: int | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> list[str]:
     """Find a peer's full UUID from the audit logs using its hex prefix."""
     like_pattern = f"{prefix}%"
     with _ensure_conn(conn) as c:
-        cursor = _run_query(
-            c,
-            """
-            SELECT DISTINCT entity_id FROM audit_events
-            WHERE entity_type = 'peer'
-              AND REPLACE(LOWER(entity_id), '-', '') LIKE ?
-            """,
-            (like_pattern,),
-        )
+        if interface_id is not None:
+            cursor = _run_query(
+                c,
+                """
+                SELECT DISTINCT entity_id FROM audit_events
+                WHERE entity_type = 'peer'
+                  AND interface = ?
+                  AND REPLACE(LOWER(entity_id), '-', '') LIKE ?
+                """,
+                (str(interface_id), like_pattern),
+            )
+        else:
+            cursor = _run_query(
+                c,
+                """
+                SELECT DISTINCT entity_id FROM audit_events
+                WHERE entity_type = 'peer'
+                  AND REPLACE(LOWER(entity_id), '-', '') LIKE ?
+                """,
+                (like_pattern,),
+            )
         return [row["entity_id"] for row in cursor.fetchall()]
+
+
+def diagnose_database(
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, str | None]]:
+    """Return structural and consistency issues without mutating the database."""
+    from .consistency import validate_state
+
+    issues: list[dict[str, str | None]] = []
+    with _ensure_conn(conn) as c:
+        if not _is_database_initialized(c):
+            return issues
+        try:
+            _assert_schema_contract_conn(c)
+        except WgplException as exc:
+            issues.append(
+                {
+                    "interface": None,
+                    "peer": None,
+                    "code": "schema_contract",
+                    "detail": str(exc),
+                }
+            )
+        try:
+            _assert_trigger_bodies(c)
+        except WgplException as exc:
+            issues.append(
+                {
+                    "interface": None,
+                    "peer": None,
+                    "code": "trigger_bodies",
+                    "detail": str(exc),
+                }
+            )
+        for row in c.execute(
+            "SELECT id, name FROM peers WHERE deleted_at = ''"
+        ).fetchall():
+            issues.append(
+                {
+                    "interface": None,
+                    "peer": str(row["name"]),
+                    "code": "empty_deleted_at",
+                    "detail": f"Peer {row['name']} has deleted_at='' (should be NULL)",
+                }
+            )
+    result = validate_state()
+    if result["status"] != "ok":
+        issues.extend(result["issues"])  # type: ignore[arg-type]
+    return issues
+
+
+def repair_database(
+    conn: sqlite3.Connection | None = None,
+) -> list[str]:
+    """Apply documented repairs: normalize deleted_at and reinstall audit triggers."""
+    actions: list[str] = []
+
+    def _repair(c: sqlite3.Connection) -> None:
+        cursor = c.execute("UPDATE peers SET deleted_at = NULL WHERE deleted_at = ''")
+        if cursor.rowcount:
+            actions.append(f"Normalized deleted_at for {cursor.rowcount} peer row(s)")
+        enforce_audit_immutability(c)
+
+    if conn is not None:
+        _repair(conn)
+        conn.commit()
+    else:
+        with transaction(verify=False) as c:
+            _repair(c)
+    if not actions:
+        actions.append("Reinstalled audit immutability triggers")
+    return actions
 
 
 def list_peers(

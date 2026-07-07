@@ -6,18 +6,17 @@ import json
 import os
 import re
 import sqlite3
-import uuid
 from typing import Any
 
 from . import db
 from .refs import (
-    PeerResolvePolicy,
-    _PEER_ID_HEX_LEN,
+    PeerAccess,
+    _MIN_PEER_ID_PREFIX_LEN,
     _normalize_peer_ref,
     resolve_interface_ref,
     resolve_peer_ref,
 )
-from .exceptions import PeerNotFoundError
+from .exceptions import AmbiguousPeerIdError, PeerNotFoundError
 
 _MAX_EXEC_CMD_LEN = 2_048
 
@@ -113,25 +112,37 @@ def list_peer_audit_history(
     """Return audit events for a peer (full UUID or unique prefix)."""
     try:
         canonical_id = resolve_peer_ref(
-            peer_ref, interface, policy=PeerResolvePolicy.MUTATE_INACTIVE
+            peer_ref, interface, access=PeerAccess.READ_SENSITIVE
         )
     except PeerNotFoundError:
         normalized = _normalize_peer_ref(peer_ref)
-        if len(normalized) != _PEER_ID_HEX_LEN:
-            matches = db.find_deleted_peer_id_from_audit(normalized)
-            if not matches:
-                raise PeerNotFoundError(
-                    f"Peer {peer_ref} not found in current peers or audit history"
-                )
-            if len(matches) > 1:
-                from wgpl.exceptions import AmbiguousPeerIdError
-
-                raise AmbiguousPeerIdError(
-                    f"Peer ID prefix '{peer_ref}' is ambiguous in audit history"
-                )
-            canonical_id = matches[0]
+        if len(normalized) < _MIN_PEER_ID_PREFIX_LEN:
+            raise PeerNotFoundError(
+                f"Peer {peer_ref} not found in current peers or audit history"
+            ) from None
+        iface_id: int | None = None
+        if interface is not None:
+            iface_id = resolve_interface_ref(interface)
         else:
-            canonical_id = str(uuid.UUID(hex=normalized))
+            interfaces = db.list_interfaces()
+            if len(interfaces) == 1:
+                iface_id = int(interfaces[0]["id"])
+            elif len(interfaces) > 1:
+                raise PeerNotFoundError(
+                    f"Peer {peer_ref} not found; specify interface for audit lookup"
+                )
+        matches = db.find_deleted_peer_id_from_audit(
+            normalized, iface_id if iface_id is not None else None
+        )
+        if not matches:
+            raise PeerNotFoundError(
+                f"Peer {peer_ref} not found in current peers or audit history"
+            )
+        if len(matches) > 1:
+            raise AmbiguousPeerIdError(
+                f"Peer ID prefix '{peer_ref}' is ambiguous in audit history"
+            )
+        canonical_id = matches[0]
     rows = db.list_audit_events(
         entity_type=db.AuditEntityType.PEER,
         entity_id=canonical_id,

@@ -134,9 +134,7 @@ def test_restore_rejects_missing_schema(wgpl_db: str, tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    with pytest.raises(
-        WgplException, match="Restored database is missing required tables"
-    ):
+    with pytest.raises(WgplException, match="Missing required tables"):
         core.restore_database(bad_path)
 
 
@@ -227,13 +225,13 @@ def test_restore_rename_failure_preserves_live_db(
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])
 
-    def fail_rename(src: str, dst: str) -> None:
+    def fail_replace(src: str, dst: str) -> None:
         if src.endswith(".tmp"):
-            raise OSError("rename blocked")
+            raise OSError("replace blocked")
 
-    monkeypatch.setattr(os, "rename", fail_rename)
+    monkeypatch.setattr(os, "replace", fail_replace)
 
-    with pytest.raises(OSError, match="rename blocked"):
+    with pytest.raises(OSError, match="replace blocked"):
         core.restore_database(valid_backup_path)
 
     restored_peer = db.get_peer(peer_id)

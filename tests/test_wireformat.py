@@ -102,3 +102,73 @@ def test_get_peer_config_rejects_invalid_keepalive(wg0_interface: str) -> None:
 
     with pytest.raises(WgplException, match="keepalive must be between"):
         core.get_peer_config(peer["id"])
+
+
+def test_get_interface_config_rejects_newline_in_ip_address(
+    wg0_interface: str,
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?",
+            ("10.0.0.2\nINJECT", peer_id),
+        )
+        conn.commit()
+
+    with pytest.raises(WgplException, match="unsafe control characters"):
+        core.get_interface_config(wg0_interface)
+
+
+def test_get_peer_config_rejects_newline_in_ip_address(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?",
+            ("10.0.0.2\nINJECT", peer_id),
+        )
+        conn.commit()
+
+    with pytest.raises(WgplException, match="unsafe control characters"):
+        core.get_peer_config(peer_id)
+
+
+def test_get_peer_config_rejects_newline_in_private_key(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET private_key = ? WHERE id = ?",
+            ("AAAA\nINJECT", peer_id),
+        )
+        conn.commit()
+
+    with pytest.raises(WgplException, match="unsafe control characters"):
+        core.get_peer_config(peer_id)
+
+
+@patch("wgpl.core.wireguard.syncconf")
+def test_interface_export_fails_like_apply_on_tampered_db(
+    mock_syncconf: MagicMock, wg0_interface: str
+) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?",
+            ("10.0.0.2\nINJECT", peer_id),
+        )
+        conn.commit()
+
+    with pytest.raises(WgplException, match="unsafe control characters"):
+        core.get_interface_config(wg0_interface)
+
+    with pytest.raises(WgplException, match="Database validation failed"):
+        core.sync_interface(wg0_interface)
+
+    mock_syncconf.assert_not_called()

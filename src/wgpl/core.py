@@ -22,6 +22,7 @@ from .audit import (
 )
 from .ipam import _reclaim_inactive_peer_slots, allocate_peer_ip
 from .refs import (
+    PeerAccess,
     PeerResolvePolicy,
     get_interface_by_ref,
     resolve_interface_ref,
@@ -57,13 +58,16 @@ def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
     except WgplException as exc:
         raise ValueError(str(exc)) from exc
 
+
 __all__ = [
+    "PeerAccess",
     "PeerResolvePolicy",
     "add_interface",
     "add_peer",
     "allocate_peer_ip",
     "assert_database_valid",
     "audit_event_to_dict",
+    "diagnose_database",
     "dump_database",
     "ensure_database",
     "get_effective_dns",
@@ -82,6 +86,7 @@ __all__ = [
     "prune_peers",
     "remove_interface",
     "remove_peer",
+    "repair_database",
     "resolve_interface_ref",
     "resolve_peer_ref",
     "restore_database",
@@ -320,6 +325,16 @@ def ensure_database() -> None:
     db.init_db()
 
 
+def diagnose_database() -> list[dict[str, str | None]]:
+    """Return structural and consistency issues for the live database."""
+    return db.diagnose_database()
+
+
+def repair_database() -> list[str]:
+    """Apply documented database repairs (triggers, deleted_at normalization)."""
+    return db.repair_database()
+
+
 def list_interfaces() -> list[dict[str, Any]]:
     """Return all interfaces as plain dicts."""
     return [dict(row) for row in db.list_interfaces()]
@@ -537,6 +552,55 @@ def prune_peers(interface_ref: str) -> int:
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
 
+def _emit_server_config(interface_ref: str) -> str:
+    """Emit server syncconf after consistency preflight and export validation."""
+    assert_database_valid(interface_ref)
+    iface_id = resolve_interface_ref(interface_ref)
+    iface = db.get_interface(iface_id)
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
+
+    integrity.assert_exportable_interface(iface)
+    peers = db.list_peers(iface_id)
+    for peer in peers:
+        if integrity.is_peer_active(peer):
+            integrity.assert_exportable_peer(peer, iface, mode="server")
+
+    return wireformat.build_server_config(iface, peers)
+
+
+def _emit_client_config(
+    peer_id: str,
+    allowed_ips: str,
+    *,
+    interface_ref: str | None = None,
+) -> str:
+    """Emit client config after resolve, preflight, and export validation."""
+    canonical_id = resolve_peer_ref(
+        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
+    )
+    peer = db.get_peer(canonical_id)
+    if not peer:
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+    if not integrity.is_peer_active(peer):
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    iface = db.get_interface(peer["interface_id"])
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
+
+    iface_ref = interface_ref if interface_ref is not None else str(iface["id"])
+    assert_database_valid(iface_ref)
+
+    peer = db.get_peer(canonical_id)
+    if not peer or not integrity.is_peer_active(peer):
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    integrity.assert_exportable_interface(iface)
+    integrity.assert_exportable_peer(peer, iface, mode="client")
+    return wireformat.build_client_config(peer, iface, allowed_ips)
+
+
 def get_peer_config(
     peer_id: str,
     allowed_ips: str = "0.0.0.0/0",
@@ -544,18 +608,7 @@ def get_peer_config(
     interface_ref: str | None = None,
 ) -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
-    canonical_id = resolve_peer_ref(
-        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
-    )
-    peer = db.get_peer(canonical_id)
-    if not peer:
-        raise PeerNotFoundError(f"Peer {peer_id} not found")
-
-    iface = db.get_interface(peer["interface_id"])
-    if not iface:
-        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
-
-    return wireformat.build_client_config(peer, iface, allowed_ips)
+    return _emit_client_config(peer_id, allowed_ips, interface_ref=interface_ref)
 
 
 def get_peer_qr(
@@ -602,24 +655,17 @@ def get_peer_qr_png_bytes(
 
 def get_interface_config(interface_ref: str) -> str:
     """Generates the declarative config string for the server interface."""
-    iface_id = resolve_interface_ref(interface_ref)
-    iface = db.get_interface(iface_id)
-    if not iface:
-        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
-
-    peers = db.list_peers(iface_id)
-    return wireformat.build_server_config(iface, peers)
+    return _emit_server_config(interface_ref)
 
 
 def sync_interface(interface_ref: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
-    assert_database_valid(interface_ref)
     iface_id = resolve_interface_ref(interface_ref)
     iface = db.get_interface(iface_id)
     if not iface:
         raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
     name = str(iface["name"])
-    conf_content = get_interface_config(str(iface_id))
+    conf_content = _emit_server_config(interface_ref)
     wireguard.syncconf(name, conf_content)
 
 
@@ -944,12 +990,20 @@ def update_peer(
             prospective_peer["ip_address"] = str(validated_ip)
         if normalized_expires is not UNSET:
             prospective_peer["expires_at"] = normalized_expires
-        integrity.assert_peer_activation(
-            prospective_peer,
-            iface,
-            conn=conn,
-            exclude_peer_id=canonical_id,
-        )
+        if integrity.is_peer_active(prospective_peer):
+            integrity.assert_peer_activation(
+                prospective_peer,
+                iface,
+                conn=conn,
+                exclude_peer_id=canonical_id,
+            )
+        elif ip_address is not None or name is not None:
+            integrity.assert_peer_slot_invariants(
+                prospective_peer,
+                iface,
+                conn=conn,
+                exclude_peer_id=canonical_id,
+            )
 
         try:
             db.update_peer(

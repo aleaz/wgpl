@@ -32,7 +32,7 @@ cli.py (Typer / presentation)
 1. **Mutations** (`peer add`, `peer remove`, etc.) update SQLite inside `BEGIN EXCLUSIVE`
    transactions. Audit events append in the same transaction.
 2. **No automatic WireGuard sync** on mutation — by design.
-3. **Apply** (`wgpl apply`) runs `validate_state` then `wg syncconf` (fail-closed).
+3. **Apply** (`wgpl apply`) and all config export paths (`interface export`, `peer config`) enter a single **emit gate** in `core.py`: `assert_database_valid` → `integrity.assert_exportable_*` → `wireformat` (formatting only).
 4. **Remote apply**: `wgpl interface export | ssh host wg syncconf iface /dev/stdin`.
 
 ## Peer lifecycle
@@ -51,15 +51,18 @@ A peer is **active** when it is not soft-deleted and not expired
 | Database file | `dbpath`: `O_NOFOLLOW`, fd connect, `chmod 600`, reject symlinks |
 | Key generation | X25519 + `os.urandom` in Python memory |
 | Subprocess | Argument lists only; `WGPL_WG_BIN` ignored when UID 0 |
-| Export | `wireformat` validates wire-safe fields before emission |
+| Export | Emit gate in `core.py`; `integrity.assert_exportable_*` SSOT; `wireformat` formats only |
+| Schema on open | Every live DB connection validates exact schema + audit trigger bodies (fail-closed) |
+| Peer access | `PeerAccess` in `refs.py` (READ_PUBLIC, READ_SENSITIVE, EXPORT_SECRET, MUTATE) |
 | Restore | Untrusted input: schema contract (tables, indexes, triggers, version), full wire validation, trigger reinstall |
 | Secrets in JSON | `peer list --json` / `peer show --json` omit private keys and PSK |
-| Multi-interface export | `peer config` / `peer qr` require `-i` when >1 interface |
+| Multi-interface secrets | `peer show --show-secrets`, `peer config`, `peer qr`, and scoped audit history require `-i` when >1 interface |
 
 ## Schema (v1)
 
 Tables: `interfaces`, `peers`, `audit_events`. Append-only audit enforced by SQLite
 triggers recreated on every `init_db()` (never `IF NOT EXISTS` for security triggers).
+Weakened or extra triggers are **detected on every live DB open**; `wgpl db doctor` diagnoses issues and `wgpl db doctor --repair` reinstalls triggers and normalizes `deleted_at`.
 
 ## Scope limits
 

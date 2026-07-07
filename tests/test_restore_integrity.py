@@ -84,7 +84,7 @@ def test_restore_rejects_unsupported_schema_version(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="unsupported schema version"):
+    with pytest.raises(WgplException, match="Unsupported schema version"):
         core.restore_database(backup)
 
 
@@ -102,13 +102,11 @@ def test_restore_rejects_missing_audit_triggers(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="missing required triggers"):
+    with pytest.raises(WgplException, match="Missing required triggers"):
         core.restore_database(backup)
 
 
-def test_restore_rejects_extra_index(
-    wg0_interface: str, tmp_path: Path
-) -> None:
+def test_restore_rejects_extra_index(wg0_interface: str, tmp_path: Path) -> None:
     backup = str(tmp_path / "backup.db")
     core.dump_database(backup)
 
@@ -119,13 +117,11 @@ def test_restore_rejects_extra_index(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="unauthorized indexes"):
+    with pytest.raises(WgplException, match="Unauthorized indexes"):
         core.restore_database(backup)
 
 
-def test_restore_rejects_extra_trigger(
-    wg0_interface: str, tmp_path: Path
-) -> None:
+def test_restore_rejects_extra_trigger(wg0_interface: str, tmp_path: Path) -> None:
     backup = str(tmp_path / "backup.db")
     core.dump_database(backup)
 
@@ -144,13 +140,11 @@ def test_restore_rejects_extra_trigger(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="unauthorized triggers"):
+    with pytest.raises(WgplException, match="Unauthorized triggers"):
         core.restore_database(backup)
 
 
-def test_restore_rejects_extra_table(
-    wg0_interface: str, tmp_path: Path
-) -> None:
+def test_restore_rejects_extra_table(wg0_interface: str, tmp_path: Path) -> None:
     backup = str(tmp_path / "backup.db")
     core.dump_database(backup)
 
@@ -161,13 +155,11 @@ def test_restore_rejects_extra_table(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="unauthorized tables"):
+    with pytest.raises(WgplException, match="Unauthorized tables"):
         core.restore_database(backup)
 
 
-def test_restore_rejects_extra_view(
-    wg0_interface: str, tmp_path: Path
-) -> None:
+def test_restore_rejects_extra_view(wg0_interface: str, tmp_path: Path) -> None:
     backup = str(tmp_path / "backup.db")
     core.dump_database(backup)
 
@@ -178,13 +170,11 @@ def test_restore_rejects_extra_view(
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="unauthorized views"):
+    with pytest.raises(WgplException, match="Unauthorized views"):
         core.restore_database(backup)
 
 
-def test_restore_rejects_invalid_mtu(
-    wg0_interface: str, tmp_path: Path
-) -> None:
+def test_restore_rejects_invalid_mtu(wg0_interface: str, tmp_path: Path) -> None:
     backup = str(tmp_path / "backup.db")
     core.dump_database(backup)
 

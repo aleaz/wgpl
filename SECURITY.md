@@ -38,7 +38,7 @@ Out of scope:
 - Never commit `*.db` or `*.sqlite3` files to version control.
 - `wgpl peer list --json` returns only public fields; use `wgpl peer config <id>` (full UUID or unique short prefix from `peer list`) when a client private key is required.
 - `wgpl peer show --json` returns the same redacted fields as `peer list --json` (no private keys). Human output hides the preshared key by default; use `--show-secrets` to display it, or `peer config` / `peer qr` for full client export.
-- When the database contains **more than one interface**, `peer config` and `peer qr` require `--interface` / `-i` even if the peer ID is globally unique. This prevents accidental secret export from the wrong VPN.
+- When the database contains **more than one interface**, `peer show --show-secrets`, `peer config`, and `peer qr` require `--interface` / `-i` even if the peer ID is globally unique. This prevents accidental secret export from the wrong VPN.
 - QR PNG files from `wgpl peer qr -o` encode the full client config (including private keys). WGPL sets `chmod 600` on the output file; do not commit or share QR images in public channels.
 - `wgpl apply` requires an existing WireGuard interface in the kernel; WGPL does not create network interfaces.
 
@@ -51,8 +51,8 @@ Out of scope:
 
 ## Export and apply boundaries
 
-- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) passes through the **wireformat** boundary: fields with control characters, invalid Base64 keys, or out-of-range MTU (1280–65535) / keepalive (0–65535) are rejected before emission.
-- `wgpl apply` runs a database consistency preflight (`validate_state`, including interface wire fields) and aborts before `wg syncconf` if active peers or interfaces are invalid.
+- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) enters a single **emit gate** in `core.py`: database consistency preflight (`validate_state`), then `integrity.assert_exportable_*` (SSOT for every interpolated field), then `wireformat` (formatting only). Export and apply share the same preflight — tampered rows cannot reach the kernel via export alone.
+- `wgpl apply` aborts before `wg syncconf` if active peers or interfaces are invalid.
 - Mutations update the SQLite SSOT only. The kernel may remain stale until you run `wgpl apply` (or `interface export | ssh … wg syncconf`). Treat post-mutation `apply` as part of your operational checklist.
 
 ## Restore integrity
@@ -62,7 +62,8 @@ Out of scope:
   - Supported `PRAGMA user_version` only.
   - Row-level validation (`validate_state` plus full wire-format scan of every peer/interface row).
   - `enforce_audit_immutability()` recreates append-only audit triggers (no `IF NOT EXISTS` bypass).
-- Malformed keys, unauthorized schema objects, or weakened audit triggers in a backup are rejected before the live database is replaced.
+- Malformed keys, unauthorized schema objects, or weakened audit triggers in a backup are rejected before the live database is replaced. The live database is re-validated immediately before atomic swap (`os.replace`).
+- **Live schema trust**: every CLI command validates the exact schema contract and audit trigger bodies on DB open (fail-closed). Use `wgpl db doctor` to list issues; `wgpl db doctor --repair` reinstalls audit triggers and normalizes empty `deleted_at` values.
 - `wgpl peer qr -o` and `wgpl db dump -o` create output via `O_NOFOLLOW` and `O_EXCL` at mode `0600`.
 - `wg` is resolved from a fixed allowlist (`/usr/bin/wg`, `/bin/wg`, `/usr/local/bin/wg`); root ignores `WGPL_WG_BIN`. Non-root may set `WGPL_WG_BIN` to a trusted regular file (re-validated before each invocation).
 

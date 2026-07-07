@@ -8,7 +8,7 @@ import ipaddress
 import re
 import sqlite3
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from . import db
 from .exceptions import (
@@ -17,6 +17,8 @@ from .exceptions import (
     PeersOutsidePoolError,
     WgplException,
 )
+
+ExportMode = Literal["server", "client"]
 
 _PEER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 _WIRE_MTU_MIN = 1280
@@ -38,9 +40,19 @@ def _parse_expires_at(value: str) -> datetime.datetime:
     return parsed
 
 
+def is_peer_deleted(peer: sqlite3.Row | Mapping[str, object]) -> bool:
+    """Return True when deleted_at is set to a non-empty timestamp."""
+    if "deleted_at" not in _peer_keys(peer):
+        return False
+    deleted_at = peer["deleted_at"]
+    if deleted_at is None:
+        return False
+    return str(deleted_at).strip() != ""
+
+
 def is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
     """Return True if the peer is not soft-deleted and not expired."""
-    if "deleted_at" in _peer_keys(peer) and peer["deleted_at"] is not None:
+    if is_peer_deleted(peer):
         return False
     expires_at_str = peer["expires_at"] if "expires_at" in _peer_keys(peer) else None
     if expires_at_str is not None:
@@ -55,7 +67,7 @@ def is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
 
 def corrupt_expires_at(peer: sqlite3.Row | Mapping[str, object]) -> bool:
     """Return True when expires_at is set but not a valid ISO timestamp."""
-    if "deleted_at" in _peer_keys(peer) and peer["deleted_at"] is not None:
+    if is_peer_deleted(peer):
         return False
     expires_at_str = peer["expires_at"] if "expires_at" in _peer_keys(peer) else None
     if expires_at_str is None:
@@ -156,12 +168,76 @@ def validate_wire_public_key(key: str) -> None:
         raise WgplException("public_key must be valid Base64") from exc
 
 
+def validate_wire_private_key(key: str) -> None:
+    """Validate private key format for client configuration export."""
+    validate_wire_safe_text(key, "private_key")
+    try:
+        decoded = base64.b64decode(key.encode("utf-8"), validate=True)
+        if len(decoded) != 32:
+            raise WgplException(
+                "private_key must decode to exactly 32 bytes for WireGuard"
+            )
+    except WgplException:
+        raise
+    except Exception as exc:
+        raise WgplException("private_key must be valid Base64") from exc
+
+
+def _parse_interface_network(
+    iface: sqlite3.Row | Mapping[str, object],
+) -> ipaddress.IPv4Network:
+    pool = str(iface["address_pool"])
+    try:
+        return ipaddress.IPv4Network(pool, strict=False)
+    except ValueError as exc:
+        raise WgplException(f"Invalid address pool '{pool}'") from exc
+
+
+def assert_exportable_interface(iface: sqlite3.Row | Mapping[str, object]) -> None:
+    """Validate all interface fields required for WireGuard export."""
+    validate_wire_interface_fields(iface)
+    _parse_interface_network(iface)
+
+
+def assert_exportable_peer(
+    peer: sqlite3.Row | Mapping[str, object],
+    iface: sqlite3.Row | Mapping[str, object],
+    *,
+    mode: ExportMode,
+) -> None:
+    """Validate all peer fields interpolated into WireGuard configuration."""
+    name = str(peer["name"])
+    if not _PEER_NAME_RE.match(name):
+        raise WgplException(f"Peer name '{name}' is not valid for export")
+    validate_wire_public_key(str(peer["public_key"]))
+
+    ip = str(peer["ip_address"])
+    validate_wire_safe_text(ip, "ip_address")
+    network = _parse_interface_network(iface)
+    validate_peer_ip_in_pool(ip, network)
+
+    psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
+    if psk:
+        validate_wire_safe_text(str(psk), "preshared_key")
+    _validate_optional_wire_mtu(peer, "mtu")
+    _validate_optional_wire_keepalive(peer, "keepalive")
+
+    if mode == "client":
+        validate_wire_private_key(str(peer["private_key"]))
+        peer_dns = peer["dns"] if "dns" in _peer_keys(peer) else None
+        iface_dns = iface["dns"] if "dns" in iface.keys() else None
+        effective_dns = peer_dns if peer_dns is not None else iface_dns
+        if effective_dns:
+            validate_wire_safe_text(str(effective_dns), "dns")
+
+
 def validate_wire_peer_fields(peer: sqlite3.Row | Mapping[str, object]) -> None:
-    """Validate peer fields embedded in WireGuard configuration output."""
+    """Validate peer wire-safe text fields (activation and row scans)."""
     name = str(peer["name"])
     if not _PEER_NAME_RE.match(name):
         raise WgplException(f"Peer name '{name}' is not valid for activation")
     validate_wire_public_key(str(peer["public_key"]))
+    validate_wire_safe_text(str(peer["ip_address"]), "ip_address")
     psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
     if psk:
         validate_wire_safe_text(str(psk), "preshared_key")
@@ -212,11 +288,45 @@ def assert_peer_activation(
     if not is_peer_active(peer):
         return
 
-    validate_wire_peer_fields(peer)
+    assert_exportable_peer(peer, iface, mode="server")
 
-    network = ipaddress.IPv4Network(str(iface["address_pool"]), strict=False)
+    iface_id = int(str(peer["interface_id"]))
+    peer_id = str(peer["id"])
+    peer_name = str(peer["name"])
+    ip = str(peer["ip_address"])
+
+    for other in db.list_peers(iface_id, conn=conn):
+        if exclude_peer_id is not None and str(other["id"]) == exclude_peer_id:
+            continue
+        if str(other["id"]) == peer_id:
+            continue
+        if not is_peer_active(other):
+            continue
+        if str(other["ip_address"]) == ip:
+            raise PeerAlreadyExistsError(
+                f"IP {ip} is already assigned to active peer '{other['name']}'"
+            )
+        if str(other["name"]) == peer_name:
+            raise PeerAlreadyExistsError(
+                f"Peer name '{peer_name}' already exists in this interface."
+            )
+
+
+def assert_peer_slot_invariants(
+    peer: sqlite3.Row | Mapping[str, object],
+    iface: sqlite3.Row | Mapping[str, object],
+    *,
+    conn: sqlite3.Connection,
+    exclude_peer_id: str | None = None,
+) -> None:
+    """Validate name/IP constraints for inactive peer updates without activation."""
+    if is_peer_active(peer):
+        return
+
+    network = _parse_interface_network(iface)
     ip = str(peer["ip_address"])
     validate_peer_ip_in_pool(ip, network)
+    validate_wire_safe_text(ip, "ip_address")
 
     iface_id = int(str(peer["interface_id"]))
     peer_id = str(peer["id"])
@@ -253,7 +363,7 @@ def validate_non_deleted_peers_in_pool(
     iface_id = resolve_interface_ref(interface_name, conn=conn)
 
     for peer in db.list_peers(iface_id, conn=conn):
-        if peer["deleted_at"] is not None:
+        if is_peer_deleted(peer):
             continue
         ip = str(peer["ip_address"])
         try:
@@ -281,7 +391,7 @@ def validate_database(
 
         if full:
             try:
-                validate_wire_interface_fields(iface)
+                assert_exportable_interface(iface)
             except WgplException as exc:
                 issues.append(
                     {
@@ -295,12 +405,12 @@ def validate_database(
         for peer in db.list_peers(iface_id, conn=conn):
             peer_name = str(peer["name"])
             if not full:
-                if peer["deleted_at"] is not None:
+                if is_peer_deleted(peer):
                     continue
                 if not is_peer_active(peer):
                     continue
             try:
-                validate_wire_peer_fields(peer)
+                assert_exportable_peer(peer, iface, mode="server")
             except WgplException as exc:
                 issues.append(
                     {

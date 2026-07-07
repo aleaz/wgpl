@@ -109,7 +109,28 @@ sudo wgpl apply wg0
 
 Restore is destructive and replaces the live database after validation. WGPL
 rejects backups with invalid schema, malformed wire-format fields, or weakened
-audit triggers.
+audit triggers. The swap uses `os.replace` after a final re-validation pass.
+
+### Database doctor
+
+Every CLI command validates the live schema on open. If the database fails
+schema contract (extra tables, weakened audit triggers, etc.), commands fail
+closed until the issue is resolved:
+
+```bash
+wgpl db doctor              # list schema and consistency issues
+wgpl db doctor --repair     # reinstall audit triggers; normalize deleted_at=''
+```
+
+Use `doctor --repair` only after reviewing the reported issues. For unauthorized
+schema objects, restore from a known-good backup instead of ad-hoc SQL edits.
+
+### Export vs apply equivalence
+
+`interface export`, `peer config`, and `apply` all pass through the same emit
+gate: `validate` preflight plus `assert_exportable_*` on every field that
+reaches WireGuard text output. A tampered row that blocks `apply` also blocks
+export — there is no weaker export path.
 
 ## Key rotation and exposure
 

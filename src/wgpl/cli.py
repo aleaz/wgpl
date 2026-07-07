@@ -380,9 +380,10 @@ def peer_show(
         # Fetching peer data
         peers = core.list_peers(interface, expired_only=False, show_all=True)
         # Resolve ID correctly
-        resolved_id = core.resolve_peer_ref(
-            peer_id, interface, policy=core.PeerResolvePolicy.MUTATE_INACTIVE
+        access = (
+            core.PeerAccess.READ_SENSITIVE if show_secrets else core.PeerAccess.MUTATE
         )
+        resolved_id = core.resolve_peer_ref(peer_id, interface, access=access)
         peer = next((p for p in peers if p["id"] == resolved_id), None)
         if not peer:
             raise PeerNotFoundError(f"Peer {peer_id} not found")
@@ -969,6 +970,49 @@ def validate_cmd(
 
 
 # --- Database ---
+
+
+@db_app.command("doctor")
+def db_doctor(
+    ctx: typer.Context,
+    repair: bool = typer.Option(
+        False, "--repair", help="Apply documented repairs (triggers, deleted_at)"
+    ),
+) -> None:
+    """Diagnose schema and data issues; optionally repair documented problems."""
+    try:
+        if repair:
+            actions = core.repair_database()
+            if ctx.obj.get("json"):
+                _output(ctx, {"status": "repaired", "actions": actions})
+            else:
+                for action in actions:
+                    console.print(f"[green]{action}[/green]")
+            return
+
+        issues = core.diagnose_database()
+        if ctx.obj.get("json"):
+            _output(
+                ctx,
+                {
+                    "status": "ok" if not issues else "error",
+                    "issues": issues,
+                },
+            )
+        elif not issues:
+            console.print("[green]No database issues detected.[/green]")
+        else:
+            for issue in issues:
+                peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
+                iface_part = issue.get("interface") or "database"
+                console.print(
+                    f"[red]{iface_part}{peer_part}: "
+                    f"{issue['code']} — {issue['detail']}[/red]"
+                )
+        if issues:
+            sys.exit(1)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
 
 
 @db_app.command("dump")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import sqlite3
 from typing import cast
 
 from . import db
@@ -19,23 +20,36 @@ from .exceptions import (
 
 def validate_state(
     interface: str | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> dict[str, str | list[dict[str, str | None]]]:
     """Validate DB consistency without mutating state."""
     issues: list[dict[str, str | None]] = []
 
     if interface is not None:
-        iface_id = resolve_interface_ref(interface)
-        iface = db.get_interface(iface_id)
+        iface_id = resolve_interface_ref(interface, conn=conn)
+        iface = db.get_interface(iface_id, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {interface} not found")
         interfaces = [iface]
     else:
-        interfaces = db.list_interfaces()
+        interfaces = db.list_interfaces(conn=conn)
 
     for iface in interfaces:
         iface_name = str(iface["name"])
         pool = str(iface["address_pool"])
-        network = ipaddress.IPv4Network(pool, strict=False)
+        try:
+            network = ipaddress.IPv4Network(pool, strict=False)
+        except ValueError as exc:
+            issues.append(
+                {
+                    "interface": iface_name,
+                    "peer": None,
+                    "code": "invalid_address_pool",
+                    "detail": f"Invalid address pool '{pool}': {exc}",
+                }
+            )
+            continue
 
         if iface["dns"]:
             try:
@@ -64,7 +78,7 @@ def validate_state(
 
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
-        for peer in db.list_peers(iface["id"]):
+        for peer in db.list_peers(iface["id"], conn=conn):
             if integrity.corrupt_expires_at(peer):
                 issues.append(
                     {
