@@ -4,6 +4,9 @@ WGPL is an **intent-based hub-and-spoke IPv4 routing generator**. You declare
 what each peer and interface should reach; the tool **derives** WireGuard
 `AllowedIPs` at export/apply time. Derived values are never stored in the database.
 
+For entity definitions (VPN, Interface, Peer, Node, Route) and the domain vs
+WireGuard boundary, see [DESIGN.md — Domain model](../DESIGN.md#domain-model).
+
 ## Glossary
 
 | WGPL term | DB / CLI field | Industry equivalents | Meaning |

@@ -10,6 +10,66 @@ WGPL (WireGuard Peer Lite) is a **disconnected Python CLI** that manages WireGua
 **hub-and-spoke remote access VPNs** (IPv4 only). It does not create network
 interfaces, manage routing, or run as a daemon.
 
+## Domain model
+
+WGPL models a **declarative hub-and-spoke VPN topology**, not WireGuard text
+files. WireGuard (`[Interface]`, `[Peer]`, `AllowedIPs`, `Endpoint`, etc.) is an
+**export format** produced at apply/export time — not the internal domain model.
+
+Routing derivation and operational patterns are documented in
+[docs/ROUTING.md](docs/ROUTING.md).
+
+### What WGPL models
+
+| Concept | Stored as | Meaning |
+|---------|-----------|---------|
+| **VPN (topology)** | One `interfaces` row | A hub-and-spoke domain: address pool, hub endpoint, optional hub-local routes, and all remote attachments |
+| **Interface** | `interfaces` table | The concentrator (hub) for one VPN domain — not the OS `wg0` device itself (BYOI) |
+| **Peer** | `peers` table | A remote **attachment** to the hub: keys, tunnel IP, lifecycle, routing **intent**. A peer is not always a single host — it may represent a laptop, phone, or a site gateway advertising LANs |
+| **Node** (conceptual) | Collapsed into `peers` today | The physical or logical remote entity (router, firewall, branch). Not a separate table yet |
+| **Route / network** | `routed_networks` (peer or interface) | IPv4 CIDRs **behind** a node or the hub — intent to reach those prefixes via the tunnel |
+| **Routing policy** | `allowed_ips_policy`, `custom_allowed_ips` | What a peer's client export should include (split/full tunnel, remote LANs, custom) |
+
+### Domain vs WireGuard
+
+```
+Domain (SQLite intent)          WireGuard (derived export)
+─────────────────────          ──────────────────────────
+interfaces + peers      →      hub syncconf / client .conf
+role, routed_networks   →      [Peer] AllowedIPs
+allowed_ips_policy      →      client AllowedIPs scope
+(keys, IP, DNS, MTU)    →      Interface / Peer fields
+```
+
+**Never stored:** derived `AllowedIPs`, computed routes, or generated configs.
+Only **intent** is persisted; `routing.py` derives reachability at export time.
+
+### Peer ≠ host
+
+A peer represents a remote node capable of announcing zero or more networks:
+
+- **`endpoint`** — tunnel identity only (notebook, phone, desktop); no
+  `routed_networks`.
+- **`subnet_router`** — gateway announcing one or more LAN CIDRs behind the
+  tunnel (`routed_networks` is a comma-separated list).
+
+The same physical router connected to two hubs would be **two peer rows** (one
+per interface) with duplicated `routed_networks` today. That is an accepted
+denormalization for the current single-hub-per-interface product scope.
+
+### Evolution notes (not implemented)
+
+The current schema does not block future extensions:
+
+| Extension | Current posture |
+|-----------|-----------------|
+| Multiple hubs | Supported — one `interfaces` row per hub |
+| Multiple WireGuard interfaces on one host | Supported — composite identity (`name + endpoint + port`) |
+| Explicit `Node` entity | Would split attachment from advertised networks; peers would reference a node |
+| IPv6 | Blocked by IPv4-only invariant; `routing.py` uses `IPv4Network` throughout |
+| Alternate exporters (MikroTik, FRR) | Viable — `routing.py` is pure; new serializers beside `wireformat` |
+| Advanced policies / BGP | Would consume the same derived prefix lists from `routing.py` |
+
 ## Layered architecture
 
 ```
