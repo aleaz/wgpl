@@ -42,6 +42,8 @@ Intent (DB)  →  routing.py (derive)  →  integrity (validate)  →  wireforma
 - **`wireformat.py`** formats only; it never computes routing.
 - **`core.py`** emit gates call `routing` then `integrity` then `wireformat`.
 
+Full specification matrix (topology → expected AllowedIPs): [routing_matrix.md](routing_matrix.md).
+
 ### Hub derivation
 
 For every active peer on the hub:
@@ -83,6 +85,84 @@ derived automatically when sites are added.
 rules. On the hub, enable `net.ipv4.ip_forward=1` and allow `FORWARD` on the
 WireGuard interface (and MASQUERADE if needed). See
 [runbook — Hub routing relay](runbook.md#hub-routing-relay).
+
+## Routing invariants
+
+Formal rules enforced by `integrity.py` (mutation / export) and
+`consistency.py` (`wgpl validate`). The routing **algorithm** lives in
+`routing.py`; these are the **constraints** it assumes.
+
+| Invariant | Rule | Enforced at |
+|-----------|------|-------------|
+| Unique prefix ownership | No two active subnet routers may advertise overlapping `routed_networks` on the same interface | `assert_peer_activation` (mutation); `validate` (`overlapping_routed_networks`) |
+| Pool disjunction | No `routed_networks` prefix may overlap `address_pool` | `validate_routed_networks_list` |
+| Tunnel identity | Peer tunnel IP must not fall inside its own `routed_networks` | `validate_routed_networks_list(tunnel_ip=…)` |
+| No egress in LAN fields | `0.0.0.0/0` forbidden in `routed_networks` (use `full_tunnel` on clients) | `validate_routed_networks_list` |
+| Role coherence | `endpoint` ⇒ `routed_networks IS NULL`; `subnet_router` ⇒ non-empty LANs | CHECK + `_validate_peer_routing_fields` |
+| Custom coherence | `allowed_ips_policy=custom` ⇒ `custom_allowed_ips NOT NULL` | CHECK + integrity |
+| Own-LAN exclusion | `all_remote_networks` never includes the peer's own `routed_networks` in client export | `routing.resolve_client_allowed_ips` |
+| Active-only derivation | Expired / soft-deleted peers excluded from hub export and remote LAN union | `integrity.is_peer_active` in emit gates |
+| Single derivator | Only `routing.py` computes AllowedIPs prefix lists | code audit — see [DESIGN.md](../DESIGN.md#architecture-verification) |
+
+**Known gap:** overlap between `interface.routed_networks` and a peer's
+`routed_networks` is not rejected automatically. Avoid duplicating the same CIDR
+on hub and site; a future validate warning may be added.
+
+**Routing loops:** The hub-and-spoke model plus own-LAN exclusion prevents a
+subnet router from installing a client route to its own LAN via the tunnel.
+There is no multi-hop peer chain in scope — all traffic relay goes through the hub
+operator's kernel forwarding, not recursive WireGuard `[Peer]` blocks.
+
+## Reachability model (conceptual graph)
+
+Lists in docs and CLI output are a flattened view of a **reachability graph**:
+
+```mermaid
+flowchart TD
+  Hub[Interface_hub]
+  PeerA[Peer_A_endpoint]
+  PeerB[Peer_B_subnet_router]
+  LANA[LAN_A]
+  LANB[LAN_B]
+  Hub --> PeerA
+  Hub --> PeerB
+  PeerB --> LANB
+```
+
+- **Hub → peer:** always `{tunnel}/32`; subnet routers add LAN edges.
+- **Client export:** policy selects which nodes/prefixes the peer may reach
+  (pool, hub LANs, remote LANs, full Internet, or custom).
+- Implementation uses prefix lists, not an explicit graph object — sufficient
+  for hub-and-spoke; a graph structure would only help if multi-hop or policy
+  routing is added later.
+
+## Invalid topologies
+
+See [routing_matrix.md — Invalid topologies](routing_matrix.md#invalid-topologies)
+for the full table with enforcement points and tests.
+
+Summary of what **must not** exist in a healthy database:
+
+- Overlapping or duplicate `routed_networks` between active subnet routers
+- LAN prefixes that overlap the VPN pool or contain a peer's tunnel IP
+- `0.0.0.0/0` in `routed_networks` fields
+- Subnet routers without LANs, or endpoints with LAN fields
+- Wire-unsafe or unparseable CIDR text (restore / export fail-closed)
+
+Warnings (validate exits 0): missing keepalive on NAT subnet routers, asymmetric
+`all_remote_networks`, incomplete LAN↔LAN derivation, expired subnet routers
+still in DB.
+
+## Module responsibilities (routing)
+
+| Module | Responsibility | Must not |
+|--------|----------------|----------|
+| `routing.py` | Derive hub/client AllowedIPs from intent | I/O, Typer, DB, wire-format output |
+| `integrity.py` | Validate invariants, export safety, activation gates | Derive AllowedIPs |
+| `wireformat.py` | Serialize precomputed AllowedIPs to `.conf` text | Compute routing |
+| `core.py` | Orchestrate emit gates, CRUD, call `routing` then `integrity` | Duplicate routing logic |
+| `consistency.py` | Topology checks for `validate` | Mutate state |
+| `cli.py` | Presentation, `--json`, Typer | Import `db`; compute routes |
 
 ## WireGuard coverage boundary
 

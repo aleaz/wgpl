@@ -70,12 +70,59 @@ The current schema does not block future extensions:
 | Alternate exporters (MikroTik, FRR) | Viable — `routing.py` is pure; new serializers beside `wireformat` |
 | Advanced policies / BGP | Would consume the same derived prefix lists from `routing.py` |
 
+## Architecture verification
+
+Post domain-model audit (implementation checked against documentation).
+
+### Architectural principles
+
+| Principle | Status |
+|-----------|--------|
+| Intent persisted; derived values never stored | Verified — no AllowedIPs columns in schema |
+| WireGuard config always generated at export | Verified — emit gates in `core.py` |
+| Domain model independent of WireGuard | Verified — see [Domain model](#domain-model) |
+| Export is one-way (intent → wire format) | Verified — no import from `.conf` |
+| `routing.py` single source of routing derivation | Verified — see below |
+
+### Peer-centric implementation
+
+The codebase is **peer-centric**, not node-centric:
+
+- All routing APIs accept `peer` / `iface` rows (`routing.resolve_*`).
+- There is no `Node` table or type; the conceptual Node is collapsed into `Peer`.
+- Future `Node` entity would sit above `Peer` without changing derivation logic.
+
+### Routing derivation audit
+
+Only `routing.py` computes prefix lists for AllowedIPs. Other modules **call**
+it:
+
+| Module | Uses `routing` for |
+|--------|-------------------|
+| `core.py` | Emit gates, JSON metadata, `explain_peer_routing` |
+| `consistency.py` | LAN↔LAN completeness checks in `validate` |
+| `integrity.py` | `parse_cidr_list`, enums — validation only, not derivation |
+
+`wireformat.py` validates and joins CIDR strings; it never chooses routes.
+`grep` for `/32` in `src/wgpl` finds only `routing.py`.
+
+### Boundary violations
+
+None found. `cli.py` does not import `db`. No business routing logic in
+`wireformat` or `db`.
+
+### Specification artifacts
+
+- Routing invariants and invalid topologies: [docs/ROUTING.md](docs/ROUTING.md)
+- Executable matrix (topology → expected AllowedIPs): [docs/routing_matrix.md](docs/routing_matrix.md)
+
 ## Layered architecture
 
 ```
 cli.py (Typer / presentation)
     → core.py (facade)
         → db.py / wireguard.py / dbpath.py (infrastructure)
+        → routing.py (derive AllowedIPs — pure functions)
         → integrity.py / wireformat.py (invariants and export boundaries)
         → refs.py / ipam.py / audit.py / restore.py / consistency.py / validators.py
 ```
@@ -84,6 +131,7 @@ cli.py (Typer / presentation)
 |-------|---------|-------|
 | Presentation | `cli.py` | No direct `db` access; stdout/stderr contract; `--json` redaction |
 | Business | `core.py`, `refs.py`, `ipam.py`, `audit.py`, `restore.py`, `consistency.py`, `validators.py` | No Typer; no stdout/stderr; orchestrates mutations and reads |
+| Routing derivation | `routing.py` | Pure functions; single source of AllowedIPs; no I/O |
 | Invariants | `integrity.py`, `wireformat.py` | Called from `core`, not from `cli` or `db` |
 | Infrastructure | `db.py`, `dbpath.py`, `wireguard.py` | No business logic |
 
