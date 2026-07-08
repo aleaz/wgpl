@@ -30,7 +30,7 @@ def validate_allowed_ips(allowed_ips: str) -> str:
 
 def build_server_config(
     iface: sqlite3.Row | Mapping[str, object],
-    peers: list[sqlite3.Row],
+    peer_allowed_ips: list[tuple[sqlite3.Row | Mapping[str, object], list[str]]],
 ) -> str:
     """Build declarative server syncconf content for active peers only."""
     name = str(iface["name"])
@@ -43,14 +43,13 @@ def build_server_config(
         conf_lines.append(f"MTU = {mtu}")
         conf_lines.append("")
 
-    for peer in peers:
-        if not integrity.is_peer_active(peer):
-            continue
+    for peer, allowed_ips in peer_allowed_ips:
         conf_lines.append("[Peer]")
         conf_lines.append(f"PublicKey = {peer['public_key']}")
         if peer["preshared_key"]:
             conf_lines.append(f"PresharedKey = {peer['preshared_key']}")
-        conf_lines.append(f"AllowedIPs = {peer['ip_address']}/32")
+        normalized_allowed_ips = validate_allowed_ips(",".join(allowed_ips))
+        conf_lines.append(f"AllowedIPs = {normalized_allowed_ips}")
         conf_lines.append("")
 
     return "\n".join(conf_lines)

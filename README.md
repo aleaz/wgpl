@@ -133,8 +133,8 @@ cat server-a.conf | ssh root@server-a "wg syncconf wg0 /dev/stdin"
 Bring modern IPAM, TTL, and Audit capabilities to hardware routers that lack these features natively.
 
 ```bash
-# Extract configuration via JSON and generate an .rsc script
-wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.ip_address)/32\""' > mikrotik_sync.rsc
+# Extract configuration via JSON and generate an .rsc script (hub AllowedIPs / allowed-address)
+wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
 ```
 
 Then import `mikrotik_sync.rsc` into your router.
@@ -176,6 +176,7 @@ Manage an unlimited number of WireGuard servers from a single SQLite database.
 
 Bring enterprise networking features to your tunnels automatically:
 
+- **Intent-based routing (v2):** Declare `role`, `routed_networks`, and `allowed_ips_policy`; WGPL derives hub and client `AllowedIPs` at export time. Patterns: split/full tunnel, subnet routers, LAN↔LAN via hub. See [docs/ROUTING.md](docs/ROUTING.md) and the [hub relay runbook](docs/runbook.md#hub-routing-relay-v2).
 - **Per-Peer Granularity:** Customize `MTU`, `PersistentKeepalive`, and `DNS` at the interface level (default) or override them per peer.
 - **FQDN & IP Support:** Endpoints are proactively validated via RFC 1123, ensuring your generated configs are always resolvable by WireGuard.
 

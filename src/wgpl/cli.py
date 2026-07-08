@@ -63,8 +63,7 @@ def _public_peer_rows(
     iface_dns: dict[int, str | None] | None = None,
 ) -> list[dict[str, str | None]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
-    iface_dns_map = iface_dns or {}
-    return [core.peer_row_to_public_dict(peer, iface_dns_map) for peer in peers]
+    return core.peer_rows_to_public_dicts(peers, iface_dns)
 
 
 def _display_dns(value: str | None) -> str:
@@ -255,6 +254,11 @@ def interface_add(
     keepalive: int | None = typer.Option(
         None, "--keepalive", help="Global PersistentKeepalive for clients"
     ),
+    routed_networks: str | None = typer.Option(
+        None,
+        "--routed-networks",
+        help="Extra CIDRs behind the hub for split-tunnel client configs",
+    ),
 ) -> None:
     try:
         result = core.add_interface(
@@ -267,6 +271,7 @@ def interface_add(
             desc=desc,
             mtu=mtu,
             keepalive=keepalive,
+            routed_networks=routed_networks,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -394,7 +399,8 @@ def peer_show(
         iface_name = iface_map.get(peer["interface_id"], peer["interface_id"])
 
         if ctx.obj.get("json"):
-            _output(ctx, core.peer_row_to_public_dict(peer, iface_dns))
+            public_rows = core.peer_rows_to_public_dicts([peer], iface_dns)
+            _output(ctx, public_rows[0])
         else:
             psk = dict(peer).get("preshared_key")
             psk_display = str(psk) if show_secrets and psk else "—"
@@ -490,6 +496,16 @@ def interface_update(
     clear_keepalive: bool = typer.Option(
         False, "--clear-keepalive", help="Remove interface PersistentKeepalive"
     ),
+    routed_networks: str | None = typer.Option(
+        None,
+        "--routed-networks",
+        help="Extra CIDRs behind the hub for split-tunnel client configs",
+    ),
+    clear_routed_networks: bool = typer.Option(
+        False,
+        "--clear-routed-networks",
+        help="Remove interface routed_networks",
+    ),
 ) -> None:
     try:
         if clear_dns and dns is not None:
@@ -500,6 +516,11 @@ def interface_update(
             _exit_error(ctx, "Cannot use --mtu and --clear-mtu together.")
         if clear_keepalive and keepalive is not None:
             _exit_error(ctx, "Cannot use --keepalive and --clear-keepalive together.")
+        if clear_routed_networks and routed_networks is not None:
+            _exit_error(
+                ctx,
+                "Cannot use --routed-networks and --clear-routed-networks together.",
+            )
 
         result = core.update_interface(
             name,
@@ -515,6 +536,8 @@ def interface_update(
             clear_mtu=clear_mtu,
             keepalive=keepalive,
             clear_keepalive=clear_keepalive,
+            routed_networks=routed_networks,
+            clear_routed_networks=clear_routed_networks,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -547,6 +570,26 @@ def peer_add(
     keepalive: int | None = typer.Option(
         None, "--keepalive", help="PersistentKeepalive override for this peer"
     ),
+    role: str = typer.Option(
+        core.PeerRole.ENDPOINT,
+        "--role",
+        help="Peer role: endpoint or subnet_router",
+    ),
+    routed_networks: str | None = typer.Option(
+        None,
+        "--routed-networks",
+        help="LAN or subnets behind this subnet router",
+    ),
+    allowed_ips_policy: str = typer.Option(
+        core.AllowedIpsPolicy.VPN_ONLY,
+        "--allowed-ips-policy",
+        help="Client AllowedIPs policy (vpn_only, split_tunnel, all_remote_networks, full_tunnel, custom)",
+    ),
+    custom_allowed_ips: str | None = typer.Option(
+        None,
+        "--custom-allowed-ips",
+        help="Custom client AllowedIPs when --allowed-ips-policy=custom",
+    ),
 ) -> None:
     try:
         result = core.add_peer(
@@ -558,6 +601,10 @@ def peer_add(
             desc=desc,
             mtu=mtu,
             keepalive=keepalive,
+            role=role,
+            routed_networks=routed_networks,
+            allowed_ips_policy=allowed_ips_policy,
+            custom_allowed_ips=custom_allowed_ips,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -749,6 +796,34 @@ def peer_update(
     clear_expires: bool = typer.Option(
         False, "--clear-expires", help="Remove peer expiration"
     ),
+    role: str | None = typer.Option(
+        None, "--role", help="Peer role: endpoint or subnet_router"
+    ),
+    routed_networks: str | None = typer.Option(
+        None,
+        "--routed-networks",
+        help="LAN or subnets behind this subnet router",
+    ),
+    clear_routed_networks: bool = typer.Option(
+        False,
+        "--clear-routed-networks",
+        help="Remove peer routed_networks",
+    ),
+    allowed_ips_policy: str | None = typer.Option(
+        None,
+        "--allowed-ips-policy",
+        help="Client AllowedIPs policy",
+    ),
+    custom_allowed_ips: str | None = typer.Option(
+        None,
+        "--custom-allowed-ips",
+        help="Custom client AllowedIPs when policy is custom",
+    ),
+    clear_custom_allowed_ips: bool = typer.Option(
+        False,
+        "--clear-custom-allowed-ips",
+        help="Remove custom_allowed_ips",
+    ),
 ) -> None:
     try:
         if clear_dns and dns is not None:
@@ -761,6 +836,16 @@ def peer_update(
             _exit_error(ctx, "Cannot use --keepalive and --clear-keepalive together.")
         if clear_expires and expires is not None:
             _exit_error(ctx, "Cannot use --expires and --clear-expires together.")
+        if clear_routed_networks and routed_networks is not None:
+            _exit_error(
+                ctx,
+                "Cannot use --routed-networks and --clear-routed-networks together.",
+            )
+        if clear_custom_allowed_ips and custom_allowed_ips is not None:
+            _exit_error(
+                ctx,
+                "Cannot use --custom-allowed-ips and --clear-custom-allowed-ips together.",
+            )
 
         result = core.update_peer(
             interface,
@@ -778,6 +863,12 @@ def peer_update(
             clear_keepalive=clear_keepalive,
             expires=expires,
             clear_expires=clear_expires,
+            role=role,
+            routed_networks=routed_networks,
+            clear_routed_networks=clear_routed_networks,
+            allowed_ips_policy=allowed_ips_policy,
+            custom_allowed_ips=custom_allowed_ips,
+            clear_custom_allowed_ips=clear_custom_allowed_ips,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
@@ -861,7 +952,11 @@ def peer_config(
     peer_id: str = typer.Argument(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
     ),
-    allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
+    allowed_ips: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="Override client AllowedIPs (default: derived from allowed_ips_policy)",
+    ),
     interface: str | None = typer.Option(
         None,
         "--interface",
@@ -870,14 +965,80 @@ def peer_config(
     ),
 ) -> None:
     try:
-        _validate_allowed_ips(ctx, allowed_ips)
-        config = core.get_peer_config(
-            peer_id, allowed_ips=allowed_ips, interface_ref=interface
-        )
+        if allowed_ips is not None:
+            _validate_allowed_ips(ctx, allowed_ips)
         if ctx.obj.get("json"):
-            _output(ctx, {"config": config})
+            payload = core.get_peer_config_payload(
+                peer_id, allowed_ips=allowed_ips, interface_ref=interface
+            )
+            _output(ctx, payload)
         else:
+            config = core.get_peer_config(
+                peer_id, allowed_ips=allowed_ips, interface_ref=interface
+            )
             print(config)  # print to stdout
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+@peer_app.command("explain")
+def peer_explain(
+    ctx: typer.Context,
+    peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+    interface: str | None = typer.Option(
+        None,
+        "--interface",
+        "-i",
+        help="Interface name or ID (disambiguates peer prefix)",
+    ),
+) -> None:
+    """Show derived AllowedIPs and LAN↔LAN routing checklist for a peer."""
+    try:
+        explanation = core.explain_peer_routing(peer_id, interface_ref=interface)
+        if ctx.obj.get("json"):
+            _output(ctx, explanation)
+            return
+
+        peer = explanation["peer"]
+        title = f"Routing: {_safe_markup(str(peer['name']))}"
+        rows = [
+            ("Role", str(explanation["role"])),
+            ("Allowed IPs policy", str(explanation["allowed_ips_policy"])),
+            (
+                "Interface routed networks",
+                str(explanation["interface_routed_networks"] or "—"),
+            ),
+            (
+                "Peer routed networks",
+                str(explanation["peer_routed_networks"] or "—"),
+            ),
+            ("Hub AllowedIPs", ", ".join(explanation["hub_allowed_ips"]) or "—"),
+            (
+                "Client AllowedIPs",
+                ", ".join(explanation["client_allowed_ips"]) or "—",
+            ),
+        ]
+        _print_show_table(title, rows)
+
+        checklist = explanation["lan_to_lan_checklist"]
+        if checklist:
+            table = _create_base_table()
+            table.add_column("Remote peer", style=_STYLE_ID)
+            table.add_column("Hub→local LAN", style=_STYLE_META)
+            table.add_column("Hub→remote LAN", style=_STYLE_META)
+            table.add_column("Local client→remote", style=_STYLE_META)
+            table.add_column("Remote client→local", style=_STYLE_META)
+            table.add_column("Complete", style=_STYLE_VALUE)
+            for item in checklist:
+                table.add_row(
+                    _safe_markup(str(item["remote_peer"])),
+                    "yes" if item["hub_local_routes_local_lan"] else "no",
+                    "yes" if item["hub_remote_routes_remote_lan"] else "no",
+                    "yes" if item["local_client_routes_remote_lan"] else "no",
+                    "yes" if item["remote_client_routes_local_lan"] else "no",
+                    "yes" if item["complete"] else "no",
+                )
+            _print_titled_table("LAN↔LAN four-leg checklist", table)
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -891,7 +1052,11 @@ def peer_qr(
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write QR code as PNG to this file"
     ),
-    allowed_ips: str = typer.Option("0.0.0.0/0", help="AllowedIPs for the client"),
+    allowed_ips: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="Override client AllowedIPs (default: derived from allowed_ips_policy)",
+    ),
     interface: str | None = typer.Option(
         None,
         "--interface",
@@ -900,7 +1065,8 @@ def peer_qr(
     ),
 ) -> None:
     try:
-        _validate_allowed_ips(ctx, allowed_ips)
+        if allowed_ips is not None:
+            _validate_allowed_ips(ctx, allowed_ips)
         if output is not None:
             png_bytes = core.get_peer_qr_png_bytes(
                 peer_id, allowed_ips=allowed_ips, interface_ref=interface
@@ -943,7 +1109,7 @@ def validate_cmd(
         None, help="Interface name to check (all if omitted)"
     ),
 ) -> None:
-    """Validate database consistency (peer IPs in pool, DNS values)."""
+    """Validate database consistency (peer IPs in pool, DNS, routing topology)."""
     try:
         result = core.validate_state(interface)
         if ctx.obj.get("json"):
@@ -959,11 +1125,18 @@ def validate_cmd(
                 )
             for issue in issues:
                 peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
+                severity = issue.get("severity", "error")
+                style = "yellow" if severity == "warning" else "red"
                 console.print(
-                    f"[red]{issue['interface']}{peer_part}: "
-                    f"{issue['code']} — {issue['detail']}[/red]"
+                    f"[{style}]{issue['interface']}{peer_part}: "
+                    f"{issue['code']} — {issue['detail']}[/{style}]"
                 )
-        if result["status"] != "ok":
+            if result["status"] == "warning":
+                scope = interface or "database"
+                console.print(
+                    f"[yellow]Validation passed with warnings for {scope}[/yellow]"
+                )
+        if result["status"] == "error":
             sys.exit(1)
     except WgplException as e:
         _exit_error(ctx, str(e))

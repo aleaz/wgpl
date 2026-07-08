@@ -42,6 +42,10 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
         "desc",
         "mtu",
         "keepalive",
+        "role",
+        "routed_networks",
+        "allowed_ips_policy",
+        "custom_allowed_ips",
     }
     assert result["dns"] is None
     assert "private_key" not in result

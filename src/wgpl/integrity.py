@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from . import db
+from . import routing
 from .exceptions import (
     InvalidPeerIpError,
     PeerAlreadyExistsError,
@@ -193,10 +194,99 @@ def _parse_interface_network(
         raise WgplException(f"Invalid address pool '{pool}'") from exc
 
 
+def validate_routed_networks_list(
+    value: str | None,
+    *,
+    field: str,
+    address_pool: str,
+    tunnel_ip: str | None = None,
+    reject_default_route: bool = True,
+) -> list[ipaddress.IPv4Network]:
+    """Validate and parse a comma-separated routed-networks field."""
+    if value is None or str(value).strip() == "":
+        return []
+    validate_wire_safe_text(str(value), field)
+    networks = routing.parse_cidr_list(str(value))
+    pool = ipaddress.IPv4Network(address_pool, strict=False)
+    for network in networks:
+        if reject_default_route and network == routing.DEFAULT_ROUTE:
+            raise WgplException(f"{field} must not contain default route 0.0.0.0/0")
+        if network.overlaps(pool):
+            raise WgplException(
+                f"{field} prefix {network} overlaps VPN address pool {pool}"
+            )
+        if tunnel_ip is not None and ipaddress.IPv4Address(tunnel_ip) in network:
+            raise WgplException(f"{field} must not contain peer tunnel IP {tunnel_ip}")
+    return networks
+
+
+def _validate_peer_routing_fields(
+    peer: sqlite3.Row | Mapping[str, object],
+    iface: sqlite3.Row | Mapping[str, object],
+) -> None:
+    """Validate role, allowed_ips_policy, and routed-network fields."""
+    keys = _peer_keys(peer)
+    role = (
+        str(peer["role"]) if "role" in keys and peer["role"] is not None else "endpoint"
+    )
+    if role not in {routing.PeerRole.ENDPOINT, routing.PeerRole.SUBNET_ROUTER}:
+        raise WgplException(f"Invalid peer role '{role}'")
+
+    policy = (
+        str(peer["allowed_ips_policy"])
+        if "allowed_ips_policy" in keys and peer["allowed_ips_policy"] is not None
+        else routing.AllowedIpsPolicy.VPN_ONLY
+    )
+    valid_policies = {item.value for item in routing.AllowedIpsPolicy}
+    if policy not in valid_policies:
+        raise WgplException(f"Invalid allowed_ips_policy '{policy}'")
+
+    tunnel_ip = str(peer["ip_address"])
+    address_pool = str(iface["address_pool"])
+    routed = peer["routed_networks"] if "routed_networks" in keys else None
+
+    if role == routing.PeerRole.ENDPOINT and routed is not None:
+        raise WgplException("endpoint peers must not have routed_networks")
+
+    if role == routing.PeerRole.SUBNET_ROUTER:
+        parsed = validate_routed_networks_list(
+            str(routed) if routed is not None else None,
+            field="routed_networks",
+            address_pool=address_pool,
+            tunnel_ip=tunnel_ip,
+        )
+        if not parsed:
+            raise WgplException("subnet_router requires routed_networks")
+
+    if policy == routing.AllowedIpsPolicy.CUSTOM:
+        custom = peer["custom_allowed_ips"] if "custom_allowed_ips" in keys else None
+        if custom is None:
+            raise WgplException(
+                "custom_allowed_ips is required when allowed_ips_policy is custom"
+            )
+        validate_wire_safe_text(str(custom), "custom_allowed_ips")
+        routing.parse_cidr_list(str(custom))
+
+
+def _validate_interface_routed_networks(
+    iface: sqlite3.Row | Mapping[str, object],
+) -> None:
+    routed = iface["routed_networks"] if "routed_networks" in iface.keys() else None
+    if routed is None:
+        return
+    validate_routed_networks_list(
+        str(routed),
+        field="routed_networks",
+        address_pool=str(iface["address_pool"]),
+        tunnel_ip=None,
+    )
+
+
 def assert_exportable_interface(iface: sqlite3.Row | Mapping[str, object]) -> None:
     """Validate all interface fields required for WireGuard export."""
     validate_wire_interface_fields(iface)
     _parse_interface_network(iface)
+    _validate_interface_routed_networks(iface)
 
 
 def assert_exportable_peer(
@@ -221,6 +311,7 @@ def assert_exportable_peer(
         validate_wire_safe_text(str(psk), "preshared_key")
     _validate_optional_wire_mtu(peer, "mtu")
     _validate_optional_wire_keepalive(peer, "keepalive")
+    _validate_peer_routing_fields(peer, iface)
 
     if mode == "client":
         validate_wire_private_key(str(peer["private_key"]))
@@ -310,6 +401,59 @@ def assert_peer_activation(
             raise PeerAlreadyExistsError(
                 f"Peer name '{peer_name}' already exists in this interface."
             )
+
+    role = (
+        str(peer["role"])
+        if "role" in _peer_keys(peer) and peer["role"] is not None
+        else routing.PeerRole.ENDPOINT
+    )
+    if role != routing.PeerRole.SUBNET_ROUTER:
+        return
+
+    address_pool = str(iface["address_pool"])
+    tunnel_ip = str(peer["ip_address"])
+    routed_raw = (
+        peer["routed_networks"] if "routed_networks" in _peer_keys(peer) else None
+    )
+    routed_networks = validate_routed_networks_list(
+        str(routed_raw) if routed_raw is not None else None,
+        field="routed_networks",
+        address_pool=address_pool,
+        tunnel_ip=tunnel_ip,
+    )
+    if not routed_networks:
+        raise WgplException("subnet_router requires routed_networks")
+
+    for other in db.list_peers(iface_id, conn=conn):
+        if exclude_peer_id is not None and str(other["id"]) == exclude_peer_id:
+            continue
+        if str(other["id"]) == peer_id:
+            continue
+        if not is_peer_active(other):
+            continue
+        other_role = (
+            str(other["role"])
+            if "role" in _peer_keys(other) and other["role"] is not None
+            else routing.PeerRole.ENDPOINT
+        )
+        if other_role != routing.PeerRole.SUBNET_ROUTER:
+            continue
+        other_raw = (
+            other["routed_networks"] if "routed_networks" in _peer_keys(other) else None
+        )
+        other_networks = validate_routed_networks_list(
+            str(other_raw) if other_raw is not None else None,
+            field="routed_networks",
+            address_pool=address_pool,
+            tunnel_ip=str(other["ip_address"]),
+        )
+        for left in routed_networks:
+            for right in other_networks:
+                if left.overlaps(right):
+                    raise PeerAlreadyExistsError(
+                        f"Routed network {left} overlaps with active peer "
+                        f"'{other['name']}' prefix {right}"
+                    )
 
 
 def assert_peer_slot_invariants(

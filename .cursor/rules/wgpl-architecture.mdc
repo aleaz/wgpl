@@ -11,7 +11,7 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 ## Layers (one direction only)
 
 `cli.py` (Typer / presentation) → `core.py` (business) → `db.py` / `wireguard.py` / `dbpath.py` (infra).
-Business invariants live in `integrity.py` and `wireformat.py` (called from `core`, not from `cli` or `db`).
+Business invariants live in `integrity.py`, `wireformat.py`, and `routing.py` (called from `core`, not from `cli` or `db`). `routing.py` derives AllowedIPs (pure functions, no I/O).
 
 - `cli.py` MUST NOT import `db.py`; use `core.ensure_database()`, `core.list_interfaces()`, `core.list_peers()`, etc.
 - `core.py` MUST NOT import Typer or format output (no stdout/stderr writes; use return values such as `dump_database(path)` and `restore_database(source_path) -> list[str]` warnings).
@@ -34,7 +34,7 @@ Business invariants live in `integrity.py` and `wireformat.py` (called from `cor
 
 ## Wireformat and export boundaries
 
-- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) enters emit gates in `core.py`: `assert_database_valid()` → `integrity.assert_exportable_*()` → `wireformat` (formatting only; no business validation).
+- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) enters emit gates in `core.py`: `assert_database_valid()` → `integrity.assert_exportable_*()` → `routing.resolve_*()` (AllowedIPs) → `wireformat` (formatting only; no business validation).
 - `allowed_ips` is validated in `core.validate_allowed_ips()` (shared with CLI).
 - `wireformat` MUST NOT interpolate DB values without prior `assert_exportable_*` validation in the emit gate.
 

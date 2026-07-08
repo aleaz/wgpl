@@ -58,9 +58,11 @@ A peer is **active** when it is not soft-deleted and not expired
 | Secrets in JSON | `peer list --json` / `peer show --json` omit private keys and PSK |
 | Multi-interface secrets | `peer show --show-secrets`, `peer config`, `peer qr`, and scoped audit history require `-i` when >1 interface |
 
-## Schema (v1)
+## Schema (v2)
 
-Tables: `interfaces`, `peers`, `audit_events`. Append-only audit enforced by SQLite
+Tables: `interfaces`, `peers`, `audit_events`. Routing intent columns on v2:
+`interfaces.routed_networks`; `peers.role`, `routed_networks`, `allowed_ips_policy`,
+`custom_allowed_ips`. See [docs/ROUTING.md](docs/ROUTING.md). Append-only audit enforced by SQLite
 triggers recreated on every `init_db()` (never `IF NOT EXISTS` for security triggers).
 Weakened or extra triggers are **detected on every live DB open**; `wgpl db doctor` diagnoses issues and `wgpl db doctor --repair` reinstalls triggers and normalizes `deleted_at`.
 

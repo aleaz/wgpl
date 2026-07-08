@@ -23,6 +23,7 @@ def valid_backup_path(tmp_path: Path) -> str:
             name TEXT NOT NULL, endpoint TEXT NOT NULL,
             port INTEGER NOT NULL DEFAULT 51820, public_key TEXT NOT NULL UNIQUE,
             address_pool TEXT NOT NULL, dns TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+            routed_networks TEXT,
             UNIQUE(name, endpoint, port)
         );
         """
@@ -35,6 +36,16 @@ def valid_backup_path(tmp_path: Path) -> str:
             public_key TEXT NOT NULL, private_key TEXT NOT NULL,
             preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
             deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
+            role TEXT NOT NULL DEFAULT 'endpoint'
+                CHECK(role IN ('endpoint', 'subnet_router')),
+            routed_networks TEXT,
+            allowed_ips_policy TEXT NOT NULL DEFAULT 'vpn_only'
+                CHECK(allowed_ips_policy IN (
+                    'vpn_only', 'split_tunnel', 'all_remote_networks',
+                    'full_tunnel', 'custom')),
+            custom_allowed_ips TEXT,
+            CHECK(role = 'subnet_router' OR routed_networks IS NULL),
+            CHECK(allowed_ips_policy != 'custom' OR custom_allowed_ips IS NOT NULL),
             FOREIGN KEY(interface_id) REFERENCES interfaces(id) ON DELETE CASCADE
         );
         """
@@ -69,10 +80,10 @@ def valid_backup_path(tmp_path: Path) -> str:
             "CREATE INDEX IF NOT EXISTS idx_audit_interface ON audit_events(interface, occurred_at);"
         )
         db.enforce_audit_immutability(conn)
-        conn.execute("PRAGMA user_version = 1")
+        conn.execute("PRAGMA user_version = 2")
         conn.execute(
             "INSERT INTO \"interfaces\" VALUES(1, 'wg0','vpn.example.com',51820,?,"
-            "'10.0.0.0/24',NULL,NULL,NULL,NULL);",
+            "'10.0.0.0/24',NULL,NULL,NULL,NULL,NULL);",
             (public_key,),
         )
         conn.commit()

@@ -47,6 +47,12 @@ def test_public_peer_rows_redact_secrets() -> None:
             "status": "Active",
             "expires_at": None,
             "deleted_at": None,
+            "role": "endpoint",
+            "routed_networks": None,
+            "allowed_ips_policy": "vpn_only",
+            "custom_allowed_ips": None,
+            "hub_allowed_ips": [],
+            "client_allowed_ips": [],
         }
     ]
     assert "private_key" not in public[0]

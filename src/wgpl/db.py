@@ -68,7 +68,7 @@ _SCHEMA_CORRUPT_MSG = (
     "Run 'wgpl db restore' from a backup or 'wgpl db doctor'."
 )
 
-SCHEMA_USER_VERSION = 1
+SCHEMA_USER_VERSION = 2
 
 _REQUIRED_TABLES = frozenset({"interfaces", "peers", "audit_events"})
 _REQUIRED_INDEXES = frozenset(
@@ -214,6 +214,11 @@ def _assert_index_contract(conn: sqlite3.Connection) -> None:
 def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
     user_version = conn.execute("PRAGMA user_version").fetchone()
     version = int(user_version[0]) if user_version else 0
+    if version == 1:
+        raise WgplException(
+            f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version 1 (expected 2); "
+            "v1 backups are not migratable."
+        )
     if version not in _SUPPORTED_SCHEMA_VERSIONS:
         raise WgplException(
             f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version {version} "
@@ -324,16 +329,17 @@ def init_db(path: str | None = None) -> None:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS interfaces (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name         TEXT NOT NULL,
-                    endpoint     TEXT NOT NULL,
-                    port         INTEGER NOT NULL DEFAULT 51820,
-                    public_key   TEXT NOT NULL UNIQUE,
-                    address_pool TEXT NOT NULL,
-                    dns          TEXT,
-                    desc         TEXT,
-                    mtu          INTEGER,
-                    keepalive    INTEGER,
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name             TEXT NOT NULL,
+                    endpoint         TEXT NOT NULL,
+                    port             INTEGER NOT NULL DEFAULT 51820,
+                    public_key       TEXT NOT NULL UNIQUE,
+                    address_pool     TEXT NOT NULL,
+                    dns              TEXT,
+                    desc             TEXT,
+                    mtu              INTEGER,
+                    keepalive        INTEGER,
+                    routed_networks  TEXT,
                     UNIQUE(name, endpoint, port)
                 );
             """
@@ -341,20 +347,30 @@ def init_db(path: str | None = None) -> None:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS peers (
-                    id           TEXT PRIMARY KEY,
-                    interface_id INTEGER NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
-                    name         TEXT NOT NULL,
-                    ip_address   TEXT NOT NULL,
-                    public_key   TEXT NOT NULL,
-                    private_key  TEXT NOT NULL,
-                    preshared_key TEXT,
-                    created_at   TEXT NOT NULL,
-                    dns          TEXT,
-                    deleted_at   TEXT,
-                    expires_at   TEXT,
-                    desc         TEXT,
-                    mtu          INTEGER,
-                    keepalive    INTEGER
+                    id                 TEXT PRIMARY KEY,
+                    interface_id       INTEGER NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
+                    name               TEXT NOT NULL,
+                    ip_address         TEXT NOT NULL,
+                    public_key         TEXT NOT NULL,
+                    private_key        TEXT NOT NULL,
+                    preshared_key      TEXT,
+                    created_at         TEXT NOT NULL,
+                    dns                TEXT,
+                    deleted_at         TEXT,
+                    expires_at         TEXT,
+                    desc               TEXT,
+                    mtu                INTEGER,
+                    keepalive          INTEGER,
+                    role               TEXT NOT NULL DEFAULT 'endpoint'
+                        CHECK(role IN ('endpoint', 'subnet_router')),
+                    routed_networks    TEXT,
+                    allowed_ips_policy TEXT NOT NULL DEFAULT 'vpn_only'
+                        CHECK(allowed_ips_policy IN (
+                            'vpn_only', 'split_tunnel', 'all_remote_networks',
+                            'full_tunnel', 'custom')),
+                    custom_allowed_ips TEXT,
+                    CHECK(role = 'subnet_router' OR routed_networks IS NULL),
+                    CHECK(allowed_ips_policy != 'custom' OR custom_allowed_ips IS NOT NULL)
                 );
             """
             )
@@ -432,13 +448,14 @@ def add_interface(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
+    routed_networks: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> int:
     """Adds a new WireGuard interface to the database and returns its ID."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             cursor = c.execute(
-                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO interfaces (name, endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive, routed_networks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     name,
                     endpoint,
@@ -449,6 +466,7 @@ def add_interface(
                     desc,
                     mtu,
                     keepalive,
+                    routed_networks,
                 ),
             )
             if cursor.lastrowid is None:
@@ -512,6 +530,7 @@ def update_interface(
     desc: str | None | _UnsetType = _UNSET,
     mtu: int | None | _UnsetType = _UNSET,
     keepalive: int | None | _UnsetType = _UNSET,
+    routed_networks: str | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the interface fields that are not _UNSET."""
@@ -542,6 +561,9 @@ def update_interface(
     if keepalive is not _UNSET:
         updates.append("keepalive = ?")
         params.append(keepalive)
+    if routed_networks is not _UNSET:
+        updates.append("routed_networks = ?")
+        params.append(routed_networks)
 
     if not updates:
         return
@@ -582,13 +604,23 @@ def add_peer(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
+    role: str = "endpoint",
+    routed_networks: str | None = None,
+    allowed_ips_policy: str = "vpn_only",
+    custom_allowed_ips: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Adds a new peer associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
-                "INSERT INTO peers (id, interface_id, name, ip_address, public_key, private_key, preshared_key, created_at, dns, expires_at, desc, mtu, keepalive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO peers (
+                    id, interface_id, name, ip_address, public_key, private_key,
+                    preshared_key, created_at, dns, expires_at, desc, mtu, keepalive,
+                    role, routed_networks, allowed_ips_policy, custom_allowed_ips
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     id,
                     interface_id,
@@ -603,6 +635,10 @@ def add_peer(
                     desc,
                     mtu,
                     keepalive,
+                    role,
+                    routed_networks,
+                    allowed_ips_policy,
+                    custom_allowed_ips,
                 ),
             )
     except sqlite3.IntegrityError as exc:
@@ -800,6 +836,10 @@ def update_peer(
     mtu: int | None | _UnsetType = _UNSET,
     keepalive: int | None | _UnsetType = _UNSET,
     expires_at: str | None | _UnsetType = _UNSET,
+    role: str | _UnsetType = _UNSET,
+    routed_networks: str | None | _UnsetType = _UNSET,
+    allowed_ips_policy: str | _UnsetType = _UNSET,
+    custom_allowed_ips: str | None | _UnsetType = _UNSET,
     conn: sqlite3.Connection | None = None,
 ) -> None:
     """Update only the peer fields that are not _UNSET."""
@@ -827,6 +867,18 @@ def update_peer(
     if expires_at is not _UNSET:
         updates.append("expires_at = ?")
         params.append(expires_at)
+    if role is not _UNSET:
+        updates.append("role = ?")
+        params.append(role)
+    if routed_networks is not _UNSET:
+        updates.append("routed_networks = ?")
+        params.append(routed_networks)
+    if allowed_ips_policy is not _UNSET:
+        updates.append("allowed_ips_policy = ?")
+        params.append(allowed_ips_policy)
+    if custom_allowed_ips is not _UNSET:
+        updates.append("custom_allowed_ips = ?")
+        params.append(custom_allowed_ips)
 
     if not updates:
         return

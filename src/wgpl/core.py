@@ -5,12 +5,14 @@ import qrcode
 import io
 import sqlite3
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from . import db
 from .db import UNSET, UnsetType
 from . import integrity
+from . import routing
+from .routing import AllowedIpsPolicy, PeerRole
 from . import wireformat
 from . import wireguard
 from .audit import (
@@ -59,9 +61,84 @@ def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
         raise ValueError(str(exc)) from exc
 
 
+def _validate_role(role: str) -> str:
+    if role not in {PeerRole.ENDPOINT, PeerRole.SUBNET_ROUTER}:
+        raise ValueError(
+            f"Invalid role '{role}'. Must be '{PeerRole.ENDPOINT}' or "
+            f"'{PeerRole.SUBNET_ROUTER}'."
+        )
+    return role
+
+
+def _validate_allowed_ips_policy(policy: str) -> str:
+    valid = {item.value for item in AllowedIpsPolicy}
+    if policy not in valid:
+        raise ValueError(
+            f"Invalid allowed_ips_policy '{policy}'. Must be one of: "
+            f"{', '.join(sorted(valid))}."
+        )
+    return policy
+
+
+def _normalize_routed_networks(value: str, *, address_pool: str) -> str:
+    normalized = routing.normalize_cidr_list(value)
+    integrity.validate_routed_networks_list(
+        normalized,
+        field="routed_networks",
+        address_pool=address_pool,
+        tunnel_ip=None,
+    )
+    return normalized
+
+
+def _normalize_custom_allowed_ips(value: str) -> str:
+    return routing.normalize_cidr_list(value)
+
+
+def _resolve_peer_routing_for_write(
+    *,
+    role: str,
+    routed_networks: str | None,
+    allowed_ips_policy: str,
+    custom_allowed_ips: str | None,
+    address_pool: str,
+) -> tuple[str, str | None, str, str | None]:
+    """Validate and normalize routing fields for peer create/update."""
+    validated_role = _validate_role(role)
+    validated_policy = _validate_allowed_ips_policy(allowed_ips_policy)
+
+    normalized_routed: str | None = None
+    if routed_networks is not None:
+        normalized_routed = _normalize_routed_networks(
+            routed_networks, address_pool=address_pool
+        )
+
+    if validated_role == PeerRole.ENDPOINT:
+        if normalized_routed is not None:
+            raise ValueError("endpoint peers must not have routed_networks")
+    elif normalized_routed is None:
+        raise ValueError("subnet_router requires routed_networks")
+
+    normalized_custom: str | None = None
+    if validated_policy == AllowedIpsPolicy.CUSTOM:
+        if custom_allowed_ips is None:
+            raise ValueError(
+                "custom_allowed_ips is required when allowed_ips_policy is custom"
+            )
+        normalized_custom = _normalize_custom_allowed_ips(custom_allowed_ips)
+    elif custom_allowed_ips is not None:
+        raise ValueError(
+            "custom_allowed_ips is only valid when allowed_ips_policy is custom"
+        )
+
+    return validated_role, normalized_routed, validated_policy, normalized_custom
+
+
 __all__ = [
+    "AllowedIpsPolicy",
     "PeerAccess",
     "PeerResolvePolicy",
+    "PeerRole",
     "add_interface",
     "add_peer",
     "allocate_peer_ip",
@@ -73,7 +150,9 @@ __all__ = [
     "get_effective_dns",
     "get_interface_by_ref",
     "get_interface_config",
+    "explain_peer_routing",
     "get_peer_config",
+    "get_peer_config_payload",
     "get_peer_qr",
     "get_peer_qr_png_bytes",
     "get_peer_status",
@@ -83,6 +162,7 @@ __all__ = [
     "list_peer_audit_history",
     "list_peers",
     "peer_row_to_public_dict",
+    "peer_rows_to_public_dicts",
     "prune_peers",
     "remove_interface",
     "remove_peer",
@@ -148,7 +228,75 @@ def peer_row_to_public_dict(
         "status": get_peer_status(peer),
         "expires_at": _peer_optional_field(peer, "expires_at"),
         "deleted_at": _peer_optional_field(peer, "deleted_at"),
+        "role": str(_peer_optional_field(peer, "role") or PeerRole.ENDPOINT),
+        "routed_networks": _peer_optional_field(peer, "routed_networks"),
+        "allowed_ips_policy": str(
+            _peer_optional_field(peer, "allowed_ips_policy")
+            or AllowedIpsPolicy.VPN_ONLY
+        ),
+        "custom_allowed_ips": _peer_optional_field(peer, "custom_allowed_ips"),
     }
+
+
+def _active_peers_on_interface(
+    interface_id: int,
+) -> list[sqlite3.Row]:
+    """Return all active peers on an interface (for routing derivation)."""
+    return [row for row in db.list_peers(interface_id) if integrity.is_peer_active(row)]
+
+
+def _derived_allowed_ips_for_peer(
+    peer: sqlite3.Row | Mapping[str, object],
+    iface: sqlite3.Row | Mapping[str, object],
+    active_peers: Sequence[sqlite3.Row | Mapping[str, object]],
+) -> tuple[list[str], list[str]]:
+    """Return (hub_allowed_ips, client_allowed_ips) for an active peer."""
+    hub_ips = routing.resolve_hub_allowed_ips(peer)
+    client_ips = routing.resolve_client_allowed_ips(peer, iface, active_peers)
+    return hub_ips, client_ips
+
+
+def _interface_routing_context(
+    interface_id: int,
+) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    """Return interface row and active peers for routing; empty when DB unavailable."""
+    try:
+        iface = db.get_interface(interface_id)
+    except WgplException:
+        return None, []
+    if iface is None:
+        return None, []
+    return iface, _active_peers_on_interface(interface_id)
+
+
+def peer_rows_to_public_dicts(
+    peers: Sequence[sqlite3.Row | Mapping[str, object]],
+    iface_dns: dict[int, str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert peer rows to JSON-safe dicts including derived AllowedIPs."""
+    iface_dns_map = iface_dns or {}
+    iface_cache: dict[int, tuple[sqlite3.Row | None, list[sqlite3.Row]]] = {}
+    result: list[dict[str, Any]] = []
+
+    for peer in peers:
+        iface_id = int(str(peer["interface_id"]))
+        if iface_id not in iface_cache:
+            iface_cache[iface_id] = _interface_routing_context(iface_id)
+
+        iface, active_peers = iface_cache[iface_id]
+        record = peer_row_to_public_dict(peer, iface_dns_map)
+        if iface is not None and integrity.is_peer_active(peer):
+            hub_ips, client_ips = _derived_allowed_ips_for_peer(
+                peer, iface, active_peers
+            )
+            record["hub_allowed_ips"] = hub_ips
+            record["client_allowed_ips"] = client_ips
+        else:
+            record["hub_allowed_ips"] = []
+            record["client_allowed_ips"] = []
+        result.append(record)
+
+    return result
 
 
 def get_effective_dns(peer_dns: str | None, iface_dns: str | None) -> str | None:
@@ -174,6 +322,10 @@ def _peer_actual_changed_fields(
         "mtu": "mtu",
         "keepalive": "keepalive",
         "expires": "expires_at",
+        "role": "role",
+        "routed_networks": "routed_networks",
+        "allowed_ips_policy": "allowed_ips_policy",
+        "custom_allowed_ips": "custom_allowed_ips",
     }
     changed: dict[str, dict[str, Any]] = {}
     for field in candidates:
@@ -198,6 +350,7 @@ def _interface_actual_changed_fields(
         "desc": "desc",
         "mtu": "mtu",
         "keepalive": "keepalive",
+        "routed_networks": "routed_networks",
     }
     changed: dict[str, dict[str, Any]] = {}
     for field in candidates:
@@ -217,6 +370,7 @@ def add_interface(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
+    routed_networks: str | None = None,
 ) -> dict[str, Any]:
     """Register a new interface in the DB."""
     name = name.strip()
@@ -239,6 +393,11 @@ def add_interface(
 
     normalized_dns = validate_dns(dns) if dns is not None else None
     _validate_mtu_keepalive(mtu, keepalive)
+    normalized_routed: str | None = None
+    if routed_networks is not None:
+        normalized_routed = _normalize_routed_networks(
+            routed_networks, address_pool=normalized_pool
+        )
 
     with db.transaction() as conn:
         iface_id = db.add_interface(
@@ -251,6 +410,7 @@ def add_interface(
             desc=desc,
             mtu=mtu,
             keepalive=keepalive,
+            routed_networks=normalized_routed,
             conn=conn,
         )
         _audit_interface_event(
@@ -276,6 +436,8 @@ def add_interface(
         result["mtu"] = mtu
     if keepalive is not None:
         result["keepalive"] = keepalive
+    if normalized_routed is not None:
+        result["routed_networks"] = normalized_routed
     return result
 
 
@@ -402,6 +564,10 @@ def add_peer(
     desc: str | None = None,
     mtu: int | None = None,
     keepalive: int | None = None,
+    role: str = PeerRole.ENDPOINT,
+    routed_networks: str | None = None,
+    allowed_ips_policy: str = AllowedIpsPolicy.VPN_ONLY,
+    custom_allowed_ips: str | None = None,
 ) -> dict[str, Any]:
     """
     Creates a new peer, allocates an IP, generates keys and saves it to the DB.
@@ -437,6 +603,16 @@ def add_peer(
         if not iface:
             raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
+        validated_role, normalized_routed, validated_policy, normalized_custom = (
+            _resolve_peer_routing_for_write(
+                role=role,
+                routed_networks=routed_networks,
+                allowed_ips_policy=allowed_ips_policy,
+                custom_allowed_ips=custom_allowed_ips,
+                address_pool=str(iface["address_pool"]),
+            )
+        )
+
         prospective_peer: dict[str, object] = {
             "id": peer_id,
             "interface_id": iface_id,
@@ -446,6 +622,10 @@ def add_peer(
             "preshared_key": preshared_key,
             "deleted_at": None,
             "expires_at": expires_at,
+            "role": validated_role,
+            "routed_networks": normalized_routed,
+            "allowed_ips_policy": validated_policy,
+            "custom_allowed_ips": normalized_custom,
         }
         integrity.assert_peer_activation(
             prospective_peer, iface, conn=conn, exclude_peer_id=peer_id
@@ -465,6 +645,10 @@ def add_peer(
             desc=desc,
             mtu=mtu,
             keepalive=keepalive,
+            role=validated_role,
+            routed_networks=normalized_routed,
+            allowed_ips_policy=validated_policy,
+            custom_allowed_ips=normalized_custom,
             conn=conn,
         )
 
@@ -491,6 +675,10 @@ def add_peer(
         "desc": desc,
         "mtu": mtu,
         "keepalive": keepalive,
+        "role": validated_role,
+        "routed_networks": normalized_routed,
+        "allowed_ips_policy": validated_policy,
+        "custom_allowed_ips": normalized_custom,
     }
 
 
@@ -562,16 +750,20 @@ def _emit_server_config(interface_ref: str) -> str:
 
     integrity.assert_exportable_interface(iface)
     peers = db.list_peers(iface_id)
+    peer_exports: list[tuple[sqlite3.Row | Mapping[str, object], list[str]]] = []
     for peer in peers:
-        if integrity.is_peer_active(peer):
-            integrity.assert_exportable_peer(peer, iface, mode="server")
+        if not integrity.is_peer_active(peer):
+            continue
+        integrity.assert_exportable_peer(peer, iface, mode="server")
+        hub_ips = routing.resolve_hub_allowed_ips(peer)
+        peer_exports.append((peer, hub_ips))
 
-    return wireformat.build_server_config(iface, peers)
+    return wireformat.build_server_config(iface, peer_exports)
 
 
 def _emit_client_config(
     peer_id: str,
-    allowed_ips: str,
+    allowed_ips: str | None = None,
     *,
     interface_ref: str | None = None,
 ) -> str:
@@ -598,12 +790,20 @@ def _emit_client_config(
 
     integrity.assert_exportable_interface(iface)
     integrity.assert_exportable_peer(peer, iface, mode="client")
+    if allowed_ips is None:
+        active_peers = [
+            row
+            for row in db.list_peers(int(str(peer["interface_id"])))
+            if integrity.is_peer_active(row)
+        ]
+        resolved = routing.resolve_client_allowed_ips(peer, iface, active_peers)
+        allowed_ips = ",".join(resolved)
     return wireformat.build_client_config(peer, iface, allowed_ips)
 
 
 def get_peer_config(
     peer_id: str,
-    allowed_ips: str = "0.0.0.0/0",
+    allowed_ips: str | None = None,
     *,
     interface_ref: str | None = None,
 ) -> str:
@@ -611,9 +811,124 @@ def get_peer_config(
     return _emit_client_config(peer_id, allowed_ips, interface_ref=interface_ref)
 
 
+def get_peer_config_payload(
+    peer_id: str,
+    allowed_ips: str | None = None,
+    *,
+    interface_ref: str | None = None,
+) -> dict[str, Any]:
+    """Return client config text plus derived AllowedIPs metadata for JSON output."""
+    config = get_peer_config(
+        peer_id, allowed_ips=allowed_ips, interface_ref=interface_ref
+    )
+    canonical_id = resolve_peer_ref(
+        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
+    )
+    peer = db.get_peer(canonical_id)
+    if not peer or not integrity.is_peer_active(peer):
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    iface = db.get_interface(peer["interface_id"])
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
+
+    if allowed_ips is None:
+        active_peers = _active_peers_on_interface(int(str(peer["interface_id"])))
+        client_ips = routing.resolve_client_allowed_ips(peer, iface, active_peers)
+        source = "derived"
+    else:
+        client_ips = [part.strip() for part in allowed_ips.split(",") if part.strip()]
+        source = "override"
+
+    return {
+        "config": config,
+        "client_allowed_ips": client_ips,
+        "allowed_ips_source": source,
+    }
+
+
+def explain_peer_routing(
+    peer_id: str,
+    *,
+    interface_ref: str | None = None,
+) -> dict[str, Any]:
+    """Explain derived hub/client AllowedIPs and LAN↔LAN four-leg checklist."""
+    canonical_id = resolve_peer_ref(peer_id, interface_ref, access=PeerAccess.MUTATE)
+    peer = db.get_peer(canonical_id)
+    if not peer:
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    iface = db.get_interface(peer["interface_id"])
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
+
+    iface_dns = interface_dns_map()
+    public = peer_rows_to_public_dicts([peer], iface_dns)[0]
+    role = str(_peer_optional_field(peer, "role") or PeerRole.ENDPOINT)
+    policy = str(
+        _peer_optional_field(peer, "allowed_ips_policy") or AllowedIpsPolicy.VPN_ONLY
+    )
+
+    hub_ips: list[str] = list(public["hub_allowed_ips"])
+    client_ips: list[str] = list(public["client_allowed_ips"])
+    checklist: list[dict[str, Any]] = []
+
+    if integrity.is_peer_active(peer) and role == PeerRole.SUBNET_ROUTER:
+        local_lans = routing.parse_cidr_list(
+            str(_peer_optional_field(peer, "routed_networks") or "")
+        )
+        active_peers = _active_peers_on_interface(int(str(peer["interface_id"])))
+        other_routers = [
+            row
+            for row in active_peers
+            if str(_peer_optional_field(row, "role") or PeerRole.ENDPOINT)
+            == PeerRole.SUBNET_ROUTER
+            and str(row["id"]) != str(peer["id"])
+        ]
+
+        for other in other_routers:
+            other_hub = routing.resolve_hub_allowed_ips(other)
+            other_client = routing.resolve_client_allowed_ips(
+                other, iface, active_peers
+            )
+            other_lans = routing.parse_cidr_list(
+                str(_peer_optional_field(other, "routed_networks") or "")
+            )
+            local_hub_ok = all(str(net) in hub_ips for net in local_lans)
+            remote_hub_ok = all(str(net) in other_hub for net in other_lans)
+            local_client_ok = all(str(net) in client_ips for net in other_lans)
+            remote_client_ok = all(str(net) in other_client for net in local_lans)
+            checklist.append(
+                {
+                    "remote_peer": str(other["name"]),
+                    "hub_local_routes_local_lan": local_hub_ok,
+                    "hub_remote_routes_remote_lan": remote_hub_ok,
+                    "local_client_routes_remote_lan": local_client_ok,
+                    "remote_client_routes_local_lan": remote_client_ok,
+                    "complete": (
+                        local_hub_ok
+                        and remote_hub_ok
+                        and local_client_ok
+                        and remote_client_ok
+                    ),
+                }
+            )
+
+    return {
+        "peer": public,
+        "role": role,
+        "allowed_ips_policy": policy,
+        "hub_allowed_ips": hub_ips,
+        "client_allowed_ips": client_ips,
+        "interface_routed_networks": _peer_optional_field(iface, "routed_networks"),
+        "peer_routed_networks": _peer_optional_field(peer, "routed_networks"),
+        "lan_to_lan_checklist": checklist,
+    }
+
+
 def get_peer_qr(
     peer_id: str,
-    allowed_ips: str = "0.0.0.0/0",
+    allowed_ips: str | None = None,
     *,
     interface_ref: str | None = None,
 ) -> str:
@@ -631,7 +946,7 @@ def get_peer_qr(
 
 def get_peer_qr_png_bytes(
     peer_id: str,
-    allowed_ips: str = "0.0.0.0/0",
+    allowed_ips: str | None = None,
     *,
     interface_ref: str | None = None,
 ) -> bytes:
@@ -678,6 +993,9 @@ def _interface_row_to_dict(iface: sqlite3.Row) -> dict[str, Any]:
         "public_key": iface["public_key"],
         "address_pool": iface["address_pool"],
         "dns": iface["dns"],
+        "routed_networks": iface["routed_networks"]
+        if "routed_networks" in iface.keys()
+        else None,
     }
 
 
@@ -705,6 +1023,8 @@ def update_interface(
     clear_mtu: bool = False,
     keepalive: int | None = None,
     clear_keepalive: bool = False,
+    routed_networks: str | None = None,
+    clear_routed_networks: bool = False,
 ) -> dict[str, str | int | list[str] | None]:
     """Update interface fields. Returns the updated row and operational hints."""
     if clear_dns and dns is not None:
@@ -715,10 +1035,22 @@ def update_interface(
         raise ValueError("Cannot set both mtu and clear_mtu")
     if clear_keepalive and keepalive is not None:
         raise ValueError("Cannot set both keepalive and clear_keepalive")
+    if clear_routed_networks and routed_networks is not None:
+        raise ValueError("Cannot set both routed_networks and clear_routed_networks")
 
     has_field = any(
         v is not None
-        for v in (endpoint, port, public_key, address_pool, dns, desc, mtu, keepalive)
+        for v in (
+            endpoint,
+            port,
+            public_key,
+            address_pool,
+            dns,
+            desc,
+            mtu,
+            keepalive,
+            routed_networks,
+        )
     )
     if (
         not has_field
@@ -726,6 +1058,7 @@ def update_interface(
         and not clear_desc
         and not clear_mtu
         and not clear_keepalive
+        and not clear_routed_networks
     ):
         raise NoUpdateFieldsError("No fields provided to update")
 
@@ -740,6 +1073,8 @@ def update_interface(
         or clear_dns
         or clear_mtu
         or clear_keepalive
+        or routed_networks is not None
+        or clear_routed_networks
     ):
         if "re_export_clients" not in hints:
             hints.append("re_export_clients")
@@ -784,6 +1119,10 @@ def update_interface(
     elif keepalive is not None:
         normalized_keepalive = keepalive
 
+    normalized_routed: str | None | UnsetType = UNSET
+    if clear_routed_networks:
+        normalized_routed = None
+
     changed_fields: list[str] = []
     if endpoint is not None:
         changed_fields.append("endpoint")
@@ -801,12 +1140,20 @@ def update_interface(
         changed_fields.append("mtu")
     if keepalive is not None or clear_keepalive:
         changed_fields.append("keepalive")
+    if routed_networks is not None or clear_routed_networks:
+        changed_fields.append("routed_networks")
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(ref, conn=conn)
         iface = db.get_interface(iface_id, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface {ref} not found")
+
+        if routed_networks is not None:
+            pool_for_routes = normalized_pool or str(iface["address_pool"])
+            normalized_routed = _normalize_routed_networks(
+                routed_networks, address_pool=pool_for_routes
+            )
 
         name = str(iface["name"])
 
@@ -828,6 +1175,7 @@ def update_interface(
             desc=normalized_desc,
             mtu=normalized_mtu,
             keepalive=normalized_keepalive,
+            routed_networks=normalized_routed,
             conn=conn,
         )
 
@@ -872,6 +1220,12 @@ def update_peer(
     clear_keepalive: bool = False,
     expires: str | None = None,
     clear_expires: bool = False,
+    role: str | None = None,
+    routed_networks: str | None = None,
+    clear_routed_networks: bool = False,
+    allowed_ips_policy: str | None = None,
+    custom_allowed_ips: str | None = None,
+    clear_custom_allowed_ips: bool = False,
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if name is not None:
@@ -886,9 +1240,28 @@ def update_peer(
         raise ValueError("Cannot set both keepalive and clear_keepalive")
     if clear_expires and expires is not None:
         raise ValueError("Cannot set both expires and clear_expires")
+    if clear_routed_networks and routed_networks is not None:
+        raise ValueError("Cannot set both routed_networks and clear_routed_networks")
+    if clear_custom_allowed_ips and custom_allowed_ips is not None:
+        raise ValueError(
+            "Cannot set both custom_allowed_ips and clear_custom_allowed_ips"
+        )
 
     has_field = any(
-        v is not None for v in (name, ip_address, dns, desc, mtu, keepalive, expires)
+        v is not None
+        for v in (
+            name,
+            ip_address,
+            dns,
+            desc,
+            mtu,
+            keepalive,
+            expires,
+            role,
+            routed_networks,
+            allowed_ips_policy,
+            custom_allowed_ips,
+        )
     )
     if (
         not has_field
@@ -897,6 +1270,8 @@ def update_peer(
         and not clear_mtu
         and not clear_keepalive
         and not clear_expires
+        and not clear_routed_networks
+        and not clear_custom_allowed_ips
     ):
         raise NoUpdateFieldsError("No fields provided to update")
 
@@ -908,8 +1283,21 @@ def update_peer(
         or clear_dns
         or clear_mtu
         or clear_keepalive
+        or role is not None
+        or routed_networks is not None
+        or clear_routed_networks
+        or allowed_ips_policy is not None
+        or custom_allowed_ips is not None
+        or clear_custom_allowed_ips
     ):
         hints.append("re_export_client")
+    if (
+        role is not None
+        or routed_networks is not None
+        or clear_routed_networks
+        or ip_address is not None
+    ):
+        hints.append("apply_server")
 
     _validate_mtu_keepalive(mtu, keepalive)
 
@@ -938,6 +1326,14 @@ def update_peer(
         changed_fields.append("keepalive")
     if expires is not None or clear_expires:
         changed_fields.append("expires")
+    if role is not None:
+        changed_fields.append("role")
+    if routed_networks is not None or clear_routed_networks:
+        changed_fields.append("routed_networks")
+    if allowed_ips_policy is not None:
+        changed_fields.append("allowed_ips_policy")
+    if custom_allowed_ips is not None or clear_custom_allowed_ips:
+        changed_fields.append("custom_allowed_ips")
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
@@ -983,6 +1379,66 @@ def update_peer(
         if not iface:
             raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
+        effective_role = (
+            _validate_role(role)
+            if role is not None
+            else str(before["role"] or PeerRole.ENDPOINT)
+        )
+        effective_routed: str | None | UnsetType = UNSET
+        if clear_routed_networks:
+            effective_routed = None
+        elif routed_networks is not None:
+            effective_routed = _normalize_routed_networks(
+                routed_networks, address_pool=str(iface["address_pool"])
+            )
+        elif role is not None and effective_role == PeerRole.ENDPOINT:
+            effective_routed = None
+
+        effective_policy = (
+            _validate_allowed_ips_policy(allowed_ips_policy)
+            if allowed_ips_policy is not None
+            else str(before["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY)
+        )
+
+        effective_custom: str | None | UnsetType = UNSET
+        if clear_custom_allowed_ips:
+            effective_custom = None
+        elif custom_allowed_ips is not None:
+            effective_custom = _normalize_custom_allowed_ips(custom_allowed_ips)
+        elif (
+            allowed_ips_policy is not None
+            and effective_policy != AllowedIpsPolicy.CUSTOM
+        ):
+            effective_custom = None
+
+        if effective_routed is UNSET:
+            current_routed = before["routed_networks"]
+            resolved_routed = (
+                str(current_routed) if current_routed is not None else None
+            )
+        elif effective_routed is None:
+            resolved_routed = None
+        else:
+            resolved_routed = str(effective_routed)
+
+        if effective_custom is UNSET:
+            current_custom = before["custom_allowed_ips"]
+            resolved_custom = (
+                str(current_custom) if current_custom is not None else None
+            )
+        elif effective_custom is None:
+            resolved_custom = None
+        else:
+            resolved_custom = str(effective_custom)
+
+        _resolve_peer_routing_for_write(
+            role=effective_role,
+            routed_networks=resolved_routed,
+            allowed_ips_policy=effective_policy,
+            custom_allowed_ips=resolved_custom,
+            address_pool=str(iface["address_pool"]),
+        )
+
         prospective_peer = dict(peer)
         if name is not None:
             prospective_peer["name"] = name
@@ -990,6 +1446,10 @@ def update_peer(
             prospective_peer["ip_address"] = str(validated_ip)
         if normalized_expires is not UNSET:
             prospective_peer["expires_at"] = normalized_expires
+        prospective_peer["role"] = effective_role
+        prospective_peer["routed_networks"] = resolved_routed
+        prospective_peer["allowed_ips_policy"] = effective_policy
+        prospective_peer["custom_allowed_ips"] = resolved_custom
         if integrity.is_peer_active(prospective_peer):
             integrity.assert_peer_activation(
                 prospective_peer,
@@ -1015,6 +1475,12 @@ def update_peer(
                 mtu=normalized_mtu,
                 keepalive=normalized_keepalive,
                 expires_at=normalized_expires,
+                role=effective_role if role is not None else UNSET,
+                routed_networks=effective_routed,
+                allowed_ips_policy=(
+                    effective_policy if allowed_ips_policy is not None else UNSET
+                ),
+                custom_allowed_ips=effective_custom,
                 conn=conn,
             )
         except PeerAlreadyExistsError:
@@ -1046,5 +1512,11 @@ def update_peer(
         "keepalive": _effective_peer_keepalive(updated, iface),
         "keepalive_override": updated["keepalive"],
         "expires_at": updated["expires_at"],
+        "role": str(updated["role"] or PeerRole.ENDPOINT),
+        "routed_networks": updated["routed_networks"],
+        "allowed_ips_policy": str(
+            updated["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY
+        ),
+        "custom_allowed_ips": updated["custom_allowed_ips"],
         "hints": list(dict.fromkeys(hints)),
     }
