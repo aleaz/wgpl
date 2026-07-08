@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Intent-based hub-and-spoke routing: `routing.py` derives hub and client `AllowedIPs` from stored intent (`role`, `routed_networks`, `allowed_ips_policy`); derived values are never persisted
+- Routing intent on interfaces and peers: `interfaces.routed_networks`; `peers.role` (`endpoint` | `subnet_router`), `routed_networks`, `allowed_ips_policy`, `custom_allowed_ips`
+- CLI routing flags: `--role`, `--routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips` (and `--clear-*` counterparts) on `peer add` / `peer update`; `--routed-networks` on `interface add` / `interface update`
+- `wgpl peer explain` — derived hub/client AllowedIPs and LAN↔LAN four-leg checklist for subnet routers
+- `wgpl validate` routing topology checks (overlapping site LANs, pool overlap, asymmetric remote access, subnet-router keepalive warnings)
+- JSON export metadata: `hub_allowed_ips` and `client_allowed_ips` on `peer list` / `peer show`; `client_allowed_ips` and `allowed_ips_source` on `peer config --json`
+- Documentation: `docs/ROUTING.md`, `docs/routing_matrix.md`, domain model and architecture verification in `DESIGN.md`, hub relay procedures in `docs/runbook.md`
 - Exact SQLite schema contract on restore (reject extra tables, indexes, triggers, or views)
 - Wire-safe MTU (1280–65535) and keepalive (0–65535) validation on export, apply preflight, and mutations
 - `dbpath.open_exclusive_output()` for hardened CLI secret output paths
@@ -16,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FastAPI self-service example: fail-closed `WGPL_PORTAL_API_KEY` guard with `secrets.compare_digest`
 - Docker workflow: Trivy scans local image before registry push
 - CI job `permissions: contents: read` (least privilege)
+- Tests: routing derivation and topology (`tests/test_routing.py`, `tests/test_validate_topology.py`, `tests/test_cli_routing.py`)
 - Tests: restore schema adversarial cases, output path hardening, wireformat MTU/keepalive, FastAPI guard
 
 ### Migration
@@ -28,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (unreleased):** `peer config` and `peer qr` derive client `AllowedIPs` from `allowed_ips_policy` by default; `--allowed-ips` overrides a single export only (previous default was full tunnel `0.0.0.0/0`)
+- Hub `interface export` and `apply` emit subnet-router `AllowedIPs` as tunnel `/32` plus advertised LAN prefixes (not tunnel `/32` only)
+- `wgpl validate` reports routing topology issues with severities; errors exit 1, warnings exit 0
+- Audit `updated` events include diffs for routing intent fields (`role`, `routed_networks`, `allowed_ips_policy`, `custom_allowed_ips`)
 - **Breaking:** minimum MTU for mutations and export is **1280** (was 576)
 - `validate_state` delegates interface wire-field checks to `integrity.validate_wire_interface_fields`
 - `dbpath` on Linux closes validation fd after connect; macOS re-checks inode before path-based open
