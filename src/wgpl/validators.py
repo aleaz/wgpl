@@ -73,11 +73,11 @@ def validate_peer_name(name: str) -> str:
     """Validate and normalize peer names used in DB and CLI output."""
     normalized = name.strip()
     if not normalized:
-        raise ValueError("Peer name cannot be empty")
+        raise ValueError("Name cannot be empty")
     if len(normalized) > 64:
-        raise ValueError("Peer name must be at most 64 characters")
+        raise ValueError("Name must be at most 64 characters")
     if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", normalized):
         raise ValueError(
-            "Peer name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
+            "Name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
         )
     return normalized

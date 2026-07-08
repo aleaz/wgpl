@@ -12,17 +12,17 @@ from .exceptions import WgplException
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
-def normalize_db_path(db_path: str) -> str:
+def normalize_db_path(db_path: str, *, label: str = "Database path") -> str:
     """Normalize DB path and reject invalid targets."""
     if not isinstance(db_path, str) or not db_path.strip():
-        raise WgplException("Database path must be a non-empty string")
+        raise WgplException(f"{label} must be a non-empty string")
     if "\x00" in db_path:
-        raise WgplException("Database path contains invalid null bytes")
+        raise WgplException(f"{label} contains invalid null bytes")
     expanded = os.path.expanduser(db_path)
     return os.path.abspath(expanded)
 
 
-def validate_path_target(db_path: str) -> None:
+def validate_path_target(db_path: str, *, label: str = "Database path") -> None:
     """Reject symlinks, directories, and non-regular files at db_path."""
     try:
         st = os.lstat(db_path)
@@ -30,14 +30,14 @@ def validate_path_target(db_path: str) -> None:
         return
 
     if stat.S_ISLNK(st.st_mode):
-        raise WgplException(f"Database path must not be a symlink: {db_path}")
+        raise WgplException(f"{label} must not be a symlink: {db_path}")
 
     if stat.S_ISDIR(st.st_mode):
-        raise WgplException(f"Database path is a directory: {db_path}")
+        raise WgplException(f"{label} is a directory: {db_path}")
 
     if not stat.S_ISREG(st.st_mode):
         raise WgplException(
-            f"Database path must be a regular file (got mode {st.st_mode:o}): {db_path}"
+            f"{label} must be a regular file (got mode {st.st_mode:o}): {db_path}"
         )
 
 
@@ -83,8 +83,8 @@ def secure_open(
 
 def open_exclusive_output(output_path: str) -> int:
     """Create an exclusive output file (O_NOFOLLOW, O_EXCL, mode 0o600)."""
-    path = normalize_db_path(output_path)
-    validate_path_target(path)
+    path = normalize_db_path(output_path, label="Output path")
+    validate_path_target(path, label="Output path")
     parent = os.path.dirname(path) or "."
     if not os.path.isdir(parent):
         raise WgplException(f"Output directory does not exist: {parent}")

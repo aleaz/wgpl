@@ -156,6 +156,7 @@ __all__ = [
     "get_effective_dns",
     "get_interface_by_ref",
     "get_interface_config",
+    "get_node_by_ref",
     "explain_peer_routing",
     "get_peer_config",
     "get_peer_config_payload",
