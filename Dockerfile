@@ -32,8 +32,11 @@ WORKDIR /app
 # Copy ONLY the built wheel from the builder stage
 COPY --from=builder /build/dist/*.whl ./
 
-# Install the wheel directly and remove it to keep the layer small
-RUN pip install --no-cache-dir *.whl && rm *.whl
+# Install the wheel; upgrade pip for install, then remove pip from runtime
+RUN pip install --no-cache-dir --upgrade "pip>=26.1" \
+ && pip install --no-cache-dir *.whl \
+ && rm *.whl \
+ && pip uninstall -y pip
 
 # Configure the persistent data volume
 VOLUME ["/data"]
