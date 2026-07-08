@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import datetime
+import uuid
+
 from wgpl import core, db
 import wgpl.cli as cli_module
 from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
@@ -15,7 +18,18 @@ from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
 runner = CliRunner()
 
 
-def test_public_peer_rows_redact_secrets() -> None:
+def _ensure_node(name: str) -> str:
+    existing = db.get_node_by_name(name)
+    if existing is not None:
+        return str(existing["id"])
+    node_id = str(uuid.uuid4())
+    db.add_node(
+        node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()
+    )
+    return node_id
+
+
+def test_public_peer_rows_redact_secrets(wgpl_db: str) -> None:
     rows = [
         {
             "id": "peer-id",
@@ -38,7 +52,9 @@ def test_public_peer_rows_redact_secrets() -> None:
         {
             "id": "peer-id",
             "interface_id": "1",
+            "node_id": None,
             "name": "phone",
+            "node": "phone",
             "ip_address": "10.0.0.2",
             "public_key": "pub",
             "created_at": "2026-01-01T00:00:00+00:00",
@@ -347,7 +363,7 @@ def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:
     db.add_peer(
         id="55c521ad-2d94-4689-8abc-111111111111",
         interface_id=iface_a,
-        name="phone",
+        node_id=_ensure_node("phone"),
         ip_address="10.0.0.2",
         public_key=keypair.public_key,
         private_key=keypair.private_key,
@@ -357,7 +373,7 @@ def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:
     db.add_peer(
         id="55c521ad-ff94-4689-8abc-222222222222",
         interface_id=iface_b,
-        name="laptop",
+        node_id=_ensure_node("laptop"),
         ip_address="10.0.1.2",
         public_key=keypair_b.public_key,
         private_key=keypair_b.private_key,

@@ -64,18 +64,25 @@ def _format_validation_issues(
 
 
 def _validate_restored_data() -> None:
-    """Run consistency and full wire-format checks on WGPL_DB_PATH."""
+    """Run consistency and full wire-format checks on WGPL_DB_PATH.
+
+    Fail-closed on error-severity issues only. Warnings (e.g. a subnet router
+    without an effective keepalive) never block a restore, matching the
+    semantics of ``wgpl validate`` and ``integrity.assert_database_valid`` — a
+    state the CLI can create must always be restorable from its own backup.
+    """
     results = (
         validate_state(),
         integrity.validate_database(full=True),
     )
-    issues: list[dict[str, str | None]] = []
+    errors: list[dict[str, str | None]] = []
     for result in results:
-        if result["status"] != "ok":
-            issues.extend(cast(list[dict[str, str | None]], result["issues"]))
-    if issues:
+        for issue in cast(list[dict[str, str | None]], result["issues"]):
+            if issue.get("severity", "error") == "error":
+                errors.append(issue)
+    if errors:
         raise WgplException(
-            f"Restored database failed validation: {_format_validation_issues(issues)}"
+            f"Restored database failed validation: {_format_validation_issues(errors)}"
         )
 
 

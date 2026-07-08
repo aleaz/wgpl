@@ -287,12 +287,12 @@ def test_json_peer_update(wgpl_db: str, iface_pubkey: str) -> None:
 
     result = runner.invoke(
         app,
-        ["--json", "peer", "update", "wg0", peer["id"], "--name", "Work"],
+        ["--json", "peer", "update", "wg0", peer["id"], "--dns", "8.8.8.8"],
     )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["name"] == "Work"
+    assert payload["dns"] == "8.8.8.8"
     assert payload["id"] == peer["id"]
 
 

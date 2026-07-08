@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import uuid
 
 import pytest
 
@@ -297,10 +298,17 @@ def test_assert_peer_activation_rejects_overlapping_routed_networks(
         iface_id = int(wg0_interface)
         iface = db.get_interface(iface_id, conn=conn)
         assert iface is not None
+        node_b_id = str(uuid.uuid4())
+        db.add_node(
+            node_b_id,
+            "site-b",
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            conn=conn,
+        )
         db.add_peer(
             id="00000000-0000-4000-8000-000000000099",
             interface_id=iface_id,
-            name="site-b",
+            node_id=node_b_id,
             ip_address="10.0.0.50",
             public_key=keypair.public_key,
             private_key=keypair.private_key,

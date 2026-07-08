@@ -18,6 +18,7 @@ from wgpl.exceptions import (
     AmbiguousPeerIdError,
     InterfaceDisambiguationRequiredError,
     InvalidDnsError,
+    NodeAlreadyExistsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
     NoAvailableIpsError,
@@ -36,6 +37,9 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
     assert set(result.keys()) == {
         "id",
         "name",
+        "node",
+        "node_id",
+        "node_created",
         "ip_address",
         "public_key",
         "dns",
@@ -71,6 +75,17 @@ def test_allocate_peer_ip_skips_gateway(wg0_interface: str) -> None:
     assert second_ip == "10.0.0.3"
 
 
+def _ensure_node(name: str) -> str:
+    existing = db.get_node_by_name(name)
+    if existing is not None:
+        return str(existing["id"])
+    node_id = str(uuid.uuid4())
+    db.add_node(
+        node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()
+    )
+    return node_id
+
+
 def _insert_peer(
     peer_id: str,
     interface: str,
@@ -81,7 +96,7 @@ def _insert_peer(
     db.add_peer(
         id=peer_id,
         interface_id=1,
-        name=name,
+        node_id=_ensure_node(name),
         ip_address=ip_address,
         public_key=keypair.public_key,
         private_key=keypair.private_key,
@@ -246,7 +261,7 @@ def _insert_peer_on_interface(
     db.add_peer(
         id=peer_id,
         interface_id=interface_id,
-        name=name,
+        node_id=_ensure_node(name),
         ip_address=ip_address,
         public_key=keypair.public_key,
         private_key=keypair.private_key,
@@ -349,11 +364,11 @@ def test_add_peer_rejects_invalid_keepalive(wg0_interface: str) -> None:
         core.add_peer(wg0_interface, "bad", keepalive=-1)
 
 
-def test_update_peer_name(wg0_interface: str) -> None:
+def test_update_node_name(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "old_name")
 
     assert peer["id"] is not None
-    result = core.update_peer(wg0_interface, peer["id"], name="new_name")
+    result = core.update_node("old_name", name="new_name")
 
     assert result["name"] == "new_name"
     row = db.get_peer(peer["id"])
@@ -361,13 +376,12 @@ def test_update_peer_name(wg0_interface: str) -> None:
     assert row["name"] == "new_name"
 
 
-def test_update_peer_name_conflict(wg0_interface: str) -> None:
+def test_update_node_name_conflict(wg0_interface: str) -> None:
     core.add_peer(wg0_interface, "taken")
-    peer = core.add_peer(wg0_interface, "mine")
+    core.add_peer(wg0_interface, "mine")
 
-    assert peer["id"] is not None
-    with pytest.raises(PeerAlreadyExistsError):
-        core.update_peer(wg0_interface, peer["id"], name="taken")
+    with pytest.raises(NodeAlreadyExistsError):
+        core.update_node("mine", name="taken")
 
 
 def test_update_peer_ip(wg0_interface: str) -> None:
@@ -631,7 +645,7 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
         valid_key = "a" * 43 + "="
         core.add_interface("wg1", "1.1.1.1", valid_key, "10.1.0.0/24")
-        core.update_peer("wg1", peer["id"], name="renamed")
+        core.update_peer("wg1", peer["id"], desc="renamed")
 
 
 def test_db_add_peer_duplicate_ip_raises_ip_error(wg0_interface: str) -> None:
@@ -642,7 +656,7 @@ def test_db_add_peer_duplicate_ip_raises_ip_error(wg0_interface: str) -> None:
         db.add_peer(
             id=str(uuid.uuid4()),
             interface_id=1,
-            name="second",
+            node_id=_ensure_node("second"),
             ip_address="10.0.0.2",
             public_key=keypair.public_key,
             private_key=keypair.private_key,
@@ -654,11 +668,11 @@ def test_db_add_peer_duplicate_name_raises_name_error(wg0_interface: str) -> Non
     core.add_peer(wg0_interface, "taken", ip_address="10.0.0.2")
     keypair = wireguard.generate_keypair()
 
-    with pytest.raises(PeerAlreadyExistsError, match="taken"):
+    with pytest.raises(PeerAlreadyExistsError):
         db.add_peer(
             id=str(uuid.uuid4()),
             interface_id=1,
-            name="taken",
+            node_id=_ensure_node("taken"),
             ip_address="10.0.0.3",
             public_key=keypair.public_key,
             private_key=keypair.private_key,
@@ -756,15 +770,16 @@ def test_naive_expires_at_past_is_expired(wg0_interface: str) -> None:
 
 def test_validate_state_detects_duplicate_active_ip(wg0_interface: str) -> None:
     _insert_peer("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", wg0_interface, "a", "10.0.0.2")
+    node_b = _ensure_node("b")
     with db.get_db() as conn:
         conn.execute("DROP INDEX IF EXISTS idx_peers_active_ip")
         conn.execute(
-            "INSERT INTO peers (id, interface_id, name, ip_address, public_key, private_key, created_at) "
+            "INSERT INTO peers (id, interface_id, node_id, ip_address, public_key, private_key, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
                 wg0_interface,
-                "b",
+                node_b,
                 "10.0.0.2",
                 "pub2",
                 "priv2",
@@ -810,7 +825,7 @@ def test_update_peer_resolve_uses_transaction_connection(
         return original(ref, interface, policy=policy, conn=conn)
 
     monkeypatch.setattr(core, "resolve_peer_ref", tracking_resolve)
-    core.update_peer(wg0_interface, str(peer["id"]), name="renamed")
+    core.update_peer(wg0_interface, str(peer["id"]), dns="9.9.9.9")
 
     assert seen_conn == [seen_conn[0]]
     assert seen_conn[0] is not None

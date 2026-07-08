@@ -10,6 +10,8 @@ from .exceptions import (
     InterfaceAlreadyExistsError,
     InterfaceConflictError,
     InterfaceNotFoundError,
+    NodeAlreadyExistsError,
+    NodeNotFoundError,
     PeerAlreadyExistsError,
     IpAlreadyInUseError,
     WgplException,
@@ -31,6 +33,7 @@ _FORBIDDEN_AUDIT_METADATA_KEYS = frozenset({"private_key", "preshared_key"})
 class AuditEntityType(StrEnum):
     PEER = "peer"
     INTERFACE = "interface"
+    NODE = "node"
 
 
 class AuditEventType(StrEnum):
@@ -70,11 +73,11 @@ _SCHEMA_CORRUPT_MSG = (
 
 SCHEMA_USER_VERSION = 1
 
-_REQUIRED_TABLES = frozenset({"interfaces", "peers", "audit_events"})
+_REQUIRED_TABLES = frozenset({"interfaces", "nodes", "peers", "audit_events"})
 _REQUIRED_INDEXES = frozenset(
     {
         "idx_peers_active_ip",
-        "idx_peers_active_name",
+        "idx_peers_active_node",
         "idx_audit_entity",
         "idx_audit_interface",
     }
@@ -341,10 +344,20 @@ def init_db(path: str | None = None) -> None:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS nodes (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL UNIQUE,
+                    desc        TEXT,
+                    created_at  TEXT NOT NULL
+                );
+            """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS peers (
                     id                 TEXT PRIMARY KEY,
                     interface_id       INTEGER NOT NULL REFERENCES interfaces(id) ON DELETE CASCADE,
-                    name               TEXT NOT NULL,
+                    node_id            TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                     ip_address         TEXT NOT NULL,
                     public_key         TEXT NOT NULL,
                     private_key        TEXT NOT NULL,
@@ -378,8 +391,8 @@ def init_db(path: str | None = None) -> None:
             )
             conn.execute(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name
-                ON peers(interface_id, name)
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_node
+                ON peers(interface_id, node_id)
                 WHERE deleted_at IS NULL;
             """
             )
@@ -387,7 +400,7 @@ def init_db(path: str | None = None) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+                    entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface', 'node')),
                     entity_id    TEXT NOT NULL,
                     interface    TEXT,
                     event_type   TEXT NOT NULL CHECK(event_type IN (
@@ -582,13 +595,140 @@ def update_interface(
         )
 
 
+# --- Nodes CRUD ---
+
+
+def add_node(
+    id: str,
+    name: str,
+    created_at: str,
+    desc: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Insert a new node (global device identity)."""
+    try:
+        with _ensure_conn(conn, commit=True) as c:
+            c.execute(
+                "INSERT INTO nodes (id, name, desc, created_at) VALUES (?, ?, ?, ?)",
+                (id, name, desc, created_at),
+            )
+    except sqlite3.IntegrityError as exc:
+        raise NodeAlreadyExistsError(
+            f"Node name '{name}' already exists (node names are global)."
+        ) from exc
+
+
+def get_node(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
+    """Retrieve a node by its unique ID."""
+    with _ensure_conn(conn) as c:
+        return _run_query(c, "SELECT * FROM nodes WHERE id = ?", (id,)).fetchone()
+
+
+def get_node_by_name(
+    name: str, conn: sqlite3.Connection | None = None
+) -> sqlite3.Row | None:
+    """Retrieve a node by its (globally unique) name."""
+    with _ensure_conn(conn) as c:
+        return _run_query(
+            c, "SELECT * FROM nodes WHERE name = ?", (name,)
+        ).fetchone()
+
+
+def find_nodes_by_id_prefix(
+    prefix: str, conn: sqlite3.Connection | None = None
+) -> list[sqlite3.Row]:
+    """Find nodes whose hex ID (without hyphens) starts with prefix."""
+    like_pattern = f"{prefix}%"
+    with _ensure_conn(conn) as c:
+        return _run_query(
+            c,
+            "SELECT * FROM nodes WHERE REPLACE(LOWER(id), '-', '') LIKE ? "
+            "ORDER BY name",
+            (like_pattern,),
+        ).fetchall()
+
+
+def list_nodes(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
+    """List all nodes with a count of their active (non-soft-deleted) attachments."""
+    with _ensure_conn(conn) as c:
+        return _run_query(
+            c,
+            """
+            SELECT n.*, (
+                SELECT COUNT(*) FROM peers p
+                WHERE p.node_id = n.id AND p.deleted_at IS NULL
+            ) AS attachment_count
+            FROM nodes n
+            ORDER BY n.name
+            """,
+        ).fetchall()
+
+
+def count_peers_for_node(
+    node_id: str,
+    conn: sqlite3.Connection | None = None,
+    *,
+    include_deleted: bool = False,
+) -> int:
+    """Count peers attached to a node (non-soft-deleted by default)."""
+    with _ensure_conn(conn) as c:
+        if include_deleted:
+            row = _run_query(
+                c, "SELECT COUNT(*) FROM peers WHERE node_id = ?", (node_id,)
+            ).fetchone()
+        else:
+            row = _run_query(
+                c,
+                "SELECT COUNT(*) FROM peers WHERE node_id = ? AND deleted_at IS NULL",
+                (node_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+
+def update_node(
+    id: str,
+    *,
+    name: str | _UnsetType = _UNSET,
+    desc: str | None | _UnsetType = _UNSET,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Update only the node fields that are not _UNSET."""
+    updates: list[str] = []
+    params: list[Any] = []
+    if name is not _UNSET:
+        updates.append("name = ?")
+        params.append(name)
+    if desc is not _UNSET:
+        updates.append("desc = ?")
+        params.append(desc)
+    if not updates:
+        return
+    params.append(id)
+    try:
+        with _ensure_conn(conn, commit=True) as c:
+            # SQL field names come from internal fixed update clauses only.
+            c.execute(f"UPDATE nodes SET {', '.join(updates)} WHERE id = ?", params)
+    except sqlite3.IntegrityError as exc:
+        raise NodeAlreadyExistsError(
+            f"Node name '{name}' already exists (node names are global)."
+        ) from exc
+
+
+def remove_node(id: str, conn: sqlite3.Connection | None = None) -> None:
+    """Physically remove a node and all its attachments (CASCADE)."""
+    with _ensure_conn(conn, commit=True) as c:
+        cursor = c.execute("DELETE FROM nodes WHERE id = ?", (id,))
+        if cursor.rowcount == 0:
+            raise NodeNotFoundError(f"Node ID {id} not found")
+
+
 # --- Peers CRUD ---
 
 
 def add_peer(
     id: str,
     interface_id: int,
-    name: str,
+    node_id: str,
     ip_address: str,
     public_key: str,
     private_key: str,
@@ -605,13 +745,13 @@ def add_peer(
     custom_allowed_ips: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
-    """Adds a new peer associated with a specific interface."""
+    """Adds a new peer (node attachment) associated with a specific interface."""
     try:
         with _ensure_conn(conn, commit=True) as c:
             c.execute(
                 """
                 INSERT INTO peers (
-                    id, interface_id, name, ip_address, public_key, private_key,
+                    id, interface_id, node_id, ip_address, public_key, private_key,
                     preshared_key, created_at, dns, expires_at, desc, mtu, keepalive,
                     role, routed_networks, allowed_ips_policy, custom_allowed_ips
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -619,7 +759,7 @@ def add_peer(
                 (
                     id,
                     interface_id,
-                    name,
+                    node_id,
                     ip_address,
                     public_key,
                     private_key,
@@ -643,14 +783,23 @@ def add_peer(
                 f"IP {ip_address} is already assigned in interface ID {interface_id}"
             ) from exc
         raise PeerAlreadyExistsError(
-            f"Peer name '{name}' already exists in interface ID {interface_id}."
+            f"Node is already attached to interface ID {interface_id}."
         ) from exc
 
 
+# Joined peer projection: peers own everything except the display name, which
+# comes from the node. Aliasing n.name AS name keeps peer["name"] working across
+# the codebase; node_id is already a peer column, node_name/node_desc are extras.
+_PEER_SELECT = (
+    "SELECT p.*, n.name AS name, n.name AS node_name, n.desc AS node_desc "
+    "FROM peers p JOIN nodes n ON p.node_id = n.id"
+)
+
+
 def get_peer(id: str, conn: sqlite3.Connection | None = None) -> sqlite3.Row | None:
-    """Retrieves a peer by its unique ID."""
+    """Retrieves a peer by its unique ID (joined with its node)."""
     with _ensure_conn(conn) as c:
-        cursor = _run_query(c, "SELECT * FROM peers WHERE id = ?", (id,))
+        cursor = _run_query(c, f"{_PEER_SELECT} WHERE p.id = ?", (id,))
         return cursor.fetchone()
 
 
@@ -665,21 +814,21 @@ def find_peers_by_id_prefix(
         if interface_id is not None:
             cursor = _run_query(
                 c,
-                """
-                SELECT * FROM peers
-                WHERE REPLACE(LOWER(id), '-', '') LIKE ?
-                  AND interface_id = ?
-                ORDER BY interface_id, ip_address
+                f"""
+                {_PEER_SELECT}
+                WHERE REPLACE(LOWER(p.id), '-', '') LIKE ?
+                  AND p.interface_id = ?
+                ORDER BY p.interface_id, p.ip_address
                 """,
                 (like_pattern, interface_id),
             )
         else:
             cursor = _run_query(
                 c,
-                """
-                SELECT * FROM peers
-                WHERE REPLACE(LOWER(id), '-', '') LIKE ?
-                ORDER BY interface_id, ip_address
+                f"""
+                {_PEER_SELECT}
+                WHERE REPLACE(LOWER(p.id), '-', '') LIKE ?
+                ORDER BY p.interface_id, p.ip_address
                 """,
                 (like_pattern,),
             )
@@ -751,7 +900,8 @@ def diagnose_database(
                 }
             )
         for row in c.execute(
-            "SELECT id, name FROM peers WHERE deleted_at = ''"
+            "SELECT p.id AS id, n.name AS name FROM peers p "
+            "JOIN nodes n ON p.node_id = n.id WHERE p.deleted_at = ''"
         ).fetchall():
             issues.append(
                 {
@@ -793,17 +943,17 @@ def repair_database(
 def list_peers(
     interface_id: int | None = None, conn: sqlite3.Connection | None = None
 ) -> list[sqlite3.Row]:
-    """Lists all peers, optionally filtered by a specific interface ID."""
+    """Lists all peers (joined with their node), optionally filtered by interface."""
     with _ensure_conn(conn) as c:
         if interface_id is not None:
             cursor = _run_query(
                 c,
-                "SELECT * FROM peers WHERE interface_id = ? ORDER BY ip_address",
+                f"{_PEER_SELECT} WHERE p.interface_id = ? ORDER BY p.ip_address",
                 (interface_id,),
             )
         else:
             cursor = _run_query(
-                c, "SELECT * FROM peers ORDER BY interface_id, ip_address"
+                c, f"{_PEER_SELECT} ORDER BY p.interface_id, p.ip_address"
             )
         return cursor.fetchall()
 
@@ -824,7 +974,6 @@ def hard_remove_peer(id: str, conn: sqlite3.Connection | None = None) -> None:
 def update_peer(
     peer_id: str,
     *,
-    name: str | _UnsetType = _UNSET,
     ip_address: str | _UnsetType = _UNSET,
     dns: str | None | _UnsetType = _UNSET,
     desc: str | None | _UnsetType = _UNSET,
@@ -841,9 +990,6 @@ def update_peer(
     updates: list[str] = []
     params: list[Any] = []
 
-    if name is not _UNSET:
-        updates.append("name = ?")
-        params.append(name)
     if ip_address is not _UNSET:
         updates.append("ip_address = ?")
         params.append(ip_address)
@@ -888,10 +1034,6 @@ def update_peer(
             )
     except sqlite3.IntegrityError as exc:
         err_msg = str(exc).lower()
-        if "name" in err_msg and name is not _UNSET:
-            raise PeerAlreadyExistsError(
-                f"Peer name '{name}' already exists in this interface."
-            ) from exc
         if "ip_address" in err_msg and ip_address is not _UNSET:
             raise IpAlreadyInUseError(
                 f"IP {ip_address} is already assigned in this interface"

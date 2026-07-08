@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class **Node** entity: `nodes` table (globally unique `name`, optional `desc`) and `wgpl node` command group (`add`, `list`, `show`, `update`, `remove`, `prune`, `history`) for device identity independent of any tunnel
+- Hybrid `wgpl peer add`: a positional `<name>` find-or-creates the node and attaches it; `--node <ref>` strictly attaches an existing node; exactly one is required. Peer JSON gains `node`, `node_id`, and `node_created`
+- `wgpl validate` hub↔peer routed-network checks: an exact duplicate of an `interface.routed_networks` prefix is an error; a partial overlap is a warning
+- Node adversarial regression tests (`tests/test_node_qa.py`) and restore warning/error-severity tests
 - Intent-based hub-and-spoke routing: `routing.py` derives hub and client `AllowedIPs` from stored intent (`role`, `routed_networks`, `allowed_ips_policy`); derived values are never persisted
 - Routing intent on interfaces and peers: `interfaces.routed_networks`; `peers.role` (`endpoint` | `subnet_router`), `routed_networks`, `allowed_ips_policy`, `custom_allowed_ips`
 - CLI routing flags: `--role`, `--routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips` (and `--clear-*` counterparts) on `peer add` / `peer update`; `--routed-networks` on `interface add` / `interface update`
@@ -28,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Peers now reference a global node via `peers.node_id`; the `peers.name` column is removed (peer read paths JOIN `nodes` and expose the node name transparently). Device names are managed through `wgpl node`; `peer update` no longer accepts `--name` (rename with `node update`). Pre-release schema change — no migration, nothing was published
+- A node attaches to a given interface at most once while active (partial unique index `idx_peers_active_node`); reclaiming an inactive peer slot is keyed by IP and `node_id`
+- Audit trail gains a `node` entity type and node events; peer audit metadata records `node_id` for device provenance
 - `peer config` and `peer qr` derive client `AllowedIPs` from `allowed_ips_policy` by default; `--allowed-ips` overrides a single export only
 - Hub `interface export` and `apply` emit subnet-router `AllowedIPs` as tunnel `/32` plus advertised LAN prefixes (not tunnel `/32` only)
 - `wgpl validate` reports routing topology issues with severities; errors exit 1, warnings exit 0
@@ -58,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `wgpl db restore` no longer rejects a backup whose only validation issues are warnings (e.g. a subnet router without an effective keepalive); it fails closed on error-severity issues only, so a state the CLI can create is always restorable from its own backup
 - `peer show --json` redacts private keys and preshared keys (consistent with `peer list --json`)
 - Malformed wire-format fields in the database rejected on export, restore, and apply
 - Restore cannot persist noop audit immutability triggers from a tampered backup

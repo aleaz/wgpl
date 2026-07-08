@@ -42,7 +42,9 @@ def test_remove_peer_soft_and_hard_audit(wg0_interface: str) -> None:
     events = core.list_peer_audit_history(peer_id, wg0_interface)
     removed_events = [e for e in events if e["event_type"] == AuditEventType.REMOVED]
     assert len(removed_events) == 1
-    assert not any(e.get("metadata") == {"hard": True} for e in removed_events)
+    assert not any(
+        (e.get("metadata") or {}).get("hard") is True for e in removed_events
+    )
 
     core.remove_peer(wg0_interface, peer_id)
     events = core.list_peer_audit_history(peer_id, wg0_interface)
@@ -53,7 +55,7 @@ def test_remove_peer_soft_and_hard_audit(wg0_interface: str) -> None:
     events = core.list_peer_audit_history(peer_id, wg0_interface)
     hard_events = [e for e in events if e["event_type"] == AuditEventType.REMOVED]
     assert len(hard_events) == 2
-    assert any(e.get("metadata") == {"hard": True} for e in hard_events)
+    assert any((e.get("metadata") or {}).get("hard") is True for e in hard_events)
 
 
 def test_reclaim_expired_logs_reclaimed_and_old_row_soft_deleted(
@@ -171,13 +173,13 @@ def test_peer_update_logs_updated_event(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])
 
-    core.update_peer(wg0_interface, peer_id, name="renamed")
+    core.update_peer(wg0_interface, peer_id, dns="9.9.9.9")
 
     events = core.list_peer_audit_history(peer_id, wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
     assert len(updated) == 1
-    assert updated[0]["metadata"]["fields"]["name"]["new"] == "renamed"
-    assert updated[0]["metadata"]["fields"]["name"]["old"] == "phone"
+    assert updated[0]["metadata"]["fields"]["dns"]["new"] == "9.9.9.9"
+    assert updated[0]["metadata"]["fields"]["dns"]["old"] is None
 
 
 def test_interface_update_logs_updated_event(wg0_interface: str) -> None:
@@ -364,7 +366,7 @@ def test_peer_update_no_audit_when_value_unchanged(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     peer_id = str(peer["id"])
 
-    core.update_peer(wg0_interface, peer_id, name="phone")
+    core.update_peer(wg0_interface, peer_id, ip_address=str(peer["ip_address"]))
 
     events = core.list_peer_audit_history(peer_id, wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]

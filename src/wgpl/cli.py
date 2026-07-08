@@ -33,10 +33,12 @@ _HINT_MESSAGES = {
 
 app = typer.Typer(help="WGPL - WireGuard Peer Manager (Lite)")
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
+node_app = typer.Typer(help="Manage device identities (nodes)")
 peer_app = typer.Typer(help="Manage WireGuard peers")
 db_app = typer.Typer(help="Manage the SQLite database (Backup & Restore)")
 
 app.add_typer(interface_app, name="interface")
+app.add_typer(node_app, name="node")
 app.add_typer(peer_app, name="peer")
 app.add_typer(db_app, name="db")
 
@@ -406,7 +408,7 @@ def peer_show(
             psk_display = str(psk) if show_secrets and psk else "—"
             rows = [
                 ("ID", str(peer["id"])),
-                ("Name", _safe_markup(str(peer["name"]))),
+                ("Node", _safe_markup(str(peer["name"]))),
                 ("Interface", _safe_markup(str(iface_name))),
                 ("Status", str(core.get_peer_status(dict(peer)))),
                 ("IP Address", str(peer["ip_address"])),
@@ -548,6 +550,172 @@ def interface_update(
         _exit_error(ctx, str(e))
 
 
+# --- Nodes ---
+
+
+@node_app.command("add")
+def node_add(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Globally unique device name"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the device"),
+) -> None:
+    try:
+        result = core.add_node(name, desc=desc)
+        if ctx.obj.get("json"):
+            _output(ctx, result)
+        else:
+            console.print(f"[green]Added node {name}[/green]")
+    except (WgplException, ValueError) as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("list")
+def node_list(ctx: typer.Context) -> None:
+    try:
+        data = core.list_nodes()
+        if ctx.obj.get("json"):
+            _output(ctx, data)
+        else:
+            rows = [
+                [
+                    _styled(str(n["id"]).replace("-", "")[:12], _STYLE_ID),
+                    _styled(_safe_markup(str(n["name"])), _STYLE_ID),
+                    _styled(str(n.get("attachment_count", 0)), _STYLE_VALUE),
+                    _styled(_safe_markup(_truncate_desc(n.get("desc"))), ""),
+                ]
+                for n in data
+            ]
+            _print_list_table(
+                "Device Nodes",
+                "nodes",
+                [
+                    ("ID", {"style": _STYLE_ID, "no_wrap": True}),
+                    ("Name", {"style": _STYLE_ID, "no_wrap": True}),
+                    ("Attachments", {}),
+                    ("Description", {}),
+                ],
+                rows,
+            )
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("show")
+def node_show(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help="Node name or ID prefix"),
+) -> None:
+    try:
+        node = core.get_node_by_ref(ref)
+        if ctx.obj.get("json"):
+            _output(ctx, node)
+        else:
+            rows = [
+                ("ID", str(node["id"])),
+                ("Name", _safe_markup(str(node["name"]))),
+                ("Attachments", str(node.get("attachment_count", 0))),
+                ("Created At", str(node.get("created_at") or "—")),
+                ("Description", _safe_markup(str(node.get("desc") or "—"))),
+            ]
+            _print_show_table(f"Node Details: {_safe_markup(str(node['name']))}", rows)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("update")
+def node_update(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help="Node name or ID prefix"),
+    name: str | None = typer.Option(None, "--name", help="New (globally unique) name"),
+    desc: str | None = typer.Option(None, "--desc", help="Description of the device"),
+    clear_desc: bool = typer.Option(
+        False, "--clear-desc", help="Remove node description"
+    ),
+) -> None:
+    try:
+        if clear_desc and desc is not None:
+            _exit_error(ctx, "Cannot use --desc and --clear-desc together.")
+        result = core.update_node(ref, name=name, desc=desc, clear_desc=clear_desc)
+        if ctx.obj.get("json"):
+            _output(ctx, result)
+        else:
+            console.print(f"[green]Updated node {ref}[/green]")
+    except (WgplException, ValueError) as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("remove")
+def node_remove(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help="Node name or ID prefix"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Remove the node and all its attachments (required when attachments remain)",
+    ),
+) -> None:
+    try:
+        core.remove_node(ref, force=force)
+        if ctx.obj.get("json"):
+            _output(ctx, {"status": "success", "node": ref, "force": force})
+        else:
+            console.print(f"[green]Removed node {ref}[/green]")
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("prune")
+def node_prune(ctx: typer.Context) -> None:
+    try:
+        removed = core.prune_nodes()
+        if ctx.obj.get("json"):
+            _output(ctx, {"status": "success", "removed_count": removed})
+        else:
+            console.print(f"[green]Pruned {removed} orphan node(s)[/green]")
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+@node_app.command("history")
+def node_history(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help="Node name or ID prefix"),
+    limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
+    offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
+) -> None:
+    try:
+        _validate_pagination(ctx, limit, offset)
+        events = core.list_node_audit_history(ref, limit=limit, offset=offset)
+        if ctx.obj.get("json"):
+            _output(ctx, events)
+        else:
+            if not events:
+                console.print(f"[yellow]No audit history for node {ref}.[/yellow]")
+                return
+            rows = [
+                [
+                    _styled(str(e["occurred_at"]), _STYLE_META),
+                    _styled(str(e.get("actor", "unknown")), _STYLE_VALUE),
+                    _styled(str(e["event_type"]), _STYLE_ID),
+                    _styled(_safe_markup(str(e.get("metadata") or "")), ""),
+                ]
+                for e in reversed(events)
+            ]
+            _print_list_table(
+                f"Audit history: {ref}",
+                "events",
+                [
+                    ("When", {"overflow": "fold"}),
+                    ("Actor", {"overflow": "fold"}),
+                    ("Event", {"overflow": "fold"}),
+                    ("Metadata", {"overflow": "fold"}),
+                ],
+                rows,
+            )
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
 # --- Peers ---
 
 
@@ -555,7 +723,15 @@ def interface_update(
 def peer_add(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
-    name: str = typer.Argument(..., help="Peer name/description"),
+    name: str | None = typer.Argument(
+        None,
+        help="Device name (find-or-create the node and attach it)",
+    ),
+    node: str | None = typer.Option(
+        None,
+        "--node",
+        help="Attach an existing node by name or ID (strict; excludes positional name)",
+    ),
     ip: str | None = typer.Option(
         None, "--ip", help="Peer IP from the interface pool (auto if omitted)"
     ),
@@ -592,6 +768,11 @@ def peer_add(
     ),
 ) -> None:
     try:
+        if (name is None) == (node is None):
+            _exit_error(
+                ctx,
+                "Provide exactly one of a device name (positional) or --node <ref>.",
+            )
         result = core.add_peer(
             interface,
             name,
@@ -605,13 +786,16 @@ def peer_add(
             routed_networks=routed_networks,
             allowed_ips_policy=allowed_ips_policy,
             custom_allowed_ips=custom_allowed_ips,
+            node_ref=node,
         )
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
             dns_note = f", DNS {result['dns']}" if result.get("dns") else ""
+            created_note = "" if result.get("node_created") else " (existing node)"
             console.print(
-                f"[green]Added peer {name} ({result['ip_address']}{dns_note})[/green]"
+                f"[green]Added peer {result['name']}{created_note} "
+                f"({result['ip_address']}{dns_note})[/green]"
             )
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
@@ -760,7 +944,6 @@ def peer_update(
     peer_id: str = typer.Argument(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
     ),
-    name: str | None = typer.Option(None, "--name", help="New peer name"),
     ip: str | None = typer.Option(
         None, "--ip", help="New peer IP from the interface pool"
     ),
@@ -851,7 +1034,6 @@ def peer_update(
             interface,
             peer_id,
             active_only=False,
-            name=name,
             ip_address=ip,
             dns=dns,
             clear_dns=clear_dns,
@@ -932,7 +1114,7 @@ def peer_list(
                 [
                     ("ID", {"overflow": "fold"}),
                     ("Interface", {}),
-                    ("Name", {"overflow": "fold"}),
+                    ("Node", {"overflow": "fold"}),
                     ("IP", {"overflow": "fold"}),
                     ("Status", {}),
                     ("DNS", {"overflow": "fold"}),

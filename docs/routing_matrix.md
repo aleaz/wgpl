@@ -149,7 +149,8 @@ Enforcement: **mutation** = rejected at `peer add` / `peer update` / `interface 
 | Subnet router without LANs | `role=subnet_router`, `routed_networks` empty | Mutation reject + validate error | `tests/test_validate_topology.py::test_validate_subnet_router_missing_routed_networks` |
 | Custom policy without CIDRs | `allowed_ips_policy=custom`, no `custom_allowed_ips` | Mutation reject (CHECK) | schema CHECK constraint |
 | Malicious / wire-unsafe CIDR text | newline injection in `routed_networks` | Restore / validate reject | `tests/test_routing.py::test_validate_database_rejects_malicious_routed_networks` |
-| Hub LAN overlaps peer LAN | `interface.routed_networks` = `192.168.1.0/24`, peer same | **Not enforced today** | Documented gap — operator must avoid; may add validate warning later |
+| Hub LAN exactly duplicates peer LAN | `interface.routed_networks` = `192.168.1.0/24`, peer same | Validate **error** | `consistency` `hub_peer_routed_networks_duplicate` |
+| Hub LAN partially overlaps peer LAN | `interface.routed_networks` = `192.168.0.0/16`, peer `192.168.1.0/24` | Validate **warning** | `consistency` `hub_peer_routed_networks_overlap` |
 | Routing loop via own LAN | subnet router receives own LAN in client export | Prevented by derivation | `all_remote_networks` excludes own `routed_networks` |
 
 ---

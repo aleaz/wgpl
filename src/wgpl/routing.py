@@ -39,6 +39,13 @@ def _peer_role(peer: sqlite3.Row | Mapping[str, object]) -> str:
     return str(role) if role is not None else PeerRole.ENDPOINT
 
 
+def _peer_identity(peer: sqlite3.Row | Mapping[str, object]) -> str:
+    """Return the device identity for own-LAN exclusion (node_id, else peer id)."""
+    if "node_id" in _row_keys(peer) and peer["node_id"] is not None:
+        return f"node:{peer['node_id']}"
+    return f"peer:{peer['id']}"
+
+
 def _allowed_ips_policy(peer: sqlite3.Row | Mapping[str, object]) -> str:
     if "allowed_ips_policy" not in _row_keys(peer):
         return AllowedIpsPolicy.VPN_ONLY
@@ -157,7 +164,7 @@ def resolve_client_allowed_ips(
         networks.extend(parse_cidr_list(str(iface_routed) if iface_routed else None))
 
     if policy == AllowedIpsPolicy.ALL_REMOTE_NETWORKS:
-        peer_id = str(peer["id"])
+        own_key = _peer_identity(peer)
         own_routed = {
             str(network)
             for network in parse_cidr_list(
@@ -167,7 +174,7 @@ def resolve_client_allowed_ips(
             )
         }
         for other in active_peers:
-            if str(other["id"]) == peer_id:
+            if _peer_identity(other) == own_key:
                 continue
             if _peer_role(other) != PeerRole.SUBNET_ROUTER:
                 continue

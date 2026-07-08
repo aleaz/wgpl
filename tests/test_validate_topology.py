@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import uuid
 
 from typer.testing import CliRunner
 
@@ -28,10 +29,17 @@ def test_validate_overlapping_routed_networks_error(wgpl_db: str) -> None:
     )
     with db.transaction() as conn:
         keypair = wireguard.generate_keypair()
+        node_id = str(uuid.uuid4())
+        db.add_node(
+            node_id,
+            "site-b",
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            conn=conn,
+        )
         db.add_peer(
             id="00000000-0000-4000-8000-000000000099",
             interface_id=1,
-            name="site-b",
+            node_id=node_id,
             ip_address="10.0.0.50",
             public_key=keypair.public_key,
             private_key=keypair.private_key,

@@ -4,7 +4,7 @@ WGPL is an **intent-based hub-and-spoke IPv4 routing generator**. You declare
 what each peer and interface should reach; the tool **derives** WireGuard
 `AllowedIPs` at export/apply time. Derived values are never stored in the database.
 
-For entity definitions (VPN, Interface, Peer, Node, Route) and the domain vs
+For entity definitions (VPN, Interface, Node, Peer, Route) and the domain vs
 WireGuard boundary, see [DESIGN.md — Domain model](../DESIGN.md#domain-model).
 
 ## Glossary
@@ -12,8 +12,9 @@ WireGuard boundary, see [DESIGN.md — Domain model](../DESIGN.md#domain-model).
 | WGPL term | DB / CLI field | Industry equivalents | Meaning |
 |-----------|----------------|----------------------|---------|
 | VPN network | `interface.address_pool` | tailnet CIDR, Netmaker network | Tunnel address space for peers |
+| Node | `nodes.name` (`peer.node_id`) | device, machine identity | Global device identity; a peer is a node's attachment to one interface |
 | Endpoint | `peer.role = endpoint` | remote client, remote access device | End device (laptop, phone, PC) |
-| Subnet router | `peer.role = subnet_router` | Tailscale subnet router, Netmaker egress gateway | Node announcing LANs behind the tunnel |
+| Subnet router | `peer.role = subnet_router` | Tailscale subnet router, Netmaker egress gateway | Node attachment announcing LANs behind the tunnel |
 | Routed networks | `peer.routed_networks` / `interface.routed_networks` | advertised routes, allowed-address (LAN part) | Comma-separated CIDRs **behind** a router or the hub |
 | Allowed IPs policy | `peer.allowed_ips_policy` | split vs full tunnel scope | What to include in **client** `[Peer] AllowedIPs` |
 | Hub AllowedIPs | derived | server `[Peer] AllowedIPs`, MikroTik `allowed-address` | What `apply` / `interface export` writes on the concentrator |
@@ -165,13 +166,10 @@ Formal rules enforced by `integrity.py` (mutation / export) and
 | No egress in LAN fields | `0.0.0.0/0` forbidden in `routed_networks` (use `full_tunnel` on clients) | `validate_routed_networks_list` |
 | Role coherence | `endpoint` ⇒ `routed_networks IS NULL`; `subnet_router` ⇒ non-empty LANs | CHECK + `_validate_peer_routing_fields` |
 | Custom coherence | `allowed_ips_policy=custom` ⇒ `custom_allowed_ips NOT NULL` | CHECK + integrity |
-| Own-LAN exclusion | `all_remote_networks` never includes the peer's own `routed_networks` in client export | `routing.resolve_client_allowed_ips` |
+| Own-LAN exclusion | `all_remote_networks` never includes the peer's own `routed_networks` in client export (keyed by `node_id`, else peer id) | `routing.resolve_client_allowed_ips` |
 | Active-only derivation | Expired / soft-deleted peers excluded from hub export and remote LAN union | `integrity.is_peer_active` in emit gates |
+| Hub↔peer routed-network hygiene | A peer `routed_networks` prefix that **exactly duplicates** an `interface.routed_networks` prefix is a `validate` **error**; a partial **overlap** is a **warning** | `consistency` (`hub_peer_routed_networks_duplicate` / `hub_peer_routed_networks_overlap`) |
 | Single derivator | Only `routing.py` computes AllowedIPs prefix lists | code audit — see [DESIGN.md](../DESIGN.md#architecture-verification) |
-
-**Known gap:** overlap between `interface.routed_networks` and a peer's
-`routed_networks` is not rejected automatically. Avoid duplicating the same CIDR
-on hub and site; a future validate warning may be added.
 
 **Routing loops:** The hub-and-spoke model plus own-LAN exclusion prevents a
 subnet router from installing a client route to its own LAN via the tunnel.
@@ -209,6 +207,7 @@ for the full table with enforcement points and tests.
 Summary of what **must not** exist in a healthy database:
 
 - Overlapping or duplicate `routed_networks` between active subnet routers
+- A peer `routed_networks` prefix that exactly duplicates an `interface.routed_networks` prefix
 - LAN prefixes that overlap the VPN pool or contain a peer's tunnel IP
 - `0.0.0.0/0` in `routed_networks` fields
 - Subnet routers without LANs, or endpoints with LAN fields
@@ -216,7 +215,7 @@ Summary of what **must not** exist in a healthy database:
 
 Warnings (validate exits 0): missing keepalive on NAT subnet routers, asymmetric
 `all_remote_networks`, incomplete LAN↔LAN derivation, expired subnet routers
-still in DB.
+still in DB, partial overlap between a peer's and the hub's `routed_networks`.
 
 ## Module responsibilities (routing)
 

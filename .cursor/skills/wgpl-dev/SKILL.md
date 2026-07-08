@@ -22,17 +22,26 @@ wgpl interface add wg0 vpn.example.com <SERVER_PUBLIC_KEY> 10.0.0.0/24 \
 wgpl interface list
 
 # 2. Create peers (IP, keypair, and PSK are generated automatically)
+#    A positional name find-or-creates the device node; --node attaches an existing one
 wgpl peer add wg0 "Johns_Phone"
 wgpl peer add wg0 "Server" --ip 10.0.0.50
-wgpl peer add wg0 "Kids" --dns 9.9.9.9
+wgpl peer add wg0 --node "Johns_Phone"   # attach an existing device (e.g. to a 2nd hub)
 wgpl peer add wg0 "Guest" --expires 7d
-wgpl peer list
-wgpl peer list wg0 --expired
-wgpl peer list wg0 --all
+wgpl peer list --interface wg0
+wgpl peer list --interface wg0 --expired
+wgpl peer list --interface wg0 --all
 
-# 2b. Update without rotating keys
+# 2a. Device identity (global nodes)
+wgpl node add "Work_Laptop" --desc "CEO laptop"
+wgpl node list
+wgpl node show "Work_Laptop"
+wgpl node update "Work_Laptop" --name "Work_Laptop_2"   # rename device (peer has no --name)
+wgpl node remove "Work_Laptop_2" --force                # cascade its attachments
+wgpl node prune                                         # drop orphan devices
+wgpl node history "Johns_Phone"
+
+# 2b. Update peer attachment without rotating keys (device rename is `node update`)
 wgpl interface update wg0 --endpoint vpn2.example.com
-wgpl peer update wg0 <PEER_ID> --name "Work Laptop"
 wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
 wgpl peer update wg0 <PEER_ID> --desc "CEO laptop" --mtu 1280
 wgpl validate wg0
@@ -86,9 +95,9 @@ wgpl db restore --yes backup.db
   (peer override → interface default). Set values with `peer update` or interface defaults.
 - Soft-deleted and expired peers are excluded from `resolve_peer_ref` by default;
   use `peer remove --hard` to physically delete a soft-deleted peer.
-- A peer occupies an IP and name in the pool only while active (not soft-deleted and not expired).
-  Reclaiming an expired peer's slot logs `reclaimed` and soft-deletes the old row; history remains in `audit_events`.
-  `peer prune` hard-deletes inactive peer rows with a `pruned` audit event each (audit log itself is never pruned).
+- A peer occupies an IP and a node attachment slot only while active (not soft-deleted and not expired).
+  Reclaiming an expired peer's IP or node slot logs `reclaimed` and soft-deletes the old row; history remains in `audit_events`.
+  `peer prune` hard-deletes inactive peer rows with a `pruned` audit event each (audit log itself is never pruned). Node identities survive `peer prune`; use `node prune` to drop orphan devices.
 - `interface remove` fails if any peer rows exist; use `peer prune` / `peer remove` first, or `--force` (audited cascade).
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
 
@@ -97,8 +106,8 @@ wgpl db restore --yes backup.db
 | File | Responsibility |
 |---|---|
 | `src/wgpl/cli.py` | Typer commands, Rich/JSON formatting; no direct `db` access |
-| `src/wgpl/core.py` | Business orchestration (CRUD, export, sync); re-exports from helper modules |
-| `src/wgpl/refs.py` | Peer and interface reference resolution |
+| `src/wgpl/core.py` | Business orchestration (CRUD, export, sync, node lifecycle); re-exports from helper modules |
+| `src/wgpl/refs.py` | Peer, interface, and node (`resolve_node_ref`) reference resolution |
 | `src/wgpl/ipam.py` | IPv4 pool allocation and inactive slot reclamation |
 | `src/wgpl/audit.py` | Audit trail append and history queries |
 | `src/wgpl/consistency.py` | `validate_state` and `assert_database_valid` |
@@ -111,7 +120,8 @@ wgpl db restore --yes backup.db
 
 ## Commands
 
-Implemented: `interface` CRUD + update, `peer` CRUD + update + prune + `explain`,
+Implemented: `interface` CRUD + update, `node` CRUD + prune + history, `peer` CRUD
++ update + prune + `explain` (hybrid `peer add <name>` / `--node <ref>`),
 routing flags (`--role`, `--routed-networks`, `--allowed-ips-policy`), `validate`,
 `apply`, `db dump`, `db restore`, `--json` M2M mode.
 

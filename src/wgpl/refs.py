@@ -11,14 +11,17 @@ from . import db
 from . import integrity
 from .exceptions import (
     AmbiguousInterfaceError,
-    AmbiguousPeerIdError,
+    AmbiguousNodeIdError,
     InterfaceDisambiguationRequiredError,
     InterfaceNotFoundError,
+    NodeNotFoundError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
+    AmbiguousPeerIdError,
 )
 
 _MIN_PEER_ID_PREFIX_LEN = 4
+_MIN_NODE_ID_PREFIX_LEN = 4
 _PEER_ID_HEX_LEN = 32
 
 
@@ -185,6 +188,39 @@ def resolve_interface_ref(
         return int(matches[0]["id"])
 
     raise AmbiguousInterfaceError(_ambiguous_interface_message(ref, matches))
+
+
+def resolve_node_ref(
+    ref: str,
+    conn: sqlite3.Connection | None = None,
+) -> str:
+    """Resolve a node reference to its canonical ID.
+
+    Precedence: an exact node name wins; otherwise an all-hex prefix of length
+    >= 4 is treated as a node-id prefix. This keeps ``--node <name>`` intuitive
+    while still allowing id-prefix lookups.
+    """
+    node = db.get_node_by_name(ref, conn=conn)
+    if node is not None:
+        return str(node["id"])
+
+    normalized = ref.replace("-", "").lower()
+    if (
+        normalized
+        and len(normalized) >= _MIN_NODE_ID_PREFIX_LEN
+        and all(c in "0123456789abcdef" for c in normalized)
+    ):
+        matches = db.find_nodes_by_id_prefix(normalized, conn=conn)
+        exact = [n for n in matches if str(n["id"]).replace("-", "").lower() == normalized]
+        if len(exact) == 1:
+            return str(exact[0]["id"])
+        if len(matches) == 1:
+            return str(matches[0]["id"])
+        if len(matches) > 1:
+            raise AmbiguousNodeIdError(
+                f"Node ID prefix '{ref}' is ambiguous ({len(matches)} matches)."
+            )
+    raise NodeNotFoundError(f"Node {ref} not found")
 
 
 def get_interface_by_ref(ref: str) -> dict[str, Any]:

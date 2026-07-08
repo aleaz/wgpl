@@ -60,24 +60,24 @@ def _reclaim_inactive_peer_slots(
     conn: sqlite3.Connection,
     *,
     ip: str | None = None,
-    name: str | None = None,
+    node_id: str | None = None,
     replaced_by_peer_id: str,
 ) -> None:
     """Soft-delete inactive peers blocking partial unique indexes; log reclaimed events."""
-    if ip is None and name is None:
+    if ip is None and node_id is None:
         return
     for peer in db.list_peers(iface_id, conn=conn):
         if integrity.is_peer_active(peer) or integrity.is_peer_deleted(peer):
             continue
         blocks_ip = ip is not None and peer["ip_address"] == ip
-        blocks_name = name is not None and peer["name"] == name
-        if not blocks_ip and not blocks_name:
+        blocks_node = node_id is not None and str(peer["node_id"]) == node_id
+        if not blocks_ip and not blocks_node:
             continue
         slots: list[str] = []
         if blocks_ip:
             slots.append("ip")
-        if blocks_name:
-            slots.append("name")
+        if blocks_node:
+            slots.append("node")
         _audit_peer_from_row(
             peer,
             db.AuditEventType.RECLAIMED,

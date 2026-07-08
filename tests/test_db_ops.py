@@ -30,9 +30,17 @@ def valid_backup_path(tmp_path: Path) -> str:
         )
         conn.execute(
             """
+        CREATE TABLE IF NOT EXISTS "nodes" (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, desc TEXT,
+            created_at TEXT NOT NULL
+        );
+        """
+        )
+        conn.execute(
+            """
         CREATE TABLE IF NOT EXISTS "peers" (
             id TEXT PRIMARY KEY, interface_id INTEGER NOT NULL,
-            name TEXT NOT NULL, ip_address TEXT NOT NULL,
+            node_id TEXT NOT NULL, ip_address TEXT NOT NULL,
             public_key TEXT NOT NULL, private_key TEXT NOT NULL,
             preshared_key TEXT, created_at TEXT NOT NULL, dns TEXT,
             deleted_at TEXT, expires_at TEXT, desc TEXT, mtu INTEGER, keepalive INTEGER,
@@ -46,7 +54,8 @@ def valid_backup_path(tmp_path: Path) -> str:
             custom_allowed_ips TEXT,
             CHECK(role = 'subnet_router' OR routed_networks IS NULL),
             CHECK(allowed_ips_policy != 'custom' OR custom_allowed_ips IS NOT NULL),
-            FOREIGN KEY(interface_id) REFERENCES interfaces(id) ON DELETE CASCADE
+            FOREIGN KEY(interface_id) REFERENCES interfaces(id) ON DELETE CASCADE,
+            FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
         );
         """
         )
@@ -54,13 +63,13 @@ def valid_backup_path(tmp_path: Path) -> str:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_ip ON peers(interface_id, ip_address) WHERE deleted_at IS NULL;"
         )
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_name ON peers(interface_id, name) WHERE deleted_at IS NULL;"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_peers_active_node ON peers(interface_id, node_id) WHERE deleted_at IS NULL;"
         )
         conn.execute(
             """
         CREATE TABLE IF NOT EXISTS audit_events (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface')),
+            entity_type  TEXT NOT NULL CHECK(entity_type IN ('peer', 'interface', 'node')),
             entity_id    TEXT NOT NULL,
             interface    TEXT,
             event_type   TEXT NOT NULL CHECK(event_type IN ('created', 'updated', 'removed', 'reclaimed', 'pruned', 'cascade_removed')),

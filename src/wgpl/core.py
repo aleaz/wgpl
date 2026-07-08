@@ -17,9 +17,11 @@ from . import wireformat
 from . import wireguard
 from .audit import (
     _audit_interface_event,
+    _audit_node_event,
     _audit_peer_from_row,
     audit_event_to_dict,
     list_interface_audit_history,
+    list_node_audit_history,
     list_peer_audit_history,
 )
 from .ipam import _reclaim_inactive_peer_slots, allocate_peer_ip
@@ -28,6 +30,7 @@ from .refs import (
     PeerResolvePolicy,
     get_interface_by_ref,
     resolve_interface_ref,
+    resolve_node_ref,
     resolve_peer_ref,
 )
 from .restore import dump_database, restore_database
@@ -42,6 +45,8 @@ from .validators import (
 from .exceptions import (
     InterfaceHasPeersError,
     InterfaceNotFoundError,
+    NodeHasPeersError,
+    NodeNotFoundError,
     NoUpdateFieldsError,
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
@@ -140,6 +145,7 @@ __all__ = [
     "PeerResolvePolicy",
     "PeerRole",
     "add_interface",
+    "add_node",
     "add_peer",
     "allocate_peer_ip",
     "assert_database_valid",
@@ -159,19 +165,25 @@ __all__ = [
     "interface_dns_map",
     "list_interface_audit_history",
     "list_interfaces",
+    "list_node_audit_history",
+    "list_nodes",
     "list_peer_audit_history",
     "list_peers",
     "peer_row_to_public_dict",
     "peer_rows_to_public_dicts",
+    "prune_nodes",
     "prune_peers",
     "remove_interface",
+    "remove_node",
     "remove_peer",
     "repair_database",
     "resolve_interface_ref",
+    "resolve_node_ref",
     "resolve_peer_ref",
     "restore_database",
     "sync_interface",
     "update_interface",
+    "update_node",
     "update_peer",
     "validate_allowed_ips",
     "validate_dns",
@@ -219,7 +231,13 @@ def peer_row_to_public_dict(
     return {
         "id": str(peer["id"]),
         "interface_id": str(interface_id),
+        "node_id": (
+            str(_peer_optional_field(peer, "node_id"))
+            if _peer_optional_field(peer, "node_id") is not None
+            else None
+        ),
         "name": str(peer["name"]),
+        "node": str(peer["name"]),
         "ip_address": str(peer["ip_address"]),
         "public_key": str(peer["public_key"]),
         "created_at": str(created_at) if created_at is not None else None,
@@ -315,7 +333,6 @@ def _peer_actual_changed_fields(
 ) -> dict[str, dict[str, Any]]:
     """Return candidate field names and their state diffs."""
     column_map = {
-        "name": "name",
         "ip_address": "ip_address",
         "dns": "dns",
         "desc": "desc",
@@ -482,6 +499,160 @@ def remove_interface(ref: str, *, force: bool = False) -> None:
         db.remove_interface(iface_id, conn=conn)
 
 
+# --- Nodes (global device identities) ---
+
+
+def _validate_node_desc(desc: str | None) -> None:
+    if desc is not None:
+        integrity.validate_wire_safe_text(desc, "desc")
+
+
+def add_node(name: str, desc: str | None = None) -> dict[str, Any]:
+    """Create a global node (device identity)."""
+    name = validate_peer_name(name)
+    _validate_node_desc(desc)
+    node_id = str(uuid.uuid4())
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with db.transaction() as conn:
+        db.add_node(node_id, name, created_at, desc=desc, conn=conn)
+        _audit_node_event(
+            node_id,
+            name,
+            db.AuditEventType.CREATED,
+            conn,
+            metadata={"desc": desc} if desc else None,
+        )
+    return {"id": node_id, "name": name, "desc": desc, "created_at": created_at}
+
+
+def list_nodes() -> list[dict[str, Any]]:
+    """Return all nodes as plain dicts, including their attachment count."""
+    return [dict(row) for row in db.list_nodes()]
+
+
+def get_node_by_ref(ref: str) -> dict[str, Any]:
+    """Resolve a node reference and return its row as a dict (with attachment count)."""
+    with db.transaction(verify=True) as conn:
+        node_id = resolve_node_ref(ref, conn=conn)
+        node = db.get_node(node_id, conn=conn)
+        if not node:
+            raise NodeNotFoundError(f"Node {ref} not found")
+        count = db.count_peers_for_node(node_id, conn=conn)
+    result = dict(node)
+    result["attachment_count"] = count
+    return result
+
+
+def update_node(
+    ref: str,
+    *,
+    name: str | None = None,
+    desc: str | None = None,
+    clear_desc: bool = False,
+) -> dict[str, Any]:
+    """Update a node's identity fields (name/desc)."""
+    if clear_desc and desc is not None:
+        raise ValueError("Cannot set both desc and clear_desc")
+    if name is None and desc is None and not clear_desc:
+        raise NoUpdateFieldsError("No fields provided to update")
+    if name is not None:
+        name = validate_peer_name(name)
+    normalized_desc: str | None | UnsetType = UNSET
+    if clear_desc:
+        normalized_desc = None
+    elif desc is not None:
+        _validate_node_desc(desc)
+        normalized_desc = desc
+
+    with db.transaction() as conn:
+        node_id = resolve_node_ref(ref, conn=conn)
+        before = db.get_node(node_id, conn=conn)
+        if not before:
+            raise NodeNotFoundError(f"Node {ref} not found")
+        db.update_node(
+            node_id,
+            name=name if name is not None else UNSET,
+            desc=normalized_desc,
+            conn=conn,
+        )
+        after = db.get_node(node_id, conn=conn)
+        if not after:
+            raise NodeNotFoundError(f"Node {ref} not found after update")
+        changed: dict[str, dict[str, Any]] = {}
+        if name is not None and before["name"] != after["name"]:
+            changed["name"] = {"old": before["name"], "new": after["name"]}
+        if (clear_desc or desc is not None) and before["desc"] != after["desc"]:
+            changed["desc"] = {"old": before["desc"], "new": after["desc"]}
+        if changed:
+            _audit_node_event(
+                node_id,
+                str(after["name"]),
+                db.AuditEventType.UPDATED,
+                conn,
+                metadata={"fields": changed},
+            )
+    return dict(after)
+
+
+def remove_node(ref: str, *, force: bool = False) -> None:
+    """Remove a node and (with --force) cascade its attachments."""
+    with db.transaction() as conn:
+        node_id = resolve_node_ref(ref, conn=conn)
+        node = db.get_node(node_id, conn=conn)
+        if not node:
+            raise NodeNotFoundError(f"Node {ref} not found")
+        name = str(node["name"])
+        active_count = db.count_peers_for_node(node_id, conn=conn)
+        if active_count > 0 and not force:
+            raise NodeHasPeersError(
+                f"Node {name} has {active_count} active attachment(s). "
+                "Remove those peers first, or use --force."
+            )
+        attachments = [
+            peer
+            for peer in db.list_peers(conn=conn)
+            if str(peer["node_id"]) == node_id
+        ]
+        for peer in attachments:
+            _audit_peer_from_row(
+                peer,
+                db.AuditEventType.CASCADE_REMOVED,
+                conn,
+                metadata={"trigger": "node_removed", "node": name},
+            )
+        _audit_node_event(
+            node_id,
+            name,
+            db.AuditEventType.REMOVED,
+            conn,
+            metadata={
+                "attachment_count": len(attachments),
+                "forced": bool(active_count and force),
+            },
+        )
+        db.remove_node(node_id, conn=conn)
+
+
+def prune_nodes() -> int:
+    """Physically remove nodes with no attachments (any lifecycle state)."""
+    removed = 0
+    with db.transaction() as conn:
+        for node in db.list_nodes(conn=conn):
+            node_id = str(node["id"])
+            total = db.count_peers_for_node(node_id, conn=conn, include_deleted=True)
+            if total == 0:
+                _audit_node_event(
+                    node_id,
+                    str(node["name"]),
+                    db.AuditEventType.PRUNED,
+                    conn,
+                    metadata={"reason": "orphan"},
+                )
+                db.remove_node(node_id, conn=conn)
+                removed += 1
+    return removed
+
+
 def ensure_database() -> None:
     """Initialize the database connection and schema."""
     db.init_db()
@@ -555,9 +726,45 @@ def _effective_peer_keepalive(peer: sqlite3.Row, iface: sqlite3.Row) -> int | No
     return None
 
 
+def _resolve_node_for_attachment(
+    conn: sqlite3.Connection,
+    *,
+    name: str | None,
+    node_ref: str | None,
+    created_at: str,
+) -> tuple[str, str, bool]:
+    """Resolve the node to attach: strict via node_ref, or find-or-create via name.
+
+    Returns (node_id, node_name, node_created).
+    """
+    if (name is None) == (node_ref is None):
+        raise ValueError(
+            "Provide exactly one of a peer name (positional) or --node <ref>."
+        )
+
+    if node_ref is not None:
+        node_id = resolve_node_ref(node_ref, conn=conn)
+        node = db.get_node(node_id, conn=conn)
+        if not node:
+            raise NodeNotFoundError(f"Node {node_ref} not found")
+        return node_id, str(node["name"]), False
+
+    node_name = validate_peer_name(str(name))
+    existing = db.get_node_by_name(node_name, conn=conn)
+    if existing is not None:
+        return str(existing["id"]), node_name, False
+
+    node_id = str(uuid.uuid4())
+    db.add_node(node_id, node_name, created_at, desc=None, conn=conn)
+    _audit_node_event(
+        node_id, node_name, db.AuditEventType.CREATED, conn, metadata={"via": "peer_add"}
+    )
+    return node_id, node_name, True
+
+
 def add_peer(
     interface_name: str,
-    peer_name: str,
+    name: str | None = None,
     ip_address: str | None = None,
     dns: str | None = None,
     expires: str | None = None,
@@ -568,17 +775,25 @@ def add_peer(
     routed_networks: str | None = None,
     allowed_ips_policy: str = AllowedIpsPolicy.VPN_ONLY,
     custom_allowed_ips: str | None = None,
+    *,
+    node_ref: str | None = None,
 ) -> dict[str, Any]:
+    """Attach a node to an interface as a peer, allocating an IP and keys.
+
+    Provide either ``name`` (positional; find-or-create the node) or ``node_ref``
+    (strict; attach an existing node). Returns the peer's essential information.
     """
-    Creates a new peer, allocates an IP, generates keys and saves it to the DB.
-    Returns a dictionary with the peer's essential information.
-    """
-    peer_name = validate_peer_name(peer_name)
     normalized_dns = validate_dns(dns) if dns is not None else None
     _validate_mtu_keepalive(mtu, keepalive)
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_name, conn=conn)
+
+        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        node_id, node_name, node_created = _resolve_node_for_attachment(
+            conn, name=name, node_ref=node_ref, created_at=created_at
+        )
+
         allocated_ip = allocate_peer_ip(iface_id, conn, ip_address)
 
         keypair = wireguard.generate_keypair()
@@ -589,11 +804,9 @@ def add_peer(
             iface_id,
             conn,
             ip=allocated_ip,
-            name=peer_name,
+            node_id=node_id,
             replaced_by_peer_id=peer_id,
         )
-
-        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         expires_at = None
         if expires:
@@ -616,7 +829,8 @@ def add_peer(
         prospective_peer: dict[str, object] = {
             "id": peer_id,
             "interface_id": iface_id,
-            "name": peer_name,
+            "node_id": node_id,
+            "name": node_name,
             "ip_address": allocated_ip,
             "public_key": keypair.public_key,
             "preshared_key": preshared_key,
@@ -634,7 +848,7 @@ def add_peer(
         db.add_peer(
             id=peer_id,
             interface_id=iface_id,
-            name=peer_name,
+            node_id=node_id,
             ip_address=allocated_ip,
             public_key=keypair.public_key,
             private_key=keypair.private_key,
@@ -654,21 +868,27 @@ def add_peer(
 
         created_peer = db.get_peer(peer_id, conn=conn)
         if created_peer:
-            meta: dict[str, Any] = {"has_psk": bool(preshared_key)}
+            meta: dict[str, Any] = {
+                "has_psk": bool(preshared_key),
+                "node_created": node_created,
+            }
             if expires_at:
                 meta["expires_at"] = expires_at
             _audit_peer_from_row(
                 created_peer,
                 db.AuditEventType.CREATED,
                 conn,
-                metadata=meta or None,
+                metadata=meta,
             )
 
     effective_dns = normalized_dns or (str(iface["dns"]) if iface["dns"] else None)
 
     return {
         "id": peer_id,
-        "name": peer_name,
+        "name": node_name,
+        "node": node_name,
+        "node_id": node_id,
+        "node_created": node_created,
         "ip_address": allocated_ip,
         "public_key": keypair.public_key,
         "dns": effective_dns,
@@ -1208,7 +1428,6 @@ def update_peer(
     peer_ref: str,
     *,
     active_only: bool = True,
-    name: str | None = None,
     ip_address: str | None = None,
     dns: str | None = None,
     clear_dns: bool = False,
@@ -1228,8 +1447,6 @@ def update_peer(
     clear_custom_allowed_ips: bool = False,
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
-    if name is not None:
-        name = validate_peer_name(name)
     if clear_dns and dns is not None:
         raise ValueError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
@@ -1250,7 +1467,6 @@ def update_peer(
     has_field = any(
         v is not None
         for v in (
-            name,
             ip_address,
             dns,
             desc,
@@ -1312,8 +1528,6 @@ def update_peer(
     )
 
     changed_fields: list[str] = []
-    if name is not None:
-        changed_fields.append("name")
     if ip_address is not None:
         changed_fields.append("ip_address")
     if dns is not None or clear_dns:
@@ -1365,13 +1579,11 @@ def update_peer(
             )
             slot_ip = validated_ip
 
-        slot_name = name
-        if slot_ip is not None or slot_name is not None:
+        if slot_ip is not None:
             _reclaim_inactive_peer_slots(
                 iface_id,
                 conn,
                 ip=slot_ip,
-                name=slot_name,
                 replaced_by_peer_id=canonical_id,
             )
 
@@ -1440,8 +1652,6 @@ def update_peer(
         )
 
         prospective_peer = dict(peer)
-        if name is not None:
-            prospective_peer["name"] = name
         if ip_address is not None:
             prospective_peer["ip_address"] = str(validated_ip)
         if normalized_expires is not UNSET:
@@ -1457,7 +1667,7 @@ def update_peer(
                 conn=conn,
                 exclude_peer_id=canonical_id,
             )
-        elif ip_address is not None or name is not None:
+        elif ip_address is not None:
             integrity.assert_peer_slot_invariants(
                 prospective_peer,
                 iface,
@@ -1468,7 +1678,6 @@ def update_peer(
         try:
             db.update_peer(
                 canonical_id,
-                name=name if name is not None else UNSET,
                 ip_address=validated_ip,
                 dns=normalized_dns,
                 desc=normalized_desc,
@@ -1503,6 +1712,8 @@ def update_peer(
     return {
         "id": str(updated["id"]),
         "name": str(updated["name"]),
+        "node": str(updated["name"]),
+        "node_id": str(updated["node_id"]),
         "ip_address": str(updated["ip_address"]),
         "dns": effective_dns,
         "dns_override": updated["dns"],

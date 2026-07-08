@@ -169,6 +169,41 @@ def _validate_routing_topology(
                     )
                 )
 
+    iface_networks: list[ipaddress.IPv4Network] = []
+    if iface_routed_raw:
+        try:
+            iface_networks = routing.parse_cidr_list(str(iface_routed_raw))
+        except WgplException:
+            iface_networks = []
+    for router in active_subnet_routers:
+        for peer_net in _peer_routed_networks(router):
+            for iface_net in iface_networks:
+                if peer_net == iface_net:
+                    issues.append(
+                        _issue(
+                            interface=iface_name,
+                            peer=str(router["name"]),
+                            code="hub_peer_routed_networks_duplicate",
+                            detail=(
+                                f"Peer '{router['name']}' routed network {peer_net} "
+                                f"exactly duplicates interface routed network {iface_net}"
+                            ),
+                        )
+                    )
+                elif peer_net.overlaps(iface_net):
+                    issues.append(
+                        _issue(
+                            interface=iface_name,
+                            peer=str(router["name"]),
+                            code="hub_peer_routed_networks_overlap",
+                            detail=(
+                                f"Peer '{router['name']}' routed network {peer_net} "
+                                f"overlaps interface routed network {iface_net}"
+                            ),
+                            severity="warning",
+                        )
+                    )
+
     for left_idx, left in enumerate(active_subnet_routers):
         left_networks = _peer_routed_networks(left)
         for right in active_subnet_routers[left_idx + 1 :]:

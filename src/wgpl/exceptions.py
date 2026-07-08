@@ -52,6 +52,30 @@ class InterfaceHasPeersError(WgplException):
     pass
 
 
+class NodeNotFoundError(WgplException):
+    """Raised when a node (device identity) is not found in the database."""
+
+    pass
+
+
+class NodeAlreadyExistsError(WgplException):
+    """Raised when creating a node whose name already exists (names are global)."""
+
+    pass
+
+
+class NodeHasPeersError(WgplException):
+    """Raised when removing a node that still has attachments without --force."""
+
+    pass
+
+
+class AmbiguousNodeIdError(WgplException):
+    """Raised when a node ID prefix matches more than one node."""
+
+    pass
+
+
 class PeerNotFoundError(WgplException):
     """Raised when a peer is not found in the database."""
 

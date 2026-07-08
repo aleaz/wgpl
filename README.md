@@ -121,6 +121,7 @@ A **WGPL interface** row is the hub record for one VPN domain (you may name it `
 wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
 
 # Add a remote-access peer (default policy: vpn_only — client reaches VPN pool only)
+# The name find-or-creates a device "node"; attach an existing device with --node <ref>
 wgpl peer add wg0 "Alice_Laptop"
 
 # Full Internet via hub (explicit policy):
@@ -169,7 +170,8 @@ flowchart TD
 | --- | --- |
 | **VPN domain** | One `interfaces` row (one hub-and-spoke topology) |
 | **WGPL interface** | Hub record in the DB — not necessarily the same thing as the OS netdev unless you named it that way |
-| **Peer** | Remote attachment to the hub (keys, tunnel IP, routing intent) |
+| **Node** | Global device identity (unique name + description); managed with `wgpl node` |
+| **Peer** | A node's attachment to one hub (keys, tunnel IP, routing intent) |
 | **Server endpoint** | `interfaces.endpoint` host (and port) — where clients connect |
 | **`peer.role = endpoint`** | End-user device (laptop, phone); no `routed_networks` |
 | **`peer.role = subnet_router`** | Site gateway advertising LAN CIDRs behind the tunnel |
@@ -226,8 +228,9 @@ Capabilities at a glance; [deployment patterns](#deployment-patterns-byoi) follo
 
 ### Lifecycle
 
+- **Device identity:** `wgpl node` manages global device records (unique name + description). A peer is a node's attachment to one hub; the same device can attach to several hubs. `peer add <iface> <name>` find-or-creates the node; `--node <ref>` attaches an existing one. Rename a device with `wgpl node update`.
 - **TTL:** `--expires 48h` for contractors and temporary access (expired peers are excluded from apply/export until pruned).
-- **Soft delete:** `peer remove` frees the IP while retaining audit history; `peer prune` hard-deletes inactive rows.
+- **Soft delete:** `peer remove` frees the IP while retaining audit history; `peer prune` hard-deletes inactive rows. Node identities persist; `wgpl node prune` removes orphan devices.
 
 Details: [Operations and audit](#operations-and-audit).
 

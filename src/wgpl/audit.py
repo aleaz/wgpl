@@ -14,6 +14,7 @@ from .refs import (
     _MIN_PEER_ID_PREFIX_LEN,
     _normalize_peer_ref,
     resolve_interface_ref,
+    resolve_node_ref,
     resolve_peer_ref,
 )
 from .exceptions import AmbiguousPeerIdError, PeerNotFoundError
@@ -39,6 +40,9 @@ def _audit_peer_from_row(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     metadata_with_context = dict(metadata) if metadata else {}
+    node_id = peer["node_id"] if "node_id" in peer.keys() else None
+    if node_id is not None:
+        metadata_with_context.setdefault("node_id", str(node_id))
     exec_cmd = os.environ.get("WGPL_EXEC_CMD")
     if exec_cmd:
         metadata_with_context["exec_cmd"] = _sanitize_exec_cmd(exec_cmd)
@@ -51,6 +55,31 @@ def _audit_peer_from_row(
         name=str(peer["name"]),
         ip_address=str(peer["ip_address"]),
         public_key=str(peer["public_key"]),
+        metadata=metadata_with_context or None,
+        conn=conn,
+    )
+
+
+def _audit_node_event(
+    node_id: str,
+    node_name: str,
+    event_type: db.AuditEventType,
+    conn: sqlite3.Connection,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Create an append-only audit event for a node (global, interface = NULL)."""
+    metadata_with_context = dict(metadata) if metadata else {}
+    exec_cmd = os.environ.get("WGPL_EXEC_CMD")
+    if exec_cmd:
+        metadata_with_context["exec_cmd"] = _sanitize_exec_cmd(exec_cmd)
+
+    db.append_audit_event(
+        entity_type=db.AuditEntityType.NODE,
+        entity_id=str(node_id),
+        event_type=event_type,
+        interface=None,
+        name=node_name,
         metadata=metadata_with_context or None,
         conn=conn,
     )
@@ -149,6 +178,36 @@ def list_peer_audit_history(
         limit=limit,
         offset=offset,
     )
+    return [audit_event_to_dict(row) for row in rows]
+
+
+def list_node_audit_history(
+    ref: str,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return audit events for a node (including after it was removed)."""
+    from .exceptions import NodeNotFoundError
+
+    try:
+        node_id = resolve_node_ref(ref, conn=conn)
+        rows = db.list_audit_events(
+            entity_type=db.AuditEntityType.NODE,
+            entity_id=node_id,
+            limit=limit,
+            offset=offset,
+            conn=conn,
+        )
+    except NodeNotFoundError:
+        rows = db.list_audit_events(
+            entity_type=db.AuditEntityType.NODE,
+            entity_id=ref,
+            limit=limit,
+            offset=offset,
+            conn=conn,
+        )
     return [audit_event_to_dict(row) for row in rows]
 
 

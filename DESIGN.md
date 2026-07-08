@@ -25,39 +25,55 @@ Routing derivation and operational patterns are documented in
 |---------|-----------|---------|
 | **VPN (topology)** | One `interfaces` row | A hub-and-spoke domain: address pool, hub endpoint, optional hub-local routes, and all remote attachments |
 | **Interface** | `interfaces` table | The concentrator (hub) for one VPN domain — not the OS `wg0` device itself (BYOI) |
-| **Peer** | `peers` table | A remote **attachment** to the hub: keys, tunnel IP, lifecycle, routing **intent**. A peer is not always a single host — it may represent a laptop, phone, or a site gateway advertising LANs |
-| **Node** (conceptual) | Collapsed into `peers` today | The physical or logical remote entity (router, firewall, branch). Not a separate table yet |
+| **Node** | `nodes` table | A **device identity**: a globally unique `name` and optional `desc`. It owns *who* a device is, independent of any tunnel. A node may be attached to zero or more interfaces |
+| **Peer** | `peers` table | A node's **attachment** to one interface: keys, tunnel IP, lifecycle, routing **intent**. Carries `node_id` (FK to `nodes`); it has no name of its own — the display name comes from the node |
 | **Route / network** | `routed_networks` (peer or interface) | IPv4 CIDRs **behind** a node or the hub — intent to reach those prefixes via the tunnel |
 | **Routing policy** | `allowed_ips_policy`, `custom_allowed_ips` | What a peer's client export should include (split/full tunnel, remote LANs, custom) |
+
+**Identity vs attachment.** The node is *pure identity* — it holds no routing or
+tunnel state. All tunnel-specific state (keys, IP, `role`, `routed_networks`,
+policy, lifecycle) lives on the peer. This lets the same device (one node) attach
+to several hubs, each attachment carrying its own routing intent.
 
 ### Domain vs WireGuard
 
 ```
-Domain (SQLite intent)          WireGuard (derived export)
-─────────────────────          ──────────────────────────
-interfaces + peers      →      hub syncconf / client .conf
-role, routed_networks   →      [Peer] AllowedIPs
-allowed_ips_policy      →      client AllowedIPs scope
-(keys, IP, DNS, MTU)    →      Interface / Peer fields
+Domain (SQLite intent)             WireGuard (derived export)
+─────────────────────             ──────────────────────────
+interfaces + nodes + peers  →     hub syncconf / client .conf
+nodes.name                  →     display / identity only (never wire)
+role, routed_networks       →     [Peer] AllowedIPs
+allowed_ips_policy          →     client AllowedIPs scope
+(keys, IP, DNS, MTU)        →     Interface / Peer fields
 ```
 
 **Never stored:** derived `AllowedIPs`, computed routes, or generated configs.
 Only **intent** is persisted; `routing.py` derives reachability at export time.
 
-### Peer ≠ host
+### Peer role (attachment intent)
 
-A peer represents a remote node capable of announcing zero or more networks:
+Each peer attachment declares how the node participates on that interface:
 
 - **`endpoint`** — tunnel identity only (notebook, phone, desktop); no
   `routed_networks`.
 - **`subnet_router`** — gateway announcing one or more LAN CIDRs behind the
   tunnel (`routed_networks` is a comma-separated list).
 
-The same physical router connected to two hubs would be **two peer rows** (one
-per interface) with duplicated `routed_networks` today. That is an accepted
-denormalization for the current single-hub-per-interface product scope.
+The same physical device connected to two hubs is **one node** with **two peer
+rows** (one per interface). Each attachment carries its own `role` and
+`routed_networks`; the shared identity (name, desc) lives once on the node.
 
-### Evolution notes (not implemented)
+### Node lifecycle
+
+- A node is created explicitly (`wgpl node add`) or implicitly via the
+  find-or-create path of `wgpl peer add <iface> <name>`.
+- Node identity **persists** when its peers are soft-deleted or expire — the
+  device is still "known" even with zero active attachments.
+- `wgpl node remove` is guarded: it refuses while attachments remain unless
+  `--force` (which cascades the attachments with audit). `wgpl node prune`
+  removes only **orphan** nodes (no attachments, including soft-deleted rows).
+
+### Evolution notes
 
 The current schema does not block future extensions:
 
@@ -65,7 +81,7 @@ The current schema does not block future extensions:
 |-----------|-----------------|
 | Multiple hubs | Supported — one `interfaces` row per hub |
 | Multiple WireGuard interfaces on one host | Supported — composite identity (`name + endpoint + port`) |
-| Explicit `Node` entity | Would split attachment from advertised networks; peers would reference a node |
+| One device across hubs | Supported — a single `nodes` row with a peer per interface |
 | IPv6 | Blocked by IPv4-only invariant; `routing.py` uses `IPv4Network` throughout |
 | Alternate exporters (MikroTik, FRR) | Viable — `routing.py` is pure; new serializers beside `wireformat` |
 | Advanced policies / BGP | Would consume the same derived prefix lists from `routing.py` |
@@ -84,13 +100,17 @@ Post domain-model audit (implementation checked against documentation).
 | Export is one-way (intent → wire format) | Verified — no import from `.conf` |
 | `routing.py` single source of routing derivation | Verified — see below |
 
-### Peer-centric implementation
+### Node / peer separation
 
-The codebase is **peer-centric**, not node-centric:
+Identity and attachment are distinct tables, but routing derivation stays
+peer-scoped:
 
-- All routing APIs accept `peer` / `iface` rows (`routing.resolve_*`).
-- There is no `Node` table or type; the conceptual Node is collapsed into `Peer`.
-- Future `Node` entity would sit above `Peer` without changing derivation logic.
+- The `nodes` table owns identity (`name`, `desc`); `peers.node_id` references it.
+- All routing APIs still accept `peer` / `iface` rows (`routing.resolve_*`); the
+  node contributes only the display name and the own-LAN exclusion key
+  (`routing` excludes by `node_id` when present, falling back to `peer.id`).
+- Peer read helpers JOIN `nodes` and alias `n.name AS name`, so downstream code
+  that reads `peer["name"]` is unchanged.
 
 ### Routing derivation audit
 
@@ -148,9 +168,9 @@ cli.py (Typer / presentation)
 A peer is **active** when it is not soft-deleted and not expired
 (`integrity.is_peer_active()` is the SSOT).
 
-- Expired peers release IP/name for reuse after `_reclaim_inactive_peer_slots` or `peer prune`.
-- Partial unique indexes only know `deleted_at IS NULL`; expired rows block INSERT until reclaimed.
-- `peer prune` hard-deletes inactive rows with a `pruned` audit event each.
+- Expired peers release their IP and node slot for reuse after `_reclaim_inactive_peer_slots` or `peer prune`.
+- Partial unique indexes only know `deleted_at IS NULL`; expired rows block INSERT until reclaimed. `idx_peers_active_node` keeps a node attached to an interface at most once while active.
+- `peer prune` hard-deletes inactive peer rows with a `pruned` audit event each. Node identities survive prune; use `node prune` to remove orphan nodes.
 
 ## Security boundaries
 
@@ -168,7 +188,9 @@ A peer is **active** when it is not soft-deleted and not expired
 
 ## Schema
 
-Tables: `interfaces`, `peers`, `audit_events`. Routing intent columns:
+Tables: `interfaces`, `nodes`, `peers`, `audit_events`. Identity columns:
+`nodes.name` (globally unique), `nodes.desc`; `peers.node_id` (FK → `nodes`,
+peers have no `name` column). Routing intent columns:
 `interfaces.routed_networks`; `peers.role`, `routed_networks`, `allowed_ips_policy`,
 `custom_allowed_ips`. See [docs/ROUTING.md](docs/ROUTING.md). Append-only audit enforced by SQLite
 triggers recreated on every `init_db()` (never `IF NOT EXISTS` for security triggers).

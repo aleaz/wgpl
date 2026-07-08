@@ -335,8 +335,6 @@ def test_cli_peer_update_set_and_clear_json(seeded: dict) -> None:
             "update",
             "wg0",
             peer_id,
-            "--name",
-            "tablet",
             "--ip",
             "10.0.0.10",
             "--dns",
@@ -353,7 +351,6 @@ def test_cli_peer_update_set_and_clear_json(seeded: dict) -> None:
     )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["name"] == "tablet"
     assert payload["ip_address"] == "10.0.0.10"
     assert payload["dns"] == "8.8.8.8"
     assert payload["desc"] == "new-desc"

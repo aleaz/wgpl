@@ -19,6 +19,7 @@ runner = CliRunner()
 IFACE_PUBKEY = wireguard.generate_keypair().public_key
 MISSING_IFACE = "wg0"
 MISSING_PEER = "00000000-0000-0000-0000-000000000001"
+MISSING_NODE = "ghostnode"
 
 
 def _no_traceback(result: object) -> None:
@@ -159,8 +160,11 @@ def test_interface_list_empty_db_json(empty_db_path: str) -> None:
         ["peer", "remove", MISSING_IFACE, MISSING_PEER],
         ["peer", "config", MISSING_PEER],
         ["peer", "qr", MISSING_PEER],
-        ["peer", "update", MISSING_IFACE, MISSING_PEER, "--name", "x"],
+        ["peer", "update", MISSING_IFACE, MISSING_PEER, "--dns", "1.1.1.1"],
         ["peer", "prune", MISSING_IFACE],
+        ["node", "show", MISSING_NODE],
+        ["node", "remove", MISSING_NODE],
+        ["node", "update", MISSING_NODE, "--name", "renamed"],
         ["apply", MISSING_IFACE],
     ],
 )

@@ -385,6 +385,11 @@ def assert_peer_activation(
     peer_id = str(peer["id"])
     peer_name = str(peer["name"])
     ip = str(peer["ip_address"])
+    node_id = (
+        str(peer["node_id"])
+        if "node_id" in _peer_keys(peer) and peer["node_id"] is not None
+        else None
+    )
 
     for other in db.list_peers(iface_id, conn=conn):
         if exclude_peer_id is not None and str(other["id"]) == exclude_peer_id:
@@ -393,6 +398,10 @@ def assert_peer_activation(
             continue
         if not is_peer_active(other):
             continue
+        if node_id is not None and str(other["node_id"]) == node_id:
+            raise PeerAlreadyExistsError(
+                f"Node '{peer_name}' is already attached to this interface."
+            )
         if str(other["ip_address"]) == ip:
             raise PeerAlreadyExistsError(
                 f"IP {ip} is already assigned to active peer '{other['name']}'"
@@ -528,6 +537,25 @@ def validate_database(
 ) -> dict[str, str | list[dict[str, str | None]]]:
     """Validate stored wire-format fields; full=True checks every row."""
     issues: list[dict[str, str | None]] = []
+
+    if full:
+        for node in db.list_nodes(conn=conn):
+            node_name = str(node["name"])
+            try:
+                if not _PEER_NAME_RE.match(node_name):
+                    raise WgplException(f"Node name '{node_name}' is not valid")
+                node_desc = node["desc"] if "desc" in node.keys() else None
+                if node_desc is not None:
+                    validate_wire_safe_text(str(node_desc), "node desc")
+            except WgplException as exc:
+                issues.append(
+                    {
+                        "interface": None,
+                        "peer": node_name,
+                        "code": "invalid_node_fields",
+                        "detail": str(exc),
+                    }
+                )
 
     for iface in db.list_interfaces(conn=conn):
         iface_name = str(iface["name"])
