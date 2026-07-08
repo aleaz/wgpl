@@ -211,7 +211,7 @@ def test_restore_rejects_v1_schema(wg0_interface: str, tmp_path) -> None:
     finally:
         conn.close()
 
-    with pytest.raises(WgplException, match="v1 backups are not migratable"):
+    with pytest.raises(WgplException, match="user_version 1 are not migratable"):
         core.restore_database(backup)
 
 

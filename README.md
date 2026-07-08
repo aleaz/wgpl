@@ -176,7 +176,7 @@ Manage an unlimited number of WireGuard servers from a single SQLite database.
 
 Bring enterprise networking features to your tunnels automatically:
 
-- **Intent-based routing (v2):** Declare `role`, `routed_networks`, and `allowed_ips_policy`; WGPL derives hub and client `AllowedIPs` at export time. Patterns: split/full tunnel, subnet routers, LAN↔LAN via hub. See [docs/ROUTING.md](docs/ROUTING.md) and the [hub relay runbook](docs/runbook.md#hub-routing-relay-v2).
+- **Intent-based routing:** Declare `role`, `routed_networks`, and `allowed_ips_policy`; WGPL derives hub and client `AllowedIPs` at export time. Patterns: split/full tunnel, subnet routers, LAN↔LAN via hub. See [docs/ROUTING.md](docs/ROUTING.md) and the [hub relay runbook](docs/runbook.md#hub-routing-relay).
 - **Per-Peer Granularity:** Customize `MTU`, `PersistentKeepalive`, and `DNS` at the interface level (default) or override them per peer.
 - **FQDN & IP Support:** Endpoints are proactively validated via RFC 1123, ensuring your generated configs are always resolvable by WireGuard.
 

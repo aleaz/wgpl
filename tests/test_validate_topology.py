@@ -1,4 +1,4 @@
-"""Tests for routing topology validation (phase 3)."""
+"""Tests for routing topology validation."""
 
 from __future__ import annotations
 

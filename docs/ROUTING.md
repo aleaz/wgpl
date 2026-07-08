@@ -1,6 +1,6 @@
-# WGPL Routing Model (v2)
+# WGPL Routing Model
 
-WGPL v2 is an **intent-based hub-and-spoke IPv4 routing generator**. You declare
+WGPL is an **intent-based hub-and-spoke IPv4 routing generator**. You declare
 what each peer and interface should reach; the tool **derives** WireGuard
 `AllowedIPs` at export/apply time. Derived values are never stored in the database.
 
@@ -79,11 +79,11 @@ derived automatically when sites are added.
 **Operator responsibility:** WGPL does not enable kernel forwarding or firewall
 rules. On the hub, enable `net.ipv4.ip_forward=1` and allow `FORWARD` on the
 WireGuard interface (and MASQUERADE if needed). See
-[runbook — Hub routing relay](runbook.md#hub-routing-relay-v2).
+[runbook — Hub routing relay](runbook.md#hub-routing-relay).
 
 ## WireGuard coverage boundary
 
-WGPL v2 = **complete hub-and-spoke IPv4 routing intent**, not a full
+WGPL = **complete hub-and-spoke IPv4 routing intent**, not a full
 `wg-quick.conf` emulator.
 
 ### In scope
@@ -96,9 +96,9 @@ WGPL v2 = **complete hub-and-spoke IPv4 routing intent**, not a full
 
 ### Partially in scope (operator or future work)
 
-- **Hub relay forwarding** — config yes; `ip_forward` / iptables manual ([runbook](runbook.md#hub-routing-relay-v2))
-- **Egress / exit node** — not in v2 (`0.0.0.0/0` rejected in `routed_networks`; use `full_tunnel` on clients)
-- **CLI `--allowed-ips` override** — ad-hoc export only (phase 2: default derived)
+- **Hub relay forwarding** — config yes; `ip_forward` / iptables manual ([runbook](runbook.md#hub-routing-relay))
+- **Egress / exit node** — not supported in `routed_networks` (`0.0.0.0/0` rejected; use `full_tunnel` on clients)
+- **CLI `--allowed-ips` override** — ad-hoc export only (default is derived from policy)
 
 ### Out of scope (by design)
 
@@ -107,7 +107,7 @@ WGPL v2 = **complete hub-and-spoke IPv4 routing intent**, not a full
 - Multiple client `[Peer]` blocks toward different hubs
 - Kernel routing management, dynamic route daemons
 
-## Schema v2
+## Database schema (routing columns)
 
 New columns (see `db.init_db()`):
 
@@ -117,7 +117,7 @@ New columns (see `db.init_db()`):
 - `peers.allowed_ips_policy` — see table above
 - `peers.custom_allowed_ips` — required when policy is `custom`
 
-`PRAGMA user_version = 2`. v1 backups are **not migratable**; restore rejects them.
+`PRAGMA user_version = 2`. Backups with `user_version = 1` are **not migratable**; restore rejects them.
 
 ## Industry mapping
 

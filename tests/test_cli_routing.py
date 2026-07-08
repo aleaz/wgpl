@@ -1,4 +1,4 @@
-"""CLI tests for routing flags (phase 2)."""
+"""CLI tests for routing flags."""
 
 from __future__ import annotations
 

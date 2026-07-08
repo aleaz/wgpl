@@ -217,7 +217,7 @@ def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
     if version == 1:
         raise WgplException(
             f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version 1 (expected 2); "
-            "v1 backups are not migratable."
+            "backups with user_version 1 are not migratable."
         )
     if version not in _SUPPORTED_SCHEMA_VERSIONS:
         raise WgplException(

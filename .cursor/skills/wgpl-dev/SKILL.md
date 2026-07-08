@@ -37,13 +37,13 @@ wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
 wgpl peer update wg0 <PEER_ID> --desc "CEO laptop" --mtu 1280
 wgpl validate wg0
 
-# 2c. Routing v2 (subnet routers, split/full tunnel) — see docs/ROUTING.md
+# 2c. Routing (subnet routers, split/full tunnel) — see docs/ROUTING.md
 wgpl interface update wg0 --routed-networks "10.50.0.0/16"
 wgpl peer add wg0 "Site_A_GW" --role subnet_router \
   --routed-networks "192.168.10.0/24" \
   --allowed-ips-policy all_remote_networks --keepalive 25
 wgpl peer explain Site_A_GW
-# Hub relay (ip_forward, FORWARD, optional MASQUERADE): docs/runbook.md#hub-routing-relay-v2
+# Hub relay (ip_forward, FORWARD, optional MASQUERADE): docs/runbook.md#hub-routing-relay
 
 # 3. Extract client configuration (full UUID or short prefix from peer list)
 wgpl peer config <PEER_ID>
@@ -116,7 +116,7 @@ routing flags (`--role`, `--routed-networks`, `--allowed-ips-policy`), `validate
 `apply`, `db dump`, `db restore`, `--json` M2M mode.
 
 Routing model: [docs/ROUTING.md](../../docs/ROUTING.md). Hub relay ops:
-[docs/runbook.md — Hub routing relay](../../docs/runbook.md#hub-routing-relay-v2).
+[docs/runbook.md — Hub routing relay](../../docs/runbook.md#hub-routing-relay).
 
 Future work: `peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).
 

@@ -2,8 +2,8 @@
 
 All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs.
 
-Routing intent (v2) is documented in [ROUTING.md](ROUTING.md). Operational hub
-relay steps are in [runbook.md — Hub routing relay](runbook.md#hub-routing-relay-v2).
+Routing intent is documented in [ROUTING.md](ROUTING.md). Operational hub
+relay steps are in [runbook.md — Hub routing relay](runbook.md#hub-routing-relay).
 
 ## Interface Management (`wgpl interface`)
 

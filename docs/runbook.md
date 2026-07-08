@@ -56,7 +56,7 @@ Mutations (`peer add`, `peer remove`, `peer update`, `peer prune`, `interface up
 update the SQLite database only. The kernel stays stale until `apply` or remote
 `syncconf` runs. This is by design.
 
-## Hub routing relay (v2)
+## Hub routing relay
 
 WGPL derives WireGuard `AllowedIPs` for hub-and-spoke topologies (remote access,
 subnet routers, LAN↔LAN via hub). See [ROUTING.md](ROUTING.md) for the routing
