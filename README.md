@@ -5,11 +5,11 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 ![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)
 
-**WGPL** is a disconnected Python CLI that manages **hub-and-spoke VPN topologies** with a SQLite database as the single source of truth. You declare peers, IP pools, and routing **intent**; WGPL handles IPAM, derives WireGuard `AllowedIPs` at export time, and applies hub changes with **zero downtime** (`wg syncconf`).
+**WGPL (WireGuard Peer Lite)** is a lightweight, disconnected Python CLI that manages **hub-and-spoke VPN topologies** with a SQLite database as the single source of truth. You declare peers, IP pools, and routing **intent**; WGPL handles IPAM, derives WireGuard `AllowedIPs` at export time, and applies hub changes with **zero downtime** (`wg syncconf`).
 
-**The problem:** Manual WireGuard means editing text files, hand-picking `AllowedIPs`, guessing free IPs, and restarting interfaces (dropping every session) to add one peer — with no audit trail.
+**The Problem:** Managing WireGuard manually means editing text files (`wg0.conf`), hand-picking `AllowedIPs`, guessing which IPs are free, and restarting interfaces (dropping all active connections) just to add one peer. It also lacks a clear history of who was granted access.
 
-**The solution:** WGPL stores **intent** (roles, routed networks, policies) in SQLite, derives hub and client `AllowedIPs` when you export or apply, allocates IPs automatically, and keeps an append-only audit log. Mutations update the database only; the kernel stays stale until you run `apply` or remote `syncconf`.
+**The Solution:** WGPL decouples peer management from your OS. It stores **intent** (roles, routed networks, policies) in SQLite, derives hub and client `AllowedIPs` when you export or apply, allocates IPs automatically, and keeps a robust append-only audit trail built on SQLite triggers. Mutations update the database only; the kernel stays stale until you run `apply` or remote `syncconf`. When combined with proper OS-level access controls, centralized lifecycle records can simplify SOC2 and ISO27001 access reviews.
 
 ### What WGPL is / is not
 
@@ -28,7 +28,7 @@ Domain model and layers: [DESIGN.md](DESIGN.md).
 - [Compared to wg-quick](#compared-to-wg-quick)
 - [When to use something else](#when-to-use-something-else)
 - [How it works](#how-it-works)
-- [Quick start](#quick-start)
+- [1-Minute Quick Start](#1-minute-quick-start)
 - [Routing summary](#routing-summary)
 - [Features](#features)
 - [Deployment patterns (BYOI)](#deployment-patterns-byoi)
@@ -75,22 +75,26 @@ flowchart LR
 - **Mutations** (`peer add`, `peer update`, `interface update`, …) write the database inside transactions. They do **not** touch WireGuard.
 - **Apply / export** reads intent, derives hub and client `AllowedIPs`, validates wire safety, then emits text for `wg syncconf`, client `.conf`, QR, or JSON.
 
+Every `apply`, `interface export`, and `peer config` path runs this pipeline before output (emit gates in `core` — see [DESIGN.md](DESIGN.md)).
+
 See [DESIGN.md — Domain vs WireGuard](DESIGN.md#domain-model) for the full domain model.
 
-## Quick start
+## 1-Minute Quick Start
 
 ### 1. Install
 
-**Option A: Standalone binary (Linux routers)** — no runtime dependencies.
+**Option A: Standalone Binary (Recommended for Linux Routers)**
+No dependencies required.
 
 ```bash
 curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 -o /usr/local/bin/wgpl
 chmod +x /usr/local/bin/wgpl
 ```
 
-> Re-run the command when a new release is published to update the binary.
+> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.
 
-**Option B: Python / uv (developers and admins)** — Python 3.12+.
+**Option B: Python / uv (Recommended for Developers & Admins)**
+Requires Python 3.12+. Using `uv` makes it easy to get the latest updates (`uv tool upgrade wgpl`) or install from the repository.
 
 ```bash
 uv tool install wgpl
@@ -102,6 +106,7 @@ WGPL does not create the OS WireGuard interface. A **WGPL interface** row is the
 
 ```bash
 # Register the hub: name, server endpoint host, hub public key, address pool
+# Add --port N if the hub does not listen on the default 51820
 wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
 
 # Add a remote-access peer (default policy: vpn_only — client reaches VPN pool only)
@@ -125,7 +130,7 @@ wgpl peer config "Alice_Laptop" > alice.conf
 chmod 600 alice.conf
 ```
 
-> If the database has **more than one** WGPL interface, pass `-i` / `--interface` to `peer config`, `peer qr`, and secret-bearing commands. See [docs/cli.md](docs/cli.md).
+> If the database has **more than one** WGPL interface, pass `-i` / `--interface` to `peer explain`, `peer config`, `peer qr`, and other secret-bearing commands. See [docs/cli.md](docs/cli.md).
 
 ## Routing summary
 
@@ -168,7 +173,7 @@ flowchart TD
 | `full_tunnel` | `0.0.0.0/0` |
 | `custom` | `peer.custom_allowed_ips` |
 
-Inspect derived routes with `wgpl peer explain <PEER_REF>` or `wgpl --json peer list` (`hub_allowed_ips`, `client_allowed_ips`).
+Inspect derived routes with `wgpl peer explain <PEER_REF>` or `wgpl --json peer list --interface wg0` (`hub_allowed_ips`, `client_allowed_ips`).
 
 ### Common patterns
 
@@ -217,8 +222,12 @@ Details: [Operations and audit](#operations-and-audit).
 
 ### Automation
 
-- **`--json`** on all commands for Ansible, Terraform, and CI pipelines.
-- **SQLite WAL** and exclusive transactions for safe concurrent writers.
+- **Strict JSON output (`--json`)** for M2M integration (Ansible, Terraform, Bash).
+- **Hot-reloads:** Declarative synchronization with the Linux kernel using `wg syncconf` (without dropping TCP connections).
+
+### Safe Concurrency
+
+- **CI/CD ready:** SQLite WAL mode and exclusive locks ensure multiple pipelines won't corrupt state when running concurrently.
 
 Per-peer overrides: `MTU`, `PersistentKeepalive`, `DNS` at interface or peer level. Server endpoints validated per RFC 1123.
 
@@ -274,7 +283,7 @@ cat hub-peers.conf | ssh root@hub-host "wg syncconf wg0 /dev/stdin"
 ### MikroTik (RouterOS v7)
 
 ```bash
-wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
+wgpl --json peer list --interface wg0 | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
 ```
 
 Import `mikrotik_sync.rsc` on the router.
@@ -376,6 +385,13 @@ wgpl db restore --yes backup.db   # destructive; validates schema and wire field
 ```
 
 After restore: `wgpl validate`, then `apply` on each managed interface.
+
+### Database diagnostics
+
+```bash
+wgpl db doctor          # diagnose schema and audit trigger issues
+wgpl db doctor --repair # reinstall triggers and normalize deleted_at
+```
 
 > **Multi-server note:** Two interfaces may share the same name (e.g. `wg0`) if server endpoint/port differ. Use the numeric **interface ID** from `wgpl interface list` when names are ambiguous.
 
