@@ -67,7 +67,7 @@ its LAN back into the tunnel.
 | 3 | VPN peers only | endpoint | vpn_only | /32 | pool |
 | 4 | VPN + all remote LANs | endpoint | all_remote_networks | /32 | pool + interface routes + remote LANs |
 | 5 | Site subnet router | subnet_router | all_remote_networks | /32 + LAN | pool + remote LANs (not own) |
-| 6 | Site-to-site via hub | 2× subnet_router | all_remote_networks | each /32 + LAN | symmetric via motor |
+| 6 | Site-to-site via hub | 2× subnet_router | all_remote_networks | each /32 + LAN | symmetric via hub |
 | 7 | Endpoint ↔ endpoint via hub | endpoint | vpn_only | /32 each | pool |
 | 8 | Manual exception | any | custom | derived | custom_allowed_ips |
 
@@ -85,6 +85,71 @@ derived automatically when sites are added.
 rules. On the hub, enable `net.ipv4.ip_forward=1` and allow `FORWARD` on the
 WireGuard interface (and MASQUERADE if needed). See
 [runbook — Hub routing relay](runbook.md#hub-routing-relay).
+
+## Site-to-site: via hub vs direct
+
+Industry docs often say **site-to-site** for any VPN between office LANs. WGPL
+supports one model and explicitly excludes the other.
+
+### Site-to-site via hub (in scope)
+
+Two or more sites reach each other's LANs **through a central concentrator**.
+Traffic path: `LAN A → gateway A → Hub → gateway B → LAN B`.
+
+This is **pattern 6** above and the LAN↔LAN four-leg checklist. WGPL derives all
+WireGuard `AllowedIPs`; the operator enables forwarding on the hub (and on site
+gateways for their LANs).
+
+```mermaid
+flowchart LR
+  LANA[LAN_A] --> GwA[gateway_A]
+  GwA --> Hub[Hub]
+  Hub --> GwB[gateway_B]
+  GwB --> LANB[LAN_B]
+```
+
+**WGPL commands (sketch):** two `subnet_router` peers with `routed_networks` and
+`allowed_ips_policy=all_remote_networks`; `wgpl validate`; `wgpl apply` on the hub;
+`peer config` on each gateway.
+
+Trade-off: inter-site traffic is **re-encrypted at the hub** (classic
+hub-and-spoke). That is the chosen topology, not a WGPL bug.
+
+### Direct site-to-site (out of scope)
+
+A **point-to-point** tunnel between two site gateways **without** a central hub:
+`LAN A → router A ↔ router B → LAN B`. Only two WireGuard endpoints; no
+concentrator in the middle.
+
+```mermaid
+flowchart LR
+  LANA[LAN_A] --> GwA[gateway_A]
+  GwA <-->|"WireGuard tunnel"| GwB[gateway_B]
+  GwB --> LANB[LAN_B]
+```
+
+WGPL does **not** model this. The product assumes **one hub per VPN domain**
+(`interfaces` row) and **spokes** (`peers`) that attach to it — not a symmetric
+**link** between two equals.
+
+Why this is not a small feature:
+
+| WGPL today | Direct site-to-site needs |
+|------------|---------------------------|
+| Hub export: `[Peer]` blocks for `wg syncconf` | Full config on **each** gateway (`[Interface]` + `[Peer]` toward the other site) |
+| One SSOT: pool + peers on the hub | Coordinated pools or bilateral intent on both sides |
+| `routing.py` derives from hub topology | Symmetric AllowedIPs on **both** ends of one link |
+| BYOI: WGPL manages peers on an existing hub | WGPL would manage **two** tunnel endpoints as peers of each other |
+
+Adding direct site-to-site would mean a **new topology type** (not extending
+`subnet_router`), new export paths, and new validation — i.e. a different product
+shape than hub-and-spoke. For ad-hoc use, configure WireGuard manually or use
+`peer config --allowed-ips` overrides; WGPL will not derive a bilateral link
+declaratively.
+
+**If you only need offices to talk to each other:** use **site-to-site via hub**
+(pattern 6). You do not need direct site-to-site unless you require no central
+relay (latency, policy, or no hub host).
 
 ## Routing invariants
 
@@ -185,7 +250,7 @@ WGPL = **complete hub-and-spoke IPv4 routing intent**, not a full
 
 ### Out of scope (by design)
 
-- Full mesh P2P, direct site-to-site (no hub), point-to-point two-node VPN
+- Full mesh P2P, **direct site-to-site** (no hub — see [Site-to-site: via hub vs direct](#site-to-site-via-hub-vs-direct)), point-to-point two-node VPN
 - IPv6, `PostUp`/`PostDown`, `Table`, `FwMark`
 - Multiple client `[Peer]` blocks toward different hubs
 - Kernel routing management, dynamic route daemons
