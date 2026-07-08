@@ -68,7 +68,7 @@ _SCHEMA_CORRUPT_MSG = (
     "Run 'wgpl db restore' from a backup or 'wgpl db doctor'."
 )
 
-SCHEMA_USER_VERSION = 2
+SCHEMA_USER_VERSION = 1
 
 _REQUIRED_TABLES = frozenset({"interfaces", "peers", "audit_events"})
 _REQUIRED_INDEXES = frozenset(
@@ -214,11 +214,6 @@ def _assert_index_contract(conn: sqlite3.Connection) -> None:
 def _assert_schema_contract_conn(conn: sqlite3.Connection) -> None:
     user_version = conn.execute("PRAGMA user_version").fetchone()
     version = int(user_version[0]) if user_version else 0
-    if version == 1:
-        raise WgplException(
-            f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version 1 (expected 2); "
-            "backups with user_version 1 are not migratable."
-        )
     if version not in _SUPPORTED_SCHEMA_VERSIONS:
         raise WgplException(
             f"{_SCHEMA_CONTRACT_MSG} Unsupported schema version {version} "

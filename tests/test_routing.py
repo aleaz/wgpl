@@ -322,23 +322,6 @@ def test_assert_peer_activation_rejects_overlapping_routed_networks(
             integrity.assert_peer_activation(peer_b, iface, conn=conn)
 
 
-def test_restore_rejects_v1_schema(wg0_interface: str, tmp_path) -> None:
-    backup = str(tmp_path / "v1.db")
-    core.dump_database(backup)
-
-    import sqlite3
-
-    conn = sqlite3.connect(backup)
-    try:
-        conn.execute("PRAGMA user_version = 1")
-        conn.commit()
-    finally:
-        conn.close()
-
-    with pytest.raises(WgplException, match="user_version 1 are not migratable"):
-        core.restore_database(backup)
-
-
 def test_validate_database_rejects_malicious_routed_networks(
     wg0_interface: str,
 ) -> None:

@@ -26,21 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: routing derivation and topology (`tests/test_routing.py`, `tests/test_validate_topology.py`, `tests/test_cli_routing.py`)
 - Tests: restore schema adversarial cases, output path hardening, wireformat MTU/keepalive, FastAPI guard
 
-### Migration
-
-- **MTU minimum raised to 1280:** before upgrading, find interfaces or peers with
-  MTU below 1280 (`wgpl interface list --json`, `wgpl peer list --json`) and
-  update or clear them (`interface update --mtu 1280`, `peer update --mtu 1280`,
-  or `--clear-mtu`). Until fixed, `validate`, `apply`, `interface export`, and
-  `peer config` / `peer qr` will fail closed on those rows.
-
 ### Changed
 
-- **Breaking (unreleased):** `peer config` and `peer qr` derive client `AllowedIPs` from `allowed_ips_policy` by default; `--allowed-ips` overrides a single export only (previous default was full tunnel `0.0.0.0/0`)
+- `peer config` and `peer qr` derive client `AllowedIPs` from `allowed_ips_policy` by default; `--allowed-ips` overrides a single export only
 - Hub `interface export` and `apply` emit subnet-router `AllowedIPs` as tunnel `/32` plus advertised LAN prefixes (not tunnel `/32` only)
 - `wgpl validate` reports routing topology issues with severities; errors exit 1, warnings exit 0
 - Audit `updated` events include diffs for routing intent fields (`role`, `routed_networks`, `allowed_ips_policy`, `custom_allowed_ips`)
-- **Breaking:** minimum MTU for mutations and export is **1280** (was 576)
+- Minimum MTU for mutations and export is **1280**
 - `validate_state` delegates interface wire-field checks to `integrity.validate_wire_interface_fields`
 - `dbpath` on Linux closes validation fd after connect; macOS re-checks inode before path-based open
 - Interface descriptions escaped in Rich CLI output (`interface list` / `show`)
@@ -56,11 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI security scanners: `bandit` (SAST) and `pip-audit` (dependency vulnerabilities)
 - Restore integrity tests (malformed wire fields, audit trigger reinstall, schema version)
 - `dbpath` and multi-interface export policy tests
-
-### Changed
-
-- **Breaking:** `interface update` pool shrink rejects any non-soft-deleted peer outside the new CIDR (including expired peers until pruned)
-- **Breaking:** `peer config` and `peer qr` require `--interface` / `-i` when the database has more than one interface
+- `interface update` pool shrink rejects any non-soft-deleted peer outside the new CIDR (including expired peers until pruned)
+- `peer config` and `peer qr` require `--interface` / `-i` when the database has more than one interface
 - `peer update --clear-expires` and future `--expires` transitions use the activation integrity gate
 - `wgpl apply` fails closed when database validation fails (before `wg syncconf`)
 - `wgpl db restore` validates schema contract, full wire-format rows, and recreates audit triggers

@@ -38,7 +38,7 @@ Domain model and layers: [DESIGN.md](DESIGN.md).
 - [Client provisioning](#client-provisioning)
 - [Operations and audit](#operations-and-audit)
 - [Integrations](#integrations)
-- [Upgrading](#upgrading)
+- [MTU requirement](#mtu-requirement)
 - [Configuration](#configuration)
 - [Documentation map](#documentation-map)
 - [Contributing](#contributing)
@@ -430,9 +430,9 @@ Copy-paste starting points in `examples/`:
 - **[GitHub Actions (GitOps)](examples/github-actions-gitops.yml):** Deploy VPN state from CI/CD.
 - **[FastAPI Self-Service Portal](examples/fastapi-self-service.py):** API wrapper for QR-based onboarding.
 
-## Upgrading
+## MTU requirement
 
-Recent releases enforce **minimum MTU 1280** on export, apply, and mutations (was 576). `wgpl validate` also reports routing topology issues.
+WGPL enforces a **minimum MTU of 1280** on export, apply, and mutations; values must be ≥ 1280 or unset. `wgpl validate` also reports routing topology issues.
 
 ```bash
 wgpl validate
@@ -440,7 +440,7 @@ wgpl interface list --json | jq '.[] | select(.mtu != null and .mtu < 1280)'
 wgpl peer list --json | jq '.[] | select(.mtu != null and .mtu < 1280)'
 ```
 
-Fix low MTU values (`interface update --mtu 1280`, `peer update --mtu 1280`, or `--clear-mtu`), then upgrade the tool. Full checklist: [docs/runbook.md — Upgrading WGPL](docs/runbook.md#upgrading-wgpl).
+Fix low MTU values with `interface update --mtu 1280`, `peer update --mtu 1280`, or `--clear-mtu`. Full checklist: [docs/runbook.md — Wire-safe MTU](docs/runbook.md#wire-safe-mtu).
 
 ## Configuration
 

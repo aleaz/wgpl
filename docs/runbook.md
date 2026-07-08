@@ -3,19 +3,20 @@
 Operational procedures for running WGPL in production. Complements
 [SECURITY.md](../SECURITY.md) and the [CLI reference](cli.md).
 
-## Upgrading WGPL
+## Wire-safe MTU
 
-When upgrading to a release that enforces wire-safe MTU (minimum **1280**):
+WGPL enforces a wire-safe MTU (minimum **1280**) on mutations, export, and apply.
+MTU values must be ≥ 1280 or unset (null); explicit low values block `validate`,
+`apply`, `interface export`, and client config export.
 
-1. **Before** replacing the binary or package, list MTU values on live data:
+1. List MTU values on live data:
 
    ```bash
    wgpl interface list --json | jq '.[] | {name, mtu}'
    wgpl peer list --json | jq '.[] | {name, mtu}'
    ```
 
-2. Fix any interface or peer with MTU below 1280 (or null is fine — only
-   explicit low values block export/apply):
+2. Fix any interface or peer with MTU below 1280:
 
    ```bash
    wgpl interface update wg0 --mtu 1280
@@ -24,11 +25,7 @@ When upgrading to a release that enforces wire-safe MTU (minimum **1280**):
    wgpl peer update wg0 <PEER_ID> --clear-mtu
    ```
 
-3. Run `wgpl validate` — it must pass before you rely on `apply` or client
-   export after the upgrade.
-
-4. Upgrade the tool (`uv tool upgrade wgpl`, package manager, or standalone
-   binary), then `wgpl validate` again and `sudo wgpl apply` as usual.
+3. Run `wgpl validate` — it must pass before you rely on `apply` or client export.
 
 ## Post-mutation checklist
 

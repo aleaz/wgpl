@@ -257,15 +257,13 @@ WGPL = **complete hub-and-spoke IPv4 routing intent**, not a full
 
 ## Database schema (routing columns)
 
-New columns (see `db.init_db()`):
+Routing columns in the initial schema (see `db.init_db()`):
 
 - `interfaces.routed_networks` — CIDRs behind the hub (split tunnel)
 - `peers.role` — `endpoint` | `subnet_router`
 - `peers.routed_networks` — CIDRs behind a subnet router
 - `peers.allowed_ips_policy` — see table above
 - `peers.custom_allowed_ips` — required when policy is `custom`
-
-`PRAGMA user_version = 2`. Backups with `user_version = 1` are **not migratable**; restore rejects them.
 
 ## Industry mapping
 
