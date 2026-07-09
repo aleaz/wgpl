@@ -5,13 +5,11 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 ![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)
 
-**WGPL (WireGuard Peer Lite)** is a lightweight, disconnected Python CLI that manages **hub-and-spoke VPN topologies** with a SQLite database as the single source of truth. You declare routing **intent** (roles, routed networks, policies); WGPL derives WireGuard `AllowedIPs` at export time, handles IPv4 IPAM, manages peer lifecycle and audit, and applies hub changes with **zero downtime** (`wg syncconf`).
+**WGPL (WireGuard Peer Lite)** is a disconnected Python CLI for **hub-and-spoke VPN topologies**. You declare routing **intent** in SQLite (the single source of truth); WGPL derives WireGuard `AllowedIPs`, allocates IPv4 addresses, tracks peer lifecycle and audit, and applies hub changes with **zero downtime** (`wg syncconf`). You bring your own OS interface (BYOI).
 
-**Start here:** [Quick Start](#quick-start) · [Domain model](#domain-model) · [Routing intent](#routing-intent) · [Documentation map](#documentation-map)
+**Start here:** [Quick Start](#quick-start) · [Routing intent](#routing-intent) · [Documentation map](#documentation-map)
 
-**The Problem:** Managing WireGuard manually means editing text files (`wg0.conf`), hand-picking `AllowedIPs`, guessing which IPs are free, and restarting interfaces (dropping active connections) to add one peer. Topology changes are error-prone, hard to review, and leave no durable history of who was granted access.
-
-**The Solution:** WGPL decouples VPN **topology intent** from your OS. Intent lives in SQLite; hub and client `AllowedIPs` are **derived** when you validate, apply, or export — never stored. Mutations update the database only; the kernel stays stale until you run `apply` or remote `syncconf`. With proper OS-level access controls, centralized lifecycle records can simplify SOC2 and ISO27001 access reviews.
+**Why it exists:** Hand-editing `wg0.conf` means picking `AllowedIPs` and free IPs by hand, restarting the interface to add a peer, and keeping no durable access history. WGPL stores topology intent in the database, derives hub and client `AllowedIPs` on validate/apply/export (never stored), and leaves the kernel unchanged until you run `apply` or remote `syncconf`.
 
 ## What WGPL is / is not
 
@@ -23,7 +21,7 @@
 | Peer lifecycle, IPAM, append-only audit | IPv6 support (IPv4 pools and peers only) |
 | BYOI: you create the OS `wg0` (or equivalent) | Direct site-to-site P2P **without** a hub |
 
-Full domain model and module layers: [DESIGN.md](DESIGN.md).
+Architecture and module layers: [DESIGN.md](DESIGN.md).
 
 ## Table of Contents
 
@@ -75,11 +73,11 @@ flowchart TB
 
 Rename a device with `wgpl node update` — `peer update` has no `--name`.
 
-See [DESIGN.md — Domain model](DESIGN.md#domain-model) and [docs/routing.md — Glossary](docs/routing.md#glossary).
+See [DESIGN.md — Domain model](DESIGN.md#domain-model) and [docs/routing.md — Glossary](docs/routing.md#glossary). Next: how intent becomes WireGuard text.
 
 ## How it works
 
-WGPL persists **routing intent** in SQLite. Every export path runs an **emit gate** before output:
+Every export path runs an **emit gate** before output:
 
 ```mermaid
 flowchart LR
@@ -121,15 +119,13 @@ Topology validation: errors exit **1**; warnings exit **0** (review before produ
 
 ### vs managed overlays (Tailscale, Netmaker, …)
 
-WGPL is a **local, auditable intent store** with deterministic derivation — not a coordinated mesh control plane. You keep full control of keys, backups, and hub relay; you operate `apply` and OS forwarding yourself. See [When to use something else](#when-to-use-something-else).
+WGPL is a **local, auditable intent store** with deterministic derivation — not a coordinated mesh control plane. You keep full control of keys, backups, and hub relay; you operate `apply` and OS forwarding yourself. Scope boundaries: [When to use something else](#when-to-use-something-else).
 
 ## When to use something else
 
-Scope boundaries before you invest.
-
 - **Full-mesh or managed overlay** — Tailscale, Netmaker, or similar (WGPL targets one hub per VPN domain, not P2P mesh).
 - **Direct site-to-site without a hub** — **Out of scope.** A symmetric tunnel between two site gateways with no concentrator is not modeled. Configure WireGuard manually, or use `peer config --allowed-ips` for a one-off export override.
-- **Site-to-site via a central hub** — **In scope.** Two `subnet_router` peers; LAN↔LAN traffic relays through the concentrator. WGPL derives all WireGuard `AllowedIPs`; you enable `ip_forward` and firewall rules on the hub. See [Routing intent](#routing-intent) and [docs/routing.md — Site-to-site](docs/routing.md#site-to-site-via-hub-vs-direct).
+- **Site-to-site via a central hub** — **In scope.** Two `subnet_router` peers; LAN↔LAN through the concentrator. See [Routing intent](#routing-intent) and [docs/routing.md — Site-to-site](docs/routing.md#site-to-site-via-hub-vs-direct).
 
 ## Quick Start
 
@@ -174,11 +170,11 @@ wgpl peer add wg0 "Alice_Laptop"
 # wgpl peer add wg0 --node "Alice_Laptop"
 ```
 
-> **Default client routes:** `peer config` and `peer qr` derive client `AllowedIPs` from `allowed_ips_policy` (default `vpn_only`).
-
-> **Override one export:** `--allowed-ips` changes a single `peer config` / `peer qr` output only. For a persistent policy, set `--allowed-ips-policy` on `peer add` or `peer update`.
+> **Client AllowedIPs:** `peer config` / `peer qr` derive from `allowed_ips_policy` (default `vpn_only`). `--allowed-ips` overrides a single export only; for a persistent policy, set `--allowed-ips-policy` on `peer add` or `peer update`.
 
 ### 3. Validate, apply, inspect, and distribute
+
+Canonical flow: **validate → apply → explain → distribute**.
 
 ```bash
 wgpl validate wg0
@@ -196,7 +192,7 @@ chmod 600 alice.conf
 
 ## Routing intent
 
-For hub-and-spoke reachability beyond simple peer lists, declare routing intent on interfaces and peers. WGPL derives `AllowedIPs`; it does **not** configure `ip_forward`, `iptables`, or physical LAN routing.
+Building on the [domain model](#domain-model): declare policies and site LANs on interfaces and peers. WGPL derives `AllowedIPs` at export; hub packet relay (`ip_forward`, firewall) stays with the operator — see [LAN↔LAN via hub](#lanlan-via-hub-four-legs).
 
 ```mermaid
 flowchart TD
@@ -267,9 +263,11 @@ flowchart LR
   GwB --> LANB[LAN_B]
 ```
 
-**Operator responsibility:** WGPL derives `AllowedIPs` only. Hub packet relay (`ip_forward`, firewall `FORWARD`, optional MASQUERADE) remains your responsibility. See [docs/runbook.md — Hub routing relay](docs/runbook.md#hub-routing-relay).
+**Operator responsibility:** WGPL derives `AllowedIPs` only. Enable hub packet relay (`ip_forward`, firewall `FORWARD`, optional MASQUERADE) yourself. See [docs/runbook.md — Hub routing relay](docs/runbook.md#hub-routing-relay).
 
 ### Examples
+
+Examples below match patterns **2**, **1**, and **5**:
 
 ```bash
 # Split tunnel — hub advertises internal nets; clients pull them via policy
@@ -288,15 +286,17 @@ wgpl peer add wg0 "Branch_GW" --role subnet_router \
 
 ## Features
 
+Capabilities at a glance; day-2 detail in [Operations and audit](#operations-and-audit).
+
 ### Multi-server and IPAM
 
-- **Composite identity:** Interface names (e.g. `wg0`) may repeat across servers; WGPL keys hubs by name + server endpoint + port.
+- **Composite identity:** Interface names (e.g. `wg0`) may repeat across servers; WGPL keys hubs by name + server endpoint + port. When names collide, use the numeric **interface ID** from `wgpl interface list`.
 - **Global IPAM:** Automatic free IPv4 allocation within each hub's CIDR pool.
 - **Idempotent apply:** `wgpl apply` is safe to run repeatedly; only deltas reach the kernel.
 
 ### Lifecycle and nodes
 
-- **Device identity:** `wgpl node` manages global records (unique name + description). `peer add <iface> <name>` find-or-creates the node; `--node <ref>` attaches an existing one. The same device can attach to several hubs.
+- **Device identity:** `wgpl node` manages global records. Attachment is via `peer add` (find-or-create or `--node`) — see [Quick Start](#quick-start) and [Domain model](#domain-model). The same device can attach to several hubs.
 - **TTL:** `--expires 48h` for contractors and temporary access (expired peers are excluded from apply/export until pruned).
 - **Soft delete:** `peer remove` frees the IP while retaining audit history; `peer prune` hard-deletes inactive peer rows. Node identities persist; `wgpl node prune` removes orphan devices (zero attachments).
 
@@ -311,9 +311,6 @@ wgpl peer add wg0 "Branch_GW" --role subnet_router \
 
 - **Strict JSON output (`--json`)** for M2M integration (Ansible, Terraform, Bash), including derived `hub_allowed_ips` / `client_allowed_ips` on peer list/show.
 - **Hot-reloads:** Declarative synchronization with the Linux kernel using `wg syncconf` (without dropping TCP connections).
-
-### Safe concurrency
-
 - **CI/CD ready:** SQLite WAL mode and exclusive locks help multiple pipelines avoid corrupting state when coordinating writes.
 
 ### WireGuard fields
@@ -324,14 +321,12 @@ wgpl peer add wg0 "Branch_GW" --role subnet_router \
 
 ## Operations and audit
 
-Day-2 workflows for teams running WGPL in production.
+After mutations: **validate**, then **apply** (or remote `syncconf`). Details: [docs/runbook.md — Post-mutation checklist](docs/runbook.md#post-mutation-checklist).
 
 ### Post-mutation workflow
 
 1. `wgpl validate [INTERFACE]` — pool fit, wire-format checks, routing topology (errors exit 1; warnings exit 0).
 2. `sudo wgpl apply INTERFACE` — or `interface export | ssh … wg syncconf` on a remote hub.
-
-Details: [docs/runbook.md — Post-mutation checklist](docs/runbook.md#post-mutation-checklist).
 
 ### Temporary access (TTL)
 
@@ -389,21 +384,19 @@ Fix low MTU values with `interface update --mtu 1280`, `peer update --mtu 1280`,
 
 ### Compliance notes
 
+With proper OS-level access controls, centralized lifecycle and audit records can simplify SOC2 and ISO27001 access reviews.
+
 | Goal | Tool |
 | --- | --- |
 | Archive history for compliance | `wgpl db dump -o archive-YYYY-MM.db`; store off-host with `chmod 600` |
 | Remove inactive peer rows (not audit) | `wgpl peer prune <interface>` |
 | Query past events | `peer history` / `interface history` / `node history` |
 
-With proper OS access controls, these records support periodic access reviews.
-
-> **Multi-server note:** Two interfaces may share the same name (e.g. `wg0`) if server endpoint/port differ. Use the numeric **interface ID** from `wgpl interface list` when names are ambiguous.
+Related: [composite interface identity](#multi-server-and-ipam) when the same interface name exists on more than one hub.
 
 ## Deployment patterns (BYOI)
 
-Where and how to run WGPL against your existing WireGuard hubs (BYOI — see [What WGPL is / is not](#what-wgpl-is--is-not)).
-
-> **Why we don't manage `iptables`:** Tools that hijack system routing often break Docker, Kubernetes, or corporate firewalls. WGPL leaves network policy under your control.
+Run WGPL against hubs you already operate. WGPL does not manage `iptables` or system routing — tools that hijack those layers often break Docker, Kubernetes, or corporate firewalls.
 
 ```mermaid
 graph TD
@@ -473,7 +466,7 @@ docker run --rm -v $(pwd)/wgpl-data:/data \
 
 ## Client provisioning
 
-Export formats for end-user devices — run on the **management host** unless noted. Run `wgpl peer explain` before distributing configs when routing intent is non-trivial.
+Export on the **management host**, then install on the end-user device. For non-trivial routing, run `wgpl peer explain` before distributing configs.
 
 ### Mobile (iOS / Android)
 
