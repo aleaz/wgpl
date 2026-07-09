@@ -18,12 +18,13 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-_PORTAL_API_KEY = os.environ.get("WGPL_PORTAL_API_KEY")
-if not _PORTAL_API_KEY:
+_PORTAL_API_KEY_RAW = os.environ.get("WGPL_PORTAL_API_KEY")
+if not _PORTAL_API_KEY_RAW:
     raise RuntimeError(
         "WGPL_PORTAL_API_KEY must be set before starting this example. "
         "Do not deploy without authentication and network controls."
     )
+_PORTAL_API_KEY: str = _PORTAL_API_KEY_RAW
 
 app = FastAPI(title="WGPL Self-Service Portal")
 

@@ -211,7 +211,9 @@ def resolve_node_ref(
         and all(c in "0123456789abcdef" for c in normalized)
     ):
         matches = db.find_nodes_by_id_prefix(normalized, conn=conn)
-        exact = [n for n in matches if str(n["id"]).replace("-", "").lower() == normalized]
+        exact = [
+            n for n in matches if str(n["id"]).replace("-", "").lower() == normalized
+        ]
         if len(exact) == 1:
             return str(exact[0]["id"])
         if len(matches) == 1:

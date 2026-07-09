@@ -15,7 +15,7 @@ uv tool run pre-commit install
 
 ```bash
 uv run ruff check src/ tests/
-uv run mypy src/
+uv run mypy src/ tests/
 uv run pytest
 ```
 
@@ -134,7 +134,7 @@ Pre-push checklist:
 
 ```bash
 uv run ruff check src/ tests/
-uv run mypy src/
+uv run mypy src/ tests/
 uv run pytest
 git status   # ensure no *.db / *.sqlite3 files are staged
 ```

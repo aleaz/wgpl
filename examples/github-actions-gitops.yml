@@ -20,7 +20,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          
+
       - name: Install WGPL Control Plane
         run: pip install wgpl
 
@@ -30,11 +30,11 @@ jobs:
           # We read 'vpn-peers.yml' (e.g. using yq) and provision them.
           # Note: The public key must be a valid 32-byte Base64 string!
           wgpl interface add wg0 vpn.example.com "PubKey123456789012345678901234567890123456=" 10.0.0.0/24
-          
+
           # Example: adding a peer from a variable or YAML loop
           wgpl peer add wg0 "Developer_A"
           wgpl peer add wg0 "Developer_B"
-          
+
           # Generate the declarative configuration
           wgpl interface export wg0 > wg0.conf
 
@@ -48,7 +48,7 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VPN_HOST" >> ~/.ssh/known_hosts
-          
+
           # 2. Stream the new configuration to the live kernel!
           # Existing tunnels will NOT drop.
           cat wg0.conf | ssh root@$VPN_HOST "wg syncconf wg0 /dev/stdin"

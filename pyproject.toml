@@ -34,6 +34,7 @@ wgpl = "wgpl.cli:app"
 [dependency-groups]
 dev = [
     "bandit>=1.8.6",
+    "fastapi>=0.115.0",
     "mypy>=2.1.0",
     "pip-audit>=2.9.0",
     "pytest>=8.0",

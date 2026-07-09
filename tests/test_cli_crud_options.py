@@ -8,10 +8,11 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from wgpl import core, db, wireguard
 from wgpl.cli import app
@@ -19,12 +20,11 @@ from wgpl.cli import app
 runner = CliRunner()
 
 
-def _no_traceback(result: object) -> None:
-    output = getattr(result, "output", "")
-    assert "Traceback (most recent call last)" not in output
+def _no_traceback(result: Result) -> None:
+    assert "Traceback (most recent call last)" not in result.output
 
 
-def _invoke(args: list[str], **kwargs: object) -> object:
+def _invoke(args: list[str], **kwargs: Any) -> Result:
     result = runner.invoke(app, args, **kwargs)
     _no_traceback(result)
     return result
@@ -67,7 +67,7 @@ def _add_peer(
     *,
     json_out: bool = True,
     **flags: str | int,
-) -> dict:
+) -> dict[str, Any]:
     args: list[str] = []
     if json_out:
         args.append("--json")
@@ -80,7 +80,7 @@ def _add_peer(
 
 
 @pytest.fixture
-def seeded(wgpl_db: str) -> dict:
+def seeded(wgpl_db: str) -> dict[str, Any]:
     """wg0 interface with one active peer."""
     _add_interface("wg0", dns="1.1.1.1", desc="Office VPN", mtu=1420, keepalive=25)
     peer = _add_peer(
@@ -483,7 +483,7 @@ def test_cli_validate_global_and_scoped(seeded: dict) -> None:
 
 
 @patch.object(core, "sync_interface")
-def test_cli_apply_human(mock_sync: object, seeded: dict) -> None:
+def test_cli_apply_human(mock_sync: MagicMock, seeded: dict) -> None:
     result = _invoke(["apply", "wg0"])
     assert result.exit_code == 0
     mock_sync.assert_called_once_with("wg0")

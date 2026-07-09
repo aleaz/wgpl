@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
-from fastapi import HTTPException  # noqa: E402
+HTTPException = fastapi.HTTPException
 
 
 def _load_fastapi_example():

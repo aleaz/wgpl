@@ -33,7 +33,7 @@ jobs:
       run: uv run ruff check src/ tests/
 
     - name: Run Mypy (Type Checking)
-      run: uv run mypy src/
+      run: uv run mypy src/ tests/
 
     - name: Run Bandit (SAST)
       run: uv run bandit -q -r src/

@@ -206,7 +206,7 @@ Weakened or extra triggers are **detected on every live DB open**; `wgpl db doct
 
 ```bash
 uv run ruff check src/ tests/
-uv run mypy src/
+uv run mypy src/ tests/
 uv run pytest
 ```
 
