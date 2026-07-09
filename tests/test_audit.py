@@ -379,3 +379,39 @@ def test_interface_update_no_audit_when_endpoint_unchanged(wg0_interface: str) -
     events = core.list_interface_audit_history(wg0_interface)
     updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
     assert updated == []
+
+
+def test_audit_event_to_dict_handles_corrupt_metadata() -> None:
+    from wgpl.audit import audit_event_to_dict
+
+    class _Row:
+        def __init__(self, data: dict[str, object]) -> None:
+            self._data = data
+
+        def __getitem__(self, key: str) -> object:
+            return self._data[key]
+
+        def keys(self) -> object:
+            return self._data.keys()
+
+    row = _Row(
+        {
+            "id": 1,
+            "entity_type": "peer",
+            "entity_id": "abc",
+            "interface": "wg0",
+            "event_type": "created",
+            "occurred_at": "2026-01-01T00:00:00+00:00",
+            "actor": "unknown",
+            "name": "phone",
+            "ip_address": "10.0.0.2",
+            "public_key": "x" * 43 + "=",
+            "metadata": "not-json",
+        }
+    )
+
+    event = audit_event_to_dict(row)  # type: ignore[arg-type]
+    metadata = event["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata.get("_corrupt") is True
+    assert metadata.get("_raw") == "not-json"

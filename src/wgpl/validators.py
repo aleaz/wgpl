@@ -19,9 +19,11 @@ def validate_dns(value: str) -> str:
     normalized: list[str] = []
     for part in parts:
         try:
-            ipaddress.ip_address(part)
+            ipaddress.IPv4Address(part)
         except ValueError as exc:
-            raise InvalidDnsError(f"Invalid DNS address '{part}'") from exc
+            raise InvalidDnsError(
+                f"Invalid DNS address '{part}' (WGPL supports IPv4 only)"
+            ) from exc
         normalized.append(part)
     return ", ".join(normalized)
 

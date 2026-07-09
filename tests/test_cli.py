@@ -23,9 +23,7 @@ def _ensure_node(name: str) -> str:
     if existing is not None:
         return str(existing["id"])
     node_id = str(uuid.uuid4())
-    db.add_node(
-        node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()
-    )
+    db.add_node(node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat())
     return node_id
 
 
@@ -299,6 +297,7 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
 
     fd, path = tempfile.mkstemp()
     os.close(fd)
+    os.unlink(path)
     core.dump_database(path)
     with open(path, "rb") as f:
         binary_db = f.read()

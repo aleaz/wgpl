@@ -236,7 +236,9 @@ def test_cli_interface_export_human_and_json(seeded: dict) -> None:
 
 
 def test_cli_interface_history_pagination(seeded: dict) -> None:
-    j = _invoke(["--json", "interface", "history", "wg0", "--limit", "2", "--offset", "0"])
+    j = _invoke(
+        ["--json", "interface", "history", "wg0", "--limit", "2", "--offset", "0"]
+    )
     assert j.exit_code == 0
     events = json.loads(j.stdout)
     assert isinstance(events, list)
@@ -499,6 +501,7 @@ def test_cli_db_restore_round_trip(seeded: dict, wgpl_db: str) -> None:
     peer_id = seeded["peer"]["id"]
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
+    os.unlink(path)
     try:
         core.dump_database(path)
         with open(path, "rb") as handle:

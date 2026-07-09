@@ -80,9 +80,7 @@ def _ensure_node(name: str) -> str:
     if existing is not None:
         return str(existing["id"])
     node_id = str(uuid.uuid4())
-    db.add_node(
-        node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()
-    )
+    db.add_node(node_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat())
     return node_id
 
 
@@ -214,6 +212,11 @@ def test_validate_dns_accepts_list() -> None:
 def test_validate_dns_rejects_invalid() -> None:
     with pytest.raises(InvalidDnsError):
         validate_dns("not-an-ip")
+
+
+def test_validate_dns_rejects_ipv6() -> None:
+    with pytest.raises(InvalidDnsError, match="IPv4 only"):
+        validate_dns("2001:db8::1")
 
 
 def test_get_peer_config_uses_interface_dns(wg0_interface: str) -> None:

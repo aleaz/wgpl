@@ -42,6 +42,13 @@ def test_get_peer_config_rejects_markup_injection_in_allowed_ips(
         )
 
 
+def test_get_peer_config_rejects_ipv6_allowed_ips(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+
+    with pytest.raises(WgplException, match="IPv4 only"):
+        core.get_peer_config(peer["id"], allowed_ips="2001:db8::/32")
+
+
 @patch("wgpl.core.wireguard.syncconf")
 def test_sync_interface_fails_on_invalid_wire_fields(
     mock_syncconf: MagicMock, wg0_interface: str

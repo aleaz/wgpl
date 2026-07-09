@@ -331,7 +331,7 @@ def validate_state(
                 )
 
         try:
-            integrity.validate_wire_interface_fields(iface)
+            integrity.assert_exportable_interface(iface)
         except WgplException as exc:
             issues.append(
                 {
@@ -345,6 +345,17 @@ def validate_state(
         seen_ips: dict[str, str] = {}
         seen_names: dict[str, str] = {}
         for peer in db.list_peers(iface["id"], conn=conn):
+            peer_name = str(peer["name"])
+            deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
+            if deleted_at is not None and str(deleted_at).strip() == "":
+                issues.append(
+                    {
+                        "interface": iface_name,
+                        "peer": peer_name,
+                        "code": "empty_deleted_at",
+                        "detail": f"Peer {peer_name} has deleted_at='' (should be NULL)",
+                    }
+                )
             if integrity.corrupt_expires_at(peer):
                 issues.append(
                     {
@@ -406,7 +417,7 @@ def validate_state(
                     )
 
             try:
-                integrity.validate_wire_peer_fields(peer)
+                integrity.assert_exportable_peer(peer, iface, mode="server")
             except WgplException as exc:
                 issues.append(
                     {

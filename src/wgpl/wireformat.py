@@ -22,9 +22,11 @@ def validate_allowed_ips(allowed_ips: str) -> str:
             raise WgplException("AllowedIPs entries cannot be empty")
         integrity.validate_wire_safe_text(candidate, "AllowedIPs")
         try:
-            normalized_parts.append(str(ipaddress.ip_network(candidate, strict=False)))
+            normalized_parts.append(str(ipaddress.IPv4Network(candidate, strict=False)))
         except ValueError as exc:
-            raise WgplException(f"Invalid AllowedIPs format '{candidate}'") from exc
+            raise WgplException(
+                f"Invalid AllowedIPs format '{candidate}' (WGPL supports IPv4 only)"
+            ) from exc
     return ",".join(normalized_parts)
 
 

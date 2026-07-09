@@ -32,6 +32,13 @@ def test_open_exclusive_output_creates_secure_file(tmp_path) -> None:
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
+def test_dump_database_rejects_existing_file(wg0_interface: str, tmp_path) -> None:
+    path = tmp_path / "backup.db"
+    path.write_bytes(b"existing")
+    with pytest.raises(WgplException, match="already exists"):
+        core.dump_database(str(path))
+
+
 def test_dump_database_rejects_symlink_output(wg0_interface: str, tmp_path) -> None:
     target = tmp_path / "real.db"
     link = tmp_path / "link.db"
@@ -68,8 +75,6 @@ def test_cli_peer_qr_rejects_symlink_output(wg0_interface: str, tmp_path) -> Non
     except (OSError, NotImplementedError):
         pytest.skip("Symlinks not supported in this environment")
 
-    result = runner.invoke(
-        app, ["peer", "qr", str(peer["id"]), "-o", str(link)]
-    )
+    result = runner.invoke(app, ["peer", "qr", str(peer["id"]), "-o", str(link)])
     assert result.exit_code == 1
     assert "symlink" in result.stderr.lower() or "WGPL Error" in result.stderr

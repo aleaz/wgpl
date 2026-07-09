@@ -629,9 +629,7 @@ def get_node_by_name(
 ) -> sqlite3.Row | None:
     """Retrieve a node by its (globally unique) name."""
     with _ensure_conn(conn) as c:
-        return _run_query(
-            c, "SELECT * FROM nodes WHERE name = ?", (name,)
-        ).fetchone()
+        return _run_query(c, "SELECT * FROM nodes WHERE name = ?", (name,)).fetchone()
 
 
 def find_nodes_by_id_prefix(
@@ -649,15 +647,12 @@ def find_nodes_by_id_prefix(
 
 
 def list_nodes(conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
-    """List all nodes with a count of their active (non-soft-deleted) attachments."""
+    """List all nodes (attachment counts are computed in core.list_nodes)."""
     with _ensure_conn(conn) as c:
         return _run_query(
             c,
             """
-            SELECT n.*, (
-                SELECT COUNT(*) FROM peers p
-                WHERE p.node_id = n.id AND p.deleted_at IS NULL
-            ) AS attachment_count
+            SELECT n.*
             FROM nodes n
             ORDER BY n.name
             """,

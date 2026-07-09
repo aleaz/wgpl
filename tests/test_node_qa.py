@@ -69,6 +69,21 @@ def test_node_remove_guarded_when_attached(wg0_interface: str) -> None:
     assert len(core.list_peers(wg0_interface)) == 1
 
 
+def test_node_remove_allowed_when_only_expired_attachment(wg0_interface: str) -> None:
+    import datetime
+
+    peer = core.add_peer(wg0_interface, "phone", expires="1h")
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
+    with db.get_db() as conn:
+        conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
+        conn.commit()
+    assert core.get_node_by_ref("phone")["attachment_count"] == 0
+    core.remove_node("phone")
+    assert core.list_nodes() == []
+
+
 def test_node_remove_force_cascades_attachments(wg0_interface: str) -> None:
     core.add_peer(wg0_interface, "phone")
     core.remove_node("phone", force=True)

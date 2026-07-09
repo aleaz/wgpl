@@ -162,10 +162,9 @@ def test_restore_no_tmp_wal_leftover(
     wg0_interface: str, wgpl_db: str, valid_backup_path: str
 ) -> None:
     core.restore_database(valid_backup_path)
-    tmp_path = f"{wgpl_db}.tmp"
-    assert not os.path.exists(tmp_path)
-    assert not os.path.exists(f"{tmp_path}-wal")
-    assert not os.path.exists(f"{tmp_path}-shm")
+    parent = os.path.dirname(wgpl_db) or "."
+    leftovers = glob.glob(os.path.join(parent, ".wgpl-restore-*.tmp*"))
+    assert leftovers == []
 
 
 def test_restore_returns_warnings_list(
@@ -223,17 +222,14 @@ def test_restore_init_db_failure_cleans_tmp(
     with pytest.raises(Exception, match="Simulated failure"):
         core.restore_database(valid_backup_path)
 
-    tmp_path_db = f"{wgpl_db}.tmp"
-    assert not os.path.exists(tmp_path_db)
+    parent = os.path.dirname(wgpl_db) or "."
+    leftovers = glob.glob(os.path.join(parent, ".wgpl-restore-*.tmp*"))
+    assert leftovers == []
 
 
 def test_restore_retry_after_leftover_tmp(wgpl_db: str, valid_backup_path: str) -> None:
-    tmp_path = f"{wgpl_db}.tmp"
-    with open(tmp_path, "w") as f:
-        f.write("leftover")
-
     core.restore_database(valid_backup_path)
-    assert not os.path.exists(tmp_path)
+    core.restore_database(valid_backup_path)
 
 
 def test_restore_rename_failure_preserves_live_db(

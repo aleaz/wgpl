@@ -177,7 +177,7 @@ def main(
 
 def _exit_error(ctx: typer.Context | None, message: str, code: int = 1) -> None:
     """Print a user-facing error and exit (JSON on stdout when --json is set)."""
-    console.print(f"[red]WGPL Error: {message}[/red]")
+    console.print(f"[red]WGPL Error: {_safe_markup(message)}[/red]")
     if ctx is not None and ctx.obj.get("json"):
         print(json.dumps({"status": "error", "message": message}))
     sys.exit(code)
@@ -1306,13 +1306,17 @@ def validate_cmd(
                     "Invalid validate_state response: issues must be a list"
                 )
             for issue in issues:
-                peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
+                iface = _safe_markup(str(issue.get("interface") or ""))
+                peer = (
+                    f" peer {_safe_markup(str(issue['peer']))}"
+                    if issue.get("peer")
+                    else ""
+                )
+                code = _safe_markup(str(issue.get("code") or ""))
+                detail = _safe_markup(str(issue.get("detail") or ""))
                 severity = issue.get("severity", "error")
                 style = "yellow" if severity == "warning" else "red"
-                console.print(
-                    f"[{style}]{issue['interface']}{peer_part}: "
-                    f"{issue['code']} — {issue['detail']}[/{style}]"
-                )
+                console.print(f"[{style}]{iface}{peer}: {code} — {detail}[/{style}]")
             if result["status"] == "warning":
                 scope = interface or "database"
                 console.print(
@@ -1358,12 +1362,15 @@ def db_doctor(
             console.print("[green]No database issues detected.[/green]")
         else:
             for issue in issues:
-                peer_part = f" peer {issue['peer']}" if issue.get("peer") else ""
-                iface_part = issue.get("interface") or "database"
-                console.print(
-                    f"[red]{iface_part}{peer_part}: "
-                    f"{issue['code']} — {issue['detail']}[/red]"
+                iface_part = _safe_markup(str(issue.get("interface") or "database"))
+                peer_part = (
+                    f" peer {_safe_markup(str(issue['peer']))}"
+                    if issue.get("peer")
+                    else ""
                 )
+                code = _safe_markup(str(issue.get("code") or ""))
+                detail = _safe_markup(str(issue.get("detail") or ""))
+                console.print(f"[red]{iface_part}{peer_part}: {code} — {detail}[/red]")
         if issues:
             sys.exit(1)
     except WgplException as e:
@@ -1388,6 +1395,7 @@ def db_dump(
             fd, path = tempfile.mkstemp()
             try:
                 os.close(fd)
+                os.unlink(path)
                 core.dump_database(path)
                 with open(path, "rb") as f:
                     shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]

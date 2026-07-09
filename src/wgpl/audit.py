@@ -115,7 +115,10 @@ def audit_event_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     """Return a JSON-safe audit event record."""
     metadata: Any = row["metadata"]
     if isinstance(metadata, str) and metadata:
-        metadata = json.loads(metadata)
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {"_corrupt": True, "_raw": metadata[:200]}
     return {
         "id": row["id"],
         "entity_type": row["entity_type"],

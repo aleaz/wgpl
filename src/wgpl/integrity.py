@@ -154,19 +154,40 @@ def _validate_optional_wire_keepalive(
         validate_wire_keepalive(row[field], field=field)
 
 
-def validate_wire_public_key(key: str) -> None:
-    """Validate public key format and wire-safe encoding."""
-    validate_wire_safe_text(key, "public_key")
+def _validate_wire_key_material(key: str, field: str) -> None:
+    """Validate a 32-byte WireGuard key encoded as Base64."""
+    validate_wire_safe_text(key, field)
     try:
         decoded = base64.b64decode(key.encode("utf-8"), validate=True)
         if len(decoded) != 32:
             raise WgplException(
-                "public_key must decode to exactly 32 bytes for WireGuard"
+                f"{field} must decode to exactly 32 bytes for WireGuard"
             )
     except WgplException:
         raise
     except Exception as exc:
-        raise WgplException("public_key must be valid Base64") from exc
+        raise WgplException(f"{field} must be valid Base64") from exc
+
+
+def validate_wire_public_key(key: str) -> None:
+    """Validate public key format and wire-safe encoding."""
+    _validate_wire_key_material(key, "public_key")
+
+
+def validate_wire_preshared_key(key: str) -> None:
+    """Validate preshared key format and wire-safe encoding."""
+    _validate_wire_key_material(key, "preshared_key")
+
+
+def validate_wire_endpoint(endpoint: str) -> None:
+    """Validate interface endpoint semantics and wire-safe encoding."""
+    validate_wire_safe_text(endpoint, "endpoint")
+    from .validators import validate_endpoint as _validate_endpoint_semantic
+
+    try:
+        _validate_endpoint_semantic(endpoint)
+    except ValueError as exc:
+        raise WgplException(str(exc)) from exc
 
 
 def validate_wire_private_key(key: str) -> None:
@@ -308,10 +329,15 @@ def assert_exportable_peer(
 
     psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
     if psk:
-        validate_wire_safe_text(str(psk), "preshared_key")
+        validate_wire_preshared_key(str(psk))
     _validate_optional_wire_mtu(peer, "mtu")
     _validate_optional_wire_keepalive(peer, "keepalive")
     _validate_peer_routing_fields(peer, iface)
+
+    if mode == "server":
+        private_key = peer["private_key"] if "private_key" in _peer_keys(peer) else None
+        if private_key:
+            validate_wire_private_key(str(private_key))
 
     if mode == "client":
         validate_wire_private_key(str(peer["private_key"]))
@@ -331,7 +357,7 @@ def validate_wire_peer_fields(peer: sqlite3.Row | Mapping[str, object]) -> None:
     validate_wire_safe_text(str(peer["ip_address"]), "ip_address")
     psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
     if psk:
-        validate_wire_safe_text(str(psk), "preshared_key")
+        validate_wire_preshared_key(str(psk))
     _validate_optional_wire_mtu(peer, "mtu")
     _validate_optional_wire_keepalive(peer, "keepalive")
 
@@ -342,7 +368,7 @@ def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) ->
     if not _PEER_NAME_RE.match(name):
         raise WgplException(f"Interface name '{name}' is not valid for export")
     validate_wire_public_key(str(iface["public_key"]))
-    validate_wire_safe_text(str(iface["endpoint"]), "endpoint")
+    validate_wire_endpoint(str(iface["endpoint"]))
     validate_wire_safe_text(str(iface["address_pool"]), "address_pool")
     port = int(str(iface["port"]))
     if not (1 <= port <= 65535):

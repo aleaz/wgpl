@@ -42,6 +42,30 @@ def test_cli_validate_error_exit_code(wgpl_db: str) -> None:
     assert result.exit_code == 1
 
 
+def test_cli_validate_escapes_markup_in_issue_detail(wgpl_db: str) -> None:
+    _setup_interface()
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE interfaces SET endpoint = ? WHERE name = ?",
+            ("[red]owned[/red]", "wg0"),
+        )
+        conn.commit()
+
+    result = runner.invoke(app, ["validate", "wg0"])
+
+    assert result.exit_code == 1
+    assert "[red]" in result.stderr
+
+
+def test_cli_exit_error_escapes_markup(wgpl_db: str) -> None:
+    _setup_interface()
+    result = runner.invoke(app, ["peer", "show", "[red]missing[/red]"])
+
+    assert result.exit_code == 1
+    assert "WGPL Error" in result.stderr
+    assert "[red]" in result.stderr
+
+
 def test_cli_interface_update_no_fields(wgpl_db: str) -> None:
     _setup_interface()
 

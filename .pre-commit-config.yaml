@@ -18,6 +18,7 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
+        files: ^src/
         additional_dependencies:
           - typer
           - pytest

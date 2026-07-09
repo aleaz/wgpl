@@ -130,3 +130,39 @@ def test_validate_wire_keepalive_rejects_out_of_range() -> None:
         integrity.validate_wire_keepalive(70000)
     assert integrity.validate_wire_keepalive(0) == 0
     assert integrity.validate_wire_keepalive(25) == 25
+
+
+def test_validate_state_rejects_invalid_endpoint(wg0_interface: str) -> None:
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE interfaces SET endpoint = ? WHERE id = ?",
+            ("!!!bad!!!", wg0_interface),
+        )
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+    assert result["status"] == "error"
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    assert any(i.get("code") == "invalid_wire_fields" for i in issues)
+
+
+def test_validate_state_rejects_invalid_custom_allowed_ips(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    peer_id = str(peer["id"])
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            UPDATE peers
+            SET allowed_ips_policy = 'custom', custom_allowed_ips = 'not-a-cidr'
+            WHERE id = ?
+            """,
+            (peer_id,),
+        )
+        conn.commit()
+
+    result = core.validate_state(wg0_interface)
+    assert result["status"] == "error"
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    assert any(i.get("code") == "invalid_wire_fields" for i in issues)

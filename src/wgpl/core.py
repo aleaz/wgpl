@@ -202,8 +202,7 @@ def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
 
 def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
     """Return lifecycle label: Active, Expired, or Deleted."""
-    deleted_at = peer["deleted_at"] if "deleted_at" in peer.keys() else None
-    if deleted_at is not None:
+    if integrity.is_peer_deleted(peer):
         return "Deleted"
     if not _is_peer_active(peer):
         return "Expired"
@@ -526,9 +525,31 @@ def add_node(name: str, desc: str | None = None) -> dict[str, Any]:
     return {"id": node_id, "name": name, "desc": desc, "created_at": created_at}
 
 
+def _count_active_peers_for_node(
+    node_id: str,
+    conn: sqlite3.Connection,
+) -> int:
+    """Count peers attached to a node that are active (not soft-deleted or expired)."""
+    return sum(
+        1
+        for peer in db.list_peers(conn=conn)
+        if peer["node_id"] is not None
+        and str(peer["node_id"]) == node_id
+        and integrity.is_peer_active(peer)
+    )
+
+
 def list_nodes() -> list[dict[str, Any]]:
     """Return all nodes as plain dicts, including their attachment count."""
-    return [dict(row) for row in db.list_nodes()]
+    with db.transaction(verify=True) as conn:
+        nodes = db.list_nodes(conn=conn)
+        return [
+            {
+                **dict(row),
+                "attachment_count": _count_active_peers_for_node(str(row["id"]), conn),
+            }
+            for row in nodes
+        ]
 
 
 def get_node_by_ref(ref: str) -> dict[str, Any]:
@@ -538,7 +559,7 @@ def get_node_by_ref(ref: str) -> dict[str, Any]:
         node = db.get_node(node_id, conn=conn)
         if not node:
             raise NodeNotFoundError(f"Node {ref} not found")
-        count = db.count_peers_for_node(node_id, conn=conn)
+        count = _count_active_peers_for_node(node_id, conn=conn)
     result = dict(node)
     result["attachment_count"] = count
     return result
@@ -603,16 +624,14 @@ def remove_node(ref: str, *, force: bool = False) -> None:
         if not node:
             raise NodeNotFoundError(f"Node {ref} not found")
         name = str(node["name"])
-        active_count = db.count_peers_for_node(node_id, conn=conn)
+        active_count = _count_active_peers_for_node(node_id, conn=conn)
         if active_count > 0 and not force:
             raise NodeHasPeersError(
                 f"Node {name} has {active_count} active attachment(s). "
                 "Remove those peers first, or use --force."
             )
         attachments = [
-            peer
-            for peer in db.list_peers(conn=conn)
-            if str(peer["node_id"]) == node_id
+            peer for peer in db.list_peers(conn=conn) if str(peer["node_id"]) == node_id
         ]
         for peer in attachments:
             _audit_peer_from_row(
@@ -758,7 +777,11 @@ def _resolve_node_for_attachment(
     node_id = str(uuid.uuid4())
     db.add_node(node_id, node_name, created_at, desc=None, conn=conn)
     _audit_node_event(
-        node_id, node_name, db.AuditEventType.CREATED, conn, metadata={"via": "peer_add"}
+        node_id,
+        node_name,
+        db.AuditEventType.CREATED,
+        conn,
+        metadata={"via": "peer_add"},
     )
     return node_id, node_name, True
 
