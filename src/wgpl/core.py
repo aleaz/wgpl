@@ -217,17 +217,40 @@ def _peer_optional_field(peer: sqlite3.Row | Mapping[str, object], field: str) -
     return None
 
 
+def _optional_int_field(
+    row: sqlite3.Row | Mapping[str, object], field: str
+) -> int | None:
+    raw = _peer_optional_field(row, field)
+    if raw is None:
+        return None
+    return int(raw)
+
+
 def peer_row_to_public_dict(
     peer: sqlite3.Row | Mapping[str, object],
     iface_dns: dict[int, str | None] | None = None,
+    iface: sqlite3.Row | Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
-    """Return a JSON-safe peer record without private_key or preshared_key."""
+    """Return a JSON-safe peer record without private_key or preshared_key.
+
+    Includes ``desc``, effective/override ``mtu`` and ``keepalive`` (same model
+    as ``update_peer`` return values) for list/show JSON parity with human UI.
+    """
     iface_dns_map = iface_dns or {}
     interface_id = int(str(peer["interface_id"]))
     peer_dns = _peer_optional_field(peer, "dns")
     if peer_dns is not None:
         peer_dns = str(peer_dns)
     created_at = peer["created_at"]
+    desc = _peer_optional_field(peer, "desc")
+    if desc is not None:
+        desc = str(desc)
+    mtu_override = _optional_int_field(peer, "mtu")
+    keepalive_override = _optional_int_field(peer, "keepalive")
+    iface_mtu = _optional_int_field(iface, "mtu") if iface is not None else None
+    iface_keepalive = (
+        _optional_int_field(iface, "keepalive") if iface is not None else None
+    )
     return {
         "id": str(peer["id"]),
         "interface_id": str(interface_id),
@@ -243,6 +266,13 @@ def peer_row_to_public_dict(
         "created_at": str(created_at) if created_at is not None else None,
         "dns": get_effective_dns(peer_dns, iface_dns_map.get(interface_id)),
         "dns_override": peer_dns,
+        "desc": desc,
+        "mtu": mtu_override if mtu_override is not None else iface_mtu,
+        "mtu_override": mtu_override,
+        "keepalive": (
+            keepalive_override if keepalive_override is not None else iface_keepalive
+        ),
+        "keepalive_override": keepalive_override,
         "status": get_peer_status(peer),
         "expires_at": _peer_optional_field(peer, "expires_at"),
         "deleted_at": _peer_optional_field(peer, "deleted_at"),
@@ -302,7 +332,7 @@ def peer_rows_to_public_dicts(
             iface_cache[iface_id] = _interface_routing_context(iface_id)
 
         iface, active_peers = iface_cache[iface_id]
-        record = peer_row_to_public_dict(peer, iface_dns_map)
+        record = peer_row_to_public_dict(peer, iface_dns_map, iface=iface)
         if iface is not None and integrity.is_peer_active(peer):
             hub_ips, client_ips = _derived_allowed_ips_for_peer(
                 peer, iface, active_peers

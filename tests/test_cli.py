@@ -58,6 +58,11 @@ def test_public_peer_rows_redact_secrets(wgpl_db: str) -> None:
             "created_at": "2026-01-01T00:00:00+00:00",
             "dns": "1.1.1.1",
             "dns_override": "1.1.1.1",
+            "desc": None,
+            "mtu": None,
+            "mtu_override": None,
+            "keepalive": None,
+            "keepalive_override": None,
             "status": "Active",
             "expires_at": None,
             "deleted_at": None,
@@ -84,6 +89,17 @@ def test_peer_list_json_redacts_secrets(wg0_interface: str) -> None:
     assert "private_key" not in peers[0]
     assert "preshared_key" not in peers[0]
     assert peers[0]["name"] == "json_peer"
+
+
+def test_cli_version_flag() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip().startswith("wgpl ")
+    assert "1." in result.stdout or "0.0.0+unknown" in result.stdout
+
+    result_v = runner.invoke(app, ["-V"])
+    assert result_v.exit_code == 0
+    assert result_v.stdout.strip().startswith("wgpl ")
 
 
 def test_peer_show_json_redacts_private_key(wg0_interface: str) -> None:
@@ -123,6 +139,42 @@ def test_peer_show_show_secrets_reveals_psk(wg0_interface: str) -> None:
 
     assert result.exit_code == 0
     assert full["preshared_key"] in result.stdout
+
+
+def test_peer_list_json_includes_desc_mtu_keepalive(wg0_interface: str) -> None:
+    core.update_interface(wg0_interface, mtu=1420, keepalive=25)
+    core.add_peer(
+        wg0_interface,
+        "json_fields",
+        desc="laptop",
+        mtu=1280,
+        keepalive=15,
+    )
+
+    result = runner.invoke(app, ["--json", "peer", "list"])
+
+    assert result.exit_code == 0
+    peer = json.loads(result.stdout)[0]
+    assert peer["desc"] == "laptop"
+    assert peer["mtu"] == 1280
+    assert peer["mtu_override"] == 1280
+    assert peer["keepalive"] == 15
+    assert peer["keepalive_override"] == 15
+
+
+def test_peer_list_json_inherits_iface_mtu_keepalive(wg0_interface: str) -> None:
+    core.update_interface(wg0_interface, mtu=1420, keepalive=25)
+    core.add_peer(wg0_interface, "inherit_fields")
+
+    result = runner.invoke(app, ["--json", "peer", "list"])
+
+    assert result.exit_code == 0
+    peer = json.loads(result.stdout)[0]
+    assert peer["desc"] is None
+    assert peer["mtu"] == 1420
+    assert peer["mtu_override"] is None
+    assert peer["keepalive"] == 25
+    assert peer["keepalive_override"] is None
 
 
 def test_peer_row_to_public_dict_matches_list_json(wg0_interface: str) -> None:

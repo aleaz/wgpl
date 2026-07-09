@@ -29,13 +29,13 @@ attachment to one interface. Node names are **globally unique**.
 
 ## Peer Management (`wgpl peer`)
 
-- **`add <INTERFACE_NAME_OR_ID> [NAME] [--node REF] [options]`**: Attaches a device to the interface as a peer. Provide **exactly one** of: a positional `<NAME>` (find-or-create the node by that name, then attach) **or** `--node <REF>` (strictly attach an existing node by name/ID). `<NAME>` must be alphanumeric with optional `_` / `-` and max length 64. A node may attach to a given interface only once. `--expires` accepts durations like `7d` or `24h` (must be greater than zero). Routing: `--role endpoint|subnet_router`, `--routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`. JSON adds `node`, `node_id`, and `node_created`.
-- **`list [--all] [--expired]`**: Shows active/all clients. JSON includes derived `hub_allowed_ips` and `client_allowed_ips`.
-- **`show <ID> [--show-secrets]`**: Peer details; JSON omits private keys (same fields as `list --json`, including derived AllowedIPs).
+- **`add <INTERFACE_NAME_OR_ID> [NAME] [--node REF] [options]`**: Attaches a device to the interface as a peer. Provide **exactly one** of: a positional `<NAME>` (find-or-create the node by that name, then attach) **or** `--node <REF>` (strictly attach an existing node by name/ID). `<NAME>` must be alphanumeric with optional `_` / `-` and max length 64. A node may attach to a given interface only once. `--expires` accepts durations like `7d` or `24h` (hours or days only; must be greater than zero). Routing: `--role endpoint|subnet_router`, `--routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`. JSON adds `node`, `node_id`, and `node_created`.
+- **`list [--all] [--expired]`**: Shows active/all clients. JSON includes derived `hub_allowed_ips` / `client_allowed_ips`, plus `desc`, effective/override `mtu` and `keepalive` (same model as `peer update` JSON).
+- **`show <ID> [--show-secrets]`**: Peer details; JSON omits private keys (same fields as `list --json`, including derived AllowedIPs and desc/mtu/keepalive).
 - **`explain <ID> [-i INTERFACE]`**: Derived hub/client AllowedIPs and LAN↔LAN four-leg checklist for subnet routers.
 - **`config <ID> [-i INTERFACE] [--allowed-ips …]`**: Client `.conf` with private key. Default AllowedIPs are **derived** from `allowed_ips_policy`; `--allowed-ips` overrides for this export only. When the database has **more than one interface**, `-i` / `--interface` is **required** (even for a full UUID). JSON adds `client_allowed_ips` and `allowed_ips_source` (`derived` | `override`).
 - **`qr <ID> [-i INTERFACE] [-o <PNG_PATH>] [--allowed-ips …]`**: QR code for the client config; same `-i` and AllowedIPs rules as `config`.
-- **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies attachment properties or uses `--clear-*` to inherit from the interface. To rename the device, use `node update` (there is no `--name` here). Fields: `--ip`, `--dns`/`--clear-dns`, `--desc`/`--clear-desc`, `--mtu`/`--clear-mtu`, `--keepalive`/`--clear-keepalive`, `--expires`/`--clear-expires`. Routing fields: `--role`, `--routed-networks`, `--clear-routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`, `--clear-custom-allowed-ips`. `--clear-expires` reactivates an expired peer and runs the same activation checks as `peer add` (IP in pool, no active collisions, wire-safe keys). Cannot combine `--expires` and `--clear-expires`.
+- **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies attachment properties or uses `--clear-*` to inherit from the interface. To rename the device, use `node update` (there is no `--name` here). Fields: `--ip`, `--dns`/`--clear-dns`, `--desc`/`--clear-desc`, `--mtu`/`--clear-mtu`, `--keepalive`/`--clear-keepalive`, `--expires`/`--clear-expires` (`--expires` units: `h` or `d` only, e.g. `24h`, `30d`). Routing fields: `--role`, `--routed-networks`, `--clear-routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`, `--clear-custom-allowed-ips`. `--clear-expires` reactivates an expired peer and runs the same activation checks as `peer add` (IP in pool, no active collisions, wire-safe keys). Cannot combine `--expires` and `--clear-expires`.
 - **`remove <INTERFACE_NAME_OR_ID> <ID> [--hard]`**: Soft-deletes a peer. Use `--hard` for physical deletion.
 - **`prune <INTERFACE_NAME_OR_ID>`**: Purges expired and soft-deleted peers. Recommended before `interface remove` when inactive rows remain.
 - **`history <INTERFACE_NAME_OR_ID> <ID> [--limit N] [--offset N]`**: Shows append-only audit events for a peer (`--limit` max: 1000).
@@ -44,8 +44,9 @@ attachment to one interface. Node names are **globally unique**.
 
 - **`wgpl apply <INTERFACE_NAME_OR_ID>`**: Synchronizes state to the WireGuard kernel via `wg syncconf`. Fails before sync if the database fails consistency checks (invalid active peers, wire-format issues, IPs outside pool).
 - **`wgpl validate [INTERFACE_NAME_OR_ID]`**: Dry-run integrity report (active peer collisions, pool fit, DNS, corrupt `expires_at`, invalid wire fields, **routing topology**). Errors exit 1; warnings exit 0. Does not mutate state.
-- **`wgpl db dump [-o FILE]`**: Binary SQLite backup at `chmod 600`.
+- **`wgpl db dump [-o FILE]`**: Binary SQLite backup at `chmod 600`. Prefer dump checksums (or a copied backup file) for integrity checks — opening the live DB may change on-disk file bytes without changing logical content.
 - **`wgpl db restore --yes <FILE>`**: Restores from a binary backup. Validates schema contract and all stored wire-format fields; reinstalls audit immutability triggers. Destructive; use `--yes`. Pass `-` for stdin (size-capped).
+- **`wgpl --version` / `-V`**: Print the installed package version and exit.
 
 ## Operational notes
 

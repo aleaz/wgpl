@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import shutil
 import tempfile
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -63,7 +64,7 @@ def _styled(text: str, style: str = "") -> str:
 def _public_peer_rows(
     peers: list[sqlite3.Row],
     iface_dns: dict[int, str | None] | None = None,
-) -> list[dict[str, str | None]]:
+) -> list[dict[str, Any]]:
     """Return peer rows safe for JSON output (no private keys or PSK)."""
     return core.peer_rows_to_public_dicts(peers, iface_dns)
 
@@ -152,6 +153,19 @@ def _print_list_table(
     _print_titled_table(title, table)
 
 
+def _package_version() -> str:
+    try:
+        return package_version("wgpl")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"wgpl {_package_version()}")
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -159,8 +173,17 @@ def main(
         False, "--json", "-j", help="Output results in JSON format"
     ),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show WGPL version and exit",
+        callback=_version_callback,
+        is_eager=True,
+    ),
 ) -> None:
     """Initialize the CLI application context and database connection."""
+    del version  # handled by eager callback
     ctx.ensure_object(dict)
     ctx.obj["json"] = output_json
     if db_path:
@@ -739,7 +762,9 @@ def peer_add(
         None, "--dns", help="DNS override for this peer's client config"
     ),
     expires: str | None = typer.Option(
-        None, "--expires", help="Duration until expiration (e.g. 7d, 24h)"
+        None,
+        "--expires",
+        help="Duration until expiration (e.g. 7d, 24h; units: h, d)",
     ),
     desc: str | None = typer.Option(None, "--desc", help="Description of the peer"),
     mtu: int | None = typer.Option(None, "--mtu", help="MTU override for this peer"),
@@ -974,7 +999,9 @@ def peer_update(
         help="Remove peer PersistentKeepalive override (inherit interface default)",
     ),
     expires: str | None = typer.Option(
-        None, "--expires", help="When the peer should expire (e.g., '30d', '1y')"
+        None,
+        "--expires",
+        help="When the peer should expire (e.g. 30d, 24h; units: h, d)",
     ),
     clear_expires: bool = typer.Option(
         False, "--clear-expires", help="Remove peer expiration"

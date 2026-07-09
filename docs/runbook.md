@@ -371,3 +371,7 @@ Cross-check active peers against your identity source. Remove stale access with
 
 Ensure the database path is a regular file with mode `600`, owned by the operator.
 Symlinks at `WGPL_DB_PATH` are rejected.
+
+For integrity monitoring, checksum a `wgpl db dump -o …` artifact (or an offline
+copy). Do not rely on a raw hash of the live `.db` file alone: SQLite may rewrite
+file bytes on open without changing logical table content.
