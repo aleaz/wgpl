@@ -17,7 +17,7 @@ files. WireGuard (`[Interface]`, `[Peer]`, `AllowedIPs`, `Endpoint`, etc.) is an
 **export format** produced at apply/export time — not the internal domain model.
 
 Routing derivation and operational patterns are documented in
-[docs/ROUTING.md](docs/ROUTING.md).
+[docs/routing.md](docs/routing.md).
 
 ### What WGPL models
 
@@ -133,7 +133,7 @@ None found. `cli.py` does not import `db`. No business routing logic in
 
 ### Specification artifacts
 
-- Routing invariants and invalid topologies: [docs/ROUTING.md](docs/ROUTING.md)
+- Routing invariants and invalid topologies: [docs/routing.md](docs/routing.md)
 - Executable matrix (topology → expected AllowedIPs): [docs/routing_matrix.md](docs/routing_matrix.md)
 
 ## Layered architecture
@@ -192,7 +192,7 @@ Tables: `interfaces`, `nodes`, `peers`, `audit_events`. Identity columns:
 `nodes.name` (globally unique), `nodes.desc`; `peers.node_id` (FK → `nodes`,
 peers have no `name` column). Routing intent columns:
 `interfaces.routed_networks`; `peers.role`, `routed_networks`, `allowed_ips_policy`,
-`custom_allowed_ips`. See [docs/ROUTING.md](docs/ROUTING.md). Append-only audit enforced by SQLite
+`custom_allowed_ips`. See [docs/routing.md](docs/routing.md). Append-only audit enforced by SQLite
 triggers recreated on every `init_db()` (never `IF NOT EXISTS` for security triggers).
 Weakened or extra triggers are **detected on every live DB open**; `wgpl db doctor` diagnoses issues and `wgpl db doctor --repair` reinstalls triggers and normalizes `deleted_at`.
 

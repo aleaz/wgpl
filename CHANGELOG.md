@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `wgpl peer explain` — derived hub/client AllowedIPs and LAN↔LAN four-leg checklist for subnet routers
 - `wgpl validate` routing topology checks (overlapping site LANs, pool overlap, asymmetric remote access, subnet-router keepalive warnings)
 - JSON export metadata: `hub_allowed_ips` and `client_allowed_ips` on `peer list` / `peer show`; `client_allowed_ips` and `allowed_ips_source` on `peer config --json`
-- Documentation: `docs/ROUTING.md`, `docs/routing_matrix.md`, domain model and architecture verification in `DESIGN.md`, hub relay procedures in `docs/runbook.md`
+- Documentation: `docs/routing.md`, `docs/routing_matrix.md`, domain model and architecture verification in `DESIGN.md`, hub relay procedures in `docs/runbook.md`
 - Exact SQLite schema contract on restore (reject extra tables, indexes, triggers, or views)
 - Wire-safe MTU (1280–65535) and keepalive (0–65535) validation on export, apply preflight, and mutations
 - `dbpath.open_exclusive_output()` for hardened CLI secret output paths

@@ -56,7 +56,7 @@ update the SQLite database only. The kernel stays stale until `apply` or remote
 ## Hub routing relay
 
 WGPL derives WireGuard `AllowedIPs` for hub-and-spoke topologies (remote access,
-subnet routers, LAN↔LAN via hub). See [ROUTING.md](ROUTING.md) for the routing
+subnet routers, LAN↔LAN via hub). See [routing.md](routing.md) for the routing
 model and pattern matrix.
 
 **WGPL does not configure the Linux kernel routing table, `ip_forward`, or
@@ -167,7 +167,7 @@ target LAN.
 
 ### Operational patterns (quick reference)
 
-See [ROUTING.md — Operational patterns](ROUTING.md#operational-patterns) for
+See [routing.md — Operational patterns](routing.md#operational-patterns) for
 the full matrix. Typical WGPL commands:
 
 **Remote access — full tunnel**

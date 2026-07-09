@@ -46,7 +46,7 @@ wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
 wgpl peer update wg0 <PEER_ID> --desc "CEO laptop" --mtu 1280
 wgpl validate wg0
 
-# 2c. Routing (subnet routers, split/full tunnel) — see docs/ROUTING.md
+# 2c. Routing (subnet routers, split/full tunnel) — see docs/routing.md
 wgpl interface update wg0 --routed-networks "10.50.0.0/16"
 wgpl peer add wg0 "Site_A_GW" --role subnet_router \
   --routed-networks "192.168.10.0/24" \
@@ -125,7 +125,7 @@ Implemented: `interface` CRUD + update, `node` CRUD + prune + history, `peer` CR
 routing flags (`--role`, `--routed-networks`, `--allowed-ips-policy`), `validate`,
 `apply`, `db dump`, `db restore`, `--json` M2M mode.
 
-Routing model: [docs/ROUTING.md](../../docs/ROUTING.md). Hub relay ops:
+Routing model: [docs/routing.md](../../docs/routing.md). Hub relay ops:
 [docs/runbook.md — Hub routing relay](../../docs/runbook.md#hub-routing-relay).
 
 Future work: `peer rotate-keys`, `interface rename`, `peer move` (follow architecture invariants).

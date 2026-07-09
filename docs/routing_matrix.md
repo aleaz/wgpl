@@ -5,7 +5,7 @@ expected derived AllowedIPs, and the pytest that verifies it.
 
 **Default pool:** `10.0.0.0/24` unless noted.
 
-See also: [ROUTING.md](ROUTING.md) (invariants, invalid topologies),
+See also: [routing.md](routing.md) (invariants, invalid topologies),
 [DESIGN.md — Domain model](../DESIGN.md#domain-model).
 
 ---
