@@ -7,6 +7,7 @@
 - [ ] `uv run ruff check src/ tests/` passes
 - [ ] `uv run mypy src/ tests/` passes
 - [ ] `uv run pytest` passes
+- [ ] CI security jobs considered (bandit, pip-audit, gitleaks — see `.github/workflows/ci.yml`)
 - [ ] JSON/M2M output does not expose `private_key` or `preshared_key` (unless via `peer config`)
 - [ ] Documentation and comments are in English
 - [ ] No database files (`*.db`, `*.sqlite3`) or real keys included

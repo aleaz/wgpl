@@ -1,3 +1,6 @@
+# ILLUSTRATIVE ONLY — insecure defaults for demos.
+# Do not use these patterns with production credentials or live firewall rules as-is.
+
 terraform {
   required_providers {
     aws = {

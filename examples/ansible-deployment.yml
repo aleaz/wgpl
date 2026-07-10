@@ -1,4 +1,6 @@
 ---
+# ILLUSTRATIVE ONLY — insecure defaults for demos.
+# Do not use become/root or production secrets as shown below without review.
 - name: Zero-Downtime WireGuard Deployment with WGPL
   hosts: vpn_gateways
   become: yes

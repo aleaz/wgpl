@@ -19,7 +19,9 @@ uv run mypy src/ tests/
 uv run pytest
 ```
 
-> **Safe by Design Testing:** You can run `pytest` fearlessly. The test suite runs entirely on `:memory:` SQLite databases and mocks the OS-level `wg` commands. It will **not** modify your host's `iptables` or `/etc/wireguard` configurations, and it does not require `root` privileges.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) also runs **bandit**, **pip-audit**, and **gitleaks** (plus `uv build`). Treat that workflow as the objective gate.
+
+> **Safe by Design Testing:** You can run `pytest` fearlessly. The suite uses isolated tempfile SQLite databases (`WGPL_DB_PATH`) and mocks OS-level `wg` commands. It will **not** modify your host's `iptables` or `/etc/wireguard` configurations, and it does not require `root` privileges.
 
 ## Architecture invariants
 
@@ -53,7 +55,7 @@ Key rules:
 1. Create a branch: `feature/<slug>` or `fix/<slug>`
 2. Keep changes focused and minimal
 3. Add or update tests for behavior changes
-4. Ensure CI passes (ruff, mypy, pytest)
+4. Ensure CI passes (see `.github/workflows/ci.yml`: ruff, mypy, pytest, bandit, pip-audit, gitleaks)
 5. Fill out the PR template checklist
 
 ## Commit messages

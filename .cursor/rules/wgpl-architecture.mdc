@@ -44,7 +44,7 @@ Business invariants live in `integrity.py`, `wireformat.py`, and `routing.py` (c
 
 ## Wireformat and export boundaries
 
-- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) enters emit gates in `core.py`: `assert_database_valid()` → `integrity.assert_exportable_*()` → `routing.resolve_*()` (AllowedIPs) → `wireformat` (formatting only; no business validation).
+- All WireGuard text output (`get_interface_config`, `get_peer_config`, `sync_interface`) enters emit gates in `core.py`: `assert_database_valid()` → `integrity.assert_exportable_*()` → `routing.resolve_*()` (AllowedIPs) → `wireformat` (emit formatting plus shared AllowedIPs/DNS/MTU/keepalive cascade; not a second business layer).
 - `allowed_ips` is validated in `core.validate_allowed_ips()` (shared with CLI).
 - `wireformat` MUST NOT interpolate DB values without prior `assert_exportable_*` validation in the emit gate.
 
