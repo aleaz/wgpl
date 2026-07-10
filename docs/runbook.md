@@ -375,3 +375,60 @@ Symlinks at `WGPL_DB_PATH` are rejected.
 For integrity monitoring, checksum a `wgpl db dump -o …` artifact (or an offline
 copy). Do not rely on a raw hash of the live `.db` file alone: SQLite may rewrite
 file bytes on open without changing logical table content.
+
+## Troubleshooting
+
+Common operator traps (also summarized in [cli.md — Operational notes](cli.md#operational-notes)):
+
+### Changes in the database but not on the hub
+
+Mutations (`peer add`, `peer update`, `peer remove`, …) write SQLite only.
+WireGuard does not change until you push:
+
+```bash
+wgpl validate wg0
+sudo wgpl apply wg0
+# remote hub:
+wgpl interface export wg0 | ssh hub 'wg syncconf wg0 /dev/stdin'
+```
+
+### `peer config` / `peer qr` asks for `-i`
+
+When the database has **more than one interface**, secret export and
+`--show-secrets` require an explicit interface so the peer cannot be resolved
+across tunnels by accident:
+
+```bash
+wgpl peer config PEER_ID -i wg0
+wgpl peer qr PEER_ID -i wg0
+wgpl peer show PEER_ID --show-secrets -i wg0
+```
+
+### Permission denied on the database / `--help` fails
+
+The default path is `~/.wgpl.db` (mode `600`). If the file is owned by another
+user (for example after a `sudo` run), open fails — including some `--help`
+paths that open the DB. Use a writable path or fix ownership:
+
+```bash
+wgpl --db /tmp/wgpl-ops.db --help
+# or
+export WGPL_DB_PATH=/path/you/own/wgpl.db
+```
+
+### `peer update` argument order
+
+Unlike `peer show` / `peer config` (peer ref first, optional `-i`), mutate
+commands take **interface then peer**:
+
+```bash
+# correct
+wgpl peer update wg0 PEER_ID --desc "laptop"
+wgpl peer remove wg0 PEER_ID
+
+# wrong — looks like peer show, but update requires INTERFACE first
+# wgpl peer update PEER_ID --desc "laptop"
+```
+
+Rename a device with `wgpl node update REF --name NEW` — `peer update` has no
+`--name`.

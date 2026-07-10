@@ -1,4 +1,9 @@
-"""WireGuard configuration builders (formatting only; validation in integrity gate)."""
+"""WireGuard configuration builders (emit formatting + shared validation/cascade).
+
+Route derivation lives in ``routing.py``. Callers must pass the emit gate in
+``core.py`` (``assert_exportable_*``) before building configs. This module
+normalizes AllowedIPs and cascades DNS/MTU/keepalive for client output.
+"""
 
 from __future__ import annotations
 

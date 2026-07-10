@@ -4,8 +4,8 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | Yes       |
 | 1.0.x   | Yes       |
+| < 1.0   | No        |
 
 ## Reporting a vulnerability
 
@@ -51,14 +51,14 @@ Out of scope:
 
 ## Export and apply boundaries
 
-- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) enters a single **emit gate** in `core.py`: database consistency preflight (`validate_state`), then `integrity.assert_exportable_*` (SSOT for every interpolated field), then `wireformat` (formatting only). Export and apply share the same preflight — tampered rows cannot reach the kernel via export alone.
+- All WireGuard text output (`interface export`, `peer config`, `apply` / `syncconf`) enters a single **emit gate** in `core.py`: database consistency preflight (`validate_state`), then `integrity.assert_exportable_*` (SSOT for every interpolated field), then `routing.resolve_*`, then `wireformat` (serialize `.conf` with shared AllowedIPs validation and DNS/MTU/keepalive cascade — no route derivation). Export and apply share the same preflight — tampered rows cannot reach the kernel via export alone.
 - `wgpl apply` aborts before `wg syncconf` if active peers or interfaces are invalid.
 - Mutations update the SQLite SSOT only. The kernel may remain stale until you run `wgpl apply` (or `interface export | ssh … wg syncconf`). Treat post-mutation `apply` as part of your operational checklist.
 
 ## Restore integrity
 
 - `wgpl db restore` treats backups as **untrusted input**:
-  - **Exact schema contract**: only WGPL tables (`interfaces`, `peers`, `audit_events`, `sqlite_sequence`), required named indexes plus SQLite `sqlite_autoindex_*` entries from UNIQUE constraints, the two audit immutability triggers, and **no views** or other custom schema objects.
+  - **Exact schema contract**: only WGPL tables (`interfaces`, `nodes`, `peers`, `audit_events`, `sqlite_sequence`), required named indexes plus SQLite `sqlite_autoindex_*` entries from UNIQUE constraints, the two audit immutability triggers, and **no views** or other custom schema objects.
   - Supported `PRAGMA user_version` only.
   - Row-level validation (`validate_state` plus full wire-format scan of every peer/interface row).
   - `enforce_audit_immutability()` recreates append-only audit triggers (no `IF NOT EXISTS` bypass).
@@ -78,7 +78,7 @@ Out of scope:
 
 - Restrict filesystem permissions on the database path (`WGPL_DB_PATH` or `--db`). Symlinks are rejected.
 - Run `wgpl interface export` over SSH to trusted hosts only.
-- Use `wgpl peer update` to change peer name, IP, or DNS without rotating keys.
+- Use `wgpl node update` to rename a device; use `wgpl peer update` to change IP, DNS, or other attachment fields without rotating keys.
 - If a private key or PSK may have been exposed, remove the peer and add a new one
   (key rotation is not available via `peer update`).
 - Run `wgpl validate` after bulk changes or restore to confirm peer IPs, DNS, and wire-format fields.

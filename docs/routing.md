@@ -36,11 +36,11 @@ WireGuard-native names are **not renamed**: `AllowedIPs`, `Address`, `Endpoint`,
 ## Architecture
 
 ```
-Intent (DB)  →  routing.py (derive)  →  integrity (validate)  →  wireformat (format)
+Intent (DB)  →  routing.py (derive)  →  integrity (validate)  →  wireformat (emit + cascade)
 ```
 
 - **`routing.py`** is the single source of derived AllowedIPs.
-- **`wireformat.py`** formats only; it never computes routing.
+- **`wireformat.py`** serializes `.conf` text (AllowedIPs normalize + DNS/MTU/keepalive cascade); it never **derives** routes.
 - **`core.py`** emit gates call `routing` then `integrity` then `wireformat`.
 
 Full specification matrix (topology → expected AllowedIPs): [routing_matrix.md](routing_matrix.md).

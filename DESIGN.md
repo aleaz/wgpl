@@ -123,13 +123,15 @@ it:
 | `consistency.py` | LAN↔LAN completeness checks in `validate` |
 | `integrity.py` | `parse_cidr_list`, enums — validation only, not derivation |
 
-`wireformat.py` validates and joins CIDR strings; it never chooses routes.
+`wireformat.py` emits `.conf` text: it normalizes/validates AllowedIPs CIDRs,
+applies DNS/MTU/keepalive cascade (peer override → interface default), and
+never **derives** routes (`routing.py` is the SSOT for AllowedIPs lists).
 `grep` for `/32` in `src/wgpl` finds only `routing.py`.
 
 ### Boundary violations
 
-None found. `cli.py` does not import `db`. No business routing logic in
-`wireformat` or `db`.
+None found. `cli.py` does not import `db`. No AllowedIPs **derivation** in
+`wireformat` or `db` (emit-path validation/cascade in `wireformat` is intentional).
 
 ### Specification artifacts
 
@@ -152,7 +154,7 @@ cli.py (Typer / presentation)
 | Presentation | `cli.py` | No direct `db` access; stdout/stderr contract; `--json` redaction |
 | Business | `core.py`, `refs.py`, `ipam.py`, `audit.py`, `restore.py`, `consistency.py`, `validators.py` | No Typer; no stdout/stderr; orchestrates mutations and reads |
 | Routing derivation | `routing.py` | Pure functions; single source of AllowedIPs; no I/O |
-| Invariants | `integrity.py`, `wireformat.py` | Called from `core`, not from `cli` or `db` |
+| Invariants | `integrity.py`, `wireformat.py` | Called from `core`, not from `cli` or `db`; `wireformat` also owns emit formatting + shared AllowedIPs/DNS/MTU/keepalive cascade |
 | Infrastructure | `db.py`, `dbpath.py`, `wireguard.py` | No business logic |
 
 ## Data flow
@@ -160,7 +162,7 @@ cli.py (Typer / presentation)
 1. **Mutations** (`peer add`, `peer remove`, etc.) update SQLite inside `BEGIN EXCLUSIVE`
    transactions. Audit events append in the same transaction.
 2. **No automatic WireGuard sync** on mutation — by design.
-3. **Apply** (`wgpl apply`) and all config export paths (`interface export`, `peer config`) enter a single **emit gate** in `core.py`: `assert_database_valid` → `integrity.assert_exportable_*` → `wireformat` (formatting only).
+3. **Apply** (`wgpl apply`) and all config export paths (`interface export`, `peer config`) enter a single **emit gate** in `core.py`: `assert_database_valid` → `integrity.assert_exportable_*` → `routing.resolve_*` (AllowedIPs) → `wireformat` (serialize `.conf`; shared AllowedIPs validation and DNS/MTU/keepalive cascade — does **not** choose routes).
 4. **Remote apply**: `wgpl interface export | ssh host wg syncconf iface /dev/stdin`.
 
 ## Peer lifecycle
@@ -179,7 +181,7 @@ A peer is **active** when it is not soft-deleted and not expired
 | Database file | `dbpath`: `O_NOFOLLOW`, fd connect, `chmod 600`, reject symlinks |
 | Key generation | X25519 + `os.urandom` in Python memory |
 | Subprocess | Argument lists only; `WGPL_WG_BIN` ignored when UID 0 |
-| Export | Emit gate in `core.py`; `integrity.assert_exportable_*` SSOT; `wireformat` formats only |
+| Export | Emit gate in `core.py`; `integrity.assert_exportable_*` SSOT; `wireformat` serializes `.conf` with shared validation/cascade (no route derivation) |
 | Schema on open | Every live DB connection validates exact schema + audit trigger bodies (fail-closed) |
 | Peer access | `PeerAccess` in `refs.py` (READ_PUBLIC, READ_SENSITIVE, EXPORT_SECRET, MUTATE) |
 | Restore | Untrusted input: schema contract (tables, indexes, triggers, version), full wire validation, trigger reinstall |

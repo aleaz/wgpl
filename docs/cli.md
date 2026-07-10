@@ -9,6 +9,7 @@ relay steps are in [runbook.md — Hub routing relay](runbook.md#hub-routing-rel
 
 - **`add <NAME> <ENDPOINT> <PUBKEY> <POOL_IP> [options]`**: Registers a new network. Accepts `--port`, `--dns`, `--mtu`, `--keepalive`, `--desc`, and `--routed-networks` (comma-separated CIDRs behind the hub for split tunnel).
 - **`list`**: Shows interfaces and their unique IDs.
+- **`show <NAME_OR_ID>`**: Interface details (endpoint, port, public key, address pool, DNS/MTU/keepalive defaults, description).
 - **`update <NAME_OR_ID> [options]`**: Modifies advanced network parameters (e.g., `--mtu 1360`, `--routed-networks`, or `--clear-routed-networks`). Shrinking `address_pool` is rejected if any non-soft-deleted peer (including expired rows) would fall outside the new CIDR.
 - **`export <NAME_OR_ID>`**: Prints standard `[Peer]` blocks compatible with the WireGuard server. Only **active** peers are exported; wire-format validation runs before output.
 - **`remove <NAME_OR_ID> [--force]`**: Deletes the interface. Fails while peer rows exist unless `--force` (run `peer prune` or remove peers first for a clean delete).
@@ -44,6 +45,7 @@ attachment to one interface. Node names are **globally unique**.
 
 - **`wgpl apply <INTERFACE_NAME_OR_ID>`**: Synchronizes state to the WireGuard kernel via `wg syncconf`. Fails before sync if the database fails consistency checks (invalid active peers, wire-format issues, IPs outside pool).
 - **`wgpl validate [INTERFACE_NAME_OR_ID]`**: Dry-run integrity report (active peer collisions, pool fit, DNS, corrupt `expires_at`, invalid wire fields, **routing topology**). Errors exit 1; warnings exit 0. Does not mutate state.
+- **`wgpl db doctor [--repair]`**: Diagnoses schema/consistency issues (extra objects, weakened audit triggers, `deleted_at` normalization). With `--repair`, reinstalls audit triggers and normalizes empty `deleted_at` strings. Detail and when to repair vs restore: [runbook — Database doctor](runbook.md#database-doctor).
 - **`wgpl db dump [-o FILE]`**: Binary SQLite backup at `chmod 600`. Prefer dump checksums (or a copied backup file) for integrity checks — opening the live DB may change on-disk file bytes without changing logical content.
 - **`wgpl db restore --yes <FILE>`**: Restores from a binary backup. Validates schema contract and all stored wire-format fields; reinstalls audit immutability triggers. Destructive; use `--yes`. Pass `-` for stdin (size-capped).
 - **`wgpl --version` / `-V`**: Print the installed package version and exit.
@@ -52,4 +54,5 @@ attachment to one interface. Node names are **globally unique**.
 
 1. Mutations update the database only — run **`wgpl apply`** (or remote `interface export | ssh … wg syncconf`) to push changes to WireGuard.
 2. After **`db restore`**, run **`validate`** then **`apply`** on each interface you manage.
-3. Multi-interface hosts: always pass **`-i`** for `peer config` and `peer qr`.
+3. Multi-interface hosts: always pass **`-i`** for `peer config`, `peer qr`, `peer show --show-secrets`, and scoped history.
+4. Common traps (forgot `apply`, `-i`, DB permissions, `peer update` argument order): [runbook — Troubleshooting](runbook.md#troubleshooting).

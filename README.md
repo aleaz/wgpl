@@ -86,7 +86,7 @@ flowchart LR
   IntentDB[(Intent in SQLite)]
   RoutingPy["routing.py — derive AllowedIPs"]
   IntegrityPy["integrity.py — validate invariants"]
-  WireformatPy["wireformat.py — format only"]
+  WireformatPy["wireformat.py — emit + shared validation/cascade"]
   ApplyPaths["apply / interface export / peer config"]
 
   IntentDB --> RoutingPy --> IntegrityPy --> WireformatPy --> ApplyPaths
@@ -96,7 +96,7 @@ flowchart LR
 | --- | --- | --- |
 | Derive | `routing.py` | Single source of hub/client `AllowedIPs` (pure functions, no I/O) |
 | Validate | `integrity.py` + `consistency.py` | Wire-safe fields, activation gates, topology checks (`wgpl validate`) |
-| Format | `wireformat.py` | Serialize precomputed CIDRs to `.conf` text — **must not** compute routes |
+| Emit | `wireformat.py` | Serialize precomputed CIDRs to `.conf`; normalize AllowedIPs; cascade DNS/MTU/keepalive — **must not** derive routes |
 | Orchestrate | `core.py` | Mutations, emit gates, IPAM, audit |
 
 - **Mutations** (`peer add`, `peer update`, `interface update`, `node update`, …) write the database inside transactions. They do **not** touch WireGuard.
