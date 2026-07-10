@@ -128,7 +128,7 @@ Configure in the repository **Settings** on GitHub:
 1. **About** — add description and topics: `wireguard`, `vpn`, `python`, `cli`, `sqlite`
 2. **Security** — enable Dependabot alerts and secret scanning
 3. **Branches** — protect `main` (require CI status checks before merge)
-4. **Releases** — create tag `v0.1.0` on the public-ready commit
+4. **Releases** — when ready to publish, create an annotated tag `vX.Y.Z` matching the version in `pyproject.toml`
 
 Pre-push checklist:
 

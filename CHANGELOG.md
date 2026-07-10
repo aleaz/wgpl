@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Notes
+
+- **Scope (is / is not):** WGPL is a disconnected CLI for declarative hub-and-spoke IPv4 VPN intent (SQLite SSOT, BYOI). It is **not** a daemon/control plane, full-mesh overlay, direct site-to-site without a hub, IPv6 manager, WireGuard `.conf` importer, or self-service portal product (the FastAPI example is illustrative only). See README.
+- **Known limitations:** Bring-your-own interface (BYOI) — WGPL does not create OS interfaces or configure hub forwarding/firewall/NAT; mutations update SQLite only (no auto-apply); remote hub sync is an operator pipe (`wgpl interface export | ssh … wg syncconf`); **IPv4-only** address pools, peer IPs, DNS, and AllowedIPs.
+
 ### Added
 
 - First-class **Node** entity: `nodes` table (globally unique `name`, optional `desc`) and `wgpl node` command group (`add`, `list`, `show`, `update`, `remove`, `prune`, `history`) for device identity independent of any tunnel
