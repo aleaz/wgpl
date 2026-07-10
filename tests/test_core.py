@@ -9,6 +9,7 @@ from typing import Any
 
 from wgpl import core, db, wireguard
 from wgpl.core import (
+    PeerAccess,
     PeerResolvePolicy,
     validate_dns,
     allocate_peer_ip,
@@ -493,9 +494,20 @@ def test_resolve_peer_ref_excludes_soft_deleted_by_default(wg0_interface: str) -
         resolve_peer_ref(peer["id"])
 
 
-def test_resolve_peer_ref_includes_soft_deleted_when_mutate_inactive(
+def test_resolve_peer_ref_includes_soft_deleted_when_mutate(
     wg0_interface: str,
 ) -> None:
+    peer = core.add_peer(wg0_interface, "phone")
+    assert peer["id"] is not None
+    core.remove_peer(wg0_interface, peer["id"])
+
+    assert resolve_peer_ref(peer["id"], access=PeerAccess.MUTATE) == peer["id"]
+
+
+def test_resolve_peer_ref_policy_alias_maps_to_peer_access(
+    wg0_interface: str,
+) -> None:
+    """PeerResolvePolicy remains importable and maps via policy=."""
     peer = core.add_peer(wg0_interface, "phone")
     assert peer["id"] is not None
     core.remove_peer(wg0_interface, peer["id"])
@@ -620,9 +632,7 @@ def test_remove_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, policy=PeerResolvePolicy.READ_ONLY, conn=None: peer[
-            "id"
-        ],
+        lambda ref, iface=None, access=None, policy=None, conn=None: peer["id"],
     )
 
     assert peer["id"] is not None
@@ -639,9 +649,7 @@ def test_update_peer_interface_mismatch_raises_domain_error(
     monkeypatch.setattr(
         core,
         "resolve_peer_ref",
-        lambda ref, iface=None, policy=PeerResolvePolicy.READ_ONLY, conn=None: peer[
-            "id"
-        ],
+        lambda ref, iface=None, access=None, policy=None, conn=None: peer["id"],
     )
 
     assert peer["id"] is not None
@@ -821,11 +829,12 @@ def test_update_peer_resolve_uses_transaction_connection(
         ref: str,
         interface: str | None = None,
         *,
+        access: PeerAccess | None = None,
         policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
         conn: sqlite3.Connection | None = None,
     ) -> str:
         seen_conn.append(conn)
-        return original(ref, interface, policy=policy, conn=conn)
+        return original(ref, interface, access=access, policy=policy, conn=conn)
 
     monkeypatch.setattr(core, "resolve_peer_ref", tracking_resolve)
     core.update_peer(wg0_interface, str(peer["id"]), dns="9.9.9.9")

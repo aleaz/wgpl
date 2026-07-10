@@ -154,7 +154,7 @@ def _validate_routing_topology(
             elif (
                 not integrity.is_peer_deleted(peer)
                 and peer["routed_networks"]
-                and get_peer_status_expired(peer)
+                and not integrity.is_peer_active(peer)
             ):
                 issues.append(
                     _issue(
@@ -275,13 +275,6 @@ def _validate_routing_topology(
                 )
 
     return issues
-
-
-def get_peer_status_expired(peer: sqlite3.Row | Mapping[str, object]) -> bool:
-    """Return True when the peer is expired but not soft-deleted."""
-    if integrity.is_peer_deleted(peer):
-        return False
-    return not integrity.is_peer_active(peer)
 
 
 def validate_state(

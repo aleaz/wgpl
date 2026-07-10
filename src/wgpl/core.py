@@ -1043,7 +1043,7 @@ def _emit_client_config(
 ) -> str:
     """Emit client config after resolve, preflight, and export validation."""
     canonical_id = resolve_peer_ref(
-        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
+        peer_id, interface_ref, access=PeerAccess.EXPORT_SECRET
     )
     peer = db.get_peer(canonical_id)
     if not peer:
@@ -1096,7 +1096,7 @@ def get_peer_config_payload(
         peer_id, allowed_ips=allowed_ips, interface_ref=interface_ref
     )
     canonical_id = resolve_peer_ref(
-        peer_id, interface_ref, policy=PeerResolvePolicy.EXPORT_SECRET
+        peer_id, interface_ref, access=PeerAccess.EXPORT_SECRET
     )
     peer = db.get_peer(canonical_id)
     if not peer or not integrity.is_peer_active(peer):
@@ -1605,13 +1605,11 @@ def update_peer(
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
-        resolve_policy = (
-            PeerResolvePolicy.MUTATE_INACTIVE
-            if not active_only
-            else PeerResolvePolicy.READ_ONLY
+        resolve_access = (
+            PeerAccess.MUTATE if not active_only else PeerAccess.READ_PUBLIC
         )
         canonical_id = resolve_peer_ref(
-            peer_ref, str(iface_id), policy=resolve_policy, conn=conn
+            peer_ref, str(iface_id), access=resolve_access, conn=conn
         )
         peer = db.get_peer(canonical_id, conn=conn)
         if not peer:

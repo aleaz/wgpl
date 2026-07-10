@@ -933,7 +933,7 @@ def peer_remove(
 ) -> None:
     try:
         canonical_id = core.resolve_peer_ref(
-            peer_id, interface, policy=core.PeerResolvePolicy.MUTATE_INACTIVE
+            peer_id, interface, access=core.PeerAccess.MUTATE
         )
         core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
@@ -1286,7 +1286,7 @@ def peer_qr(
             with os.fdopen(fd, "wb") as f:
                 f.write(png_bytes)
             canonical_id = core.resolve_peer_ref(
-                peer_id, interface, policy=core.PeerResolvePolicy.EXPORT_SECRET
+                peer_id, interface, access=core.PeerAccess.EXPORT_SECRET
             )
             if ctx.obj.get("json"):
                 _output(

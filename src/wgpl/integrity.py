@@ -348,20 +348,6 @@ def assert_exportable_peer(
             validate_wire_safe_text(str(effective_dns), "dns")
 
 
-def validate_wire_peer_fields(peer: sqlite3.Row | Mapping[str, object]) -> None:
-    """Validate peer wire-safe text fields (activation and row scans)."""
-    name = str(peer["name"])
-    if not _PEER_NAME_RE.match(name):
-        raise WgplException(f"Peer name '{name}' is not valid for activation")
-    validate_wire_public_key(str(peer["public_key"]))
-    validate_wire_safe_text(str(peer["ip_address"]), "ip_address")
-    psk = peer["preshared_key"] if "preshared_key" in _peer_keys(peer) else None
-    if psk:
-        validate_wire_preshared_key(str(psk))
-    _validate_optional_wire_mtu(peer, "mtu")
-    _validate_optional_wire_keepalive(peer, "keepalive")
-
-
 def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) -> None:
     """Validate interface fields embedded in WireGuard configuration output."""
     name = str(iface["name"])
