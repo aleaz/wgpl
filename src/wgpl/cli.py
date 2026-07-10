@@ -32,7 +32,9 @@ _HINT_MESSAGES = {
     "apply_server": "Run wgpl apply or interface export to sync the server.",
 }
 
-app = typer.Typer(help="WGPL - WireGuard Peer Manager (Lite)")
+app = typer.Typer(
+    help="WGPL — declarative hub-and-spoke VPN intent CLI (WireGuard Peer Lite)"
+)
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
 node_app = typer.Typer(help="Manage device identities (nodes)")
 peer_app = typer.Typer(help="Manage WireGuard peers")

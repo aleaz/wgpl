@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Aligned classifier, README badge, CLI tagline, and package description with the hub-and-spoke intent identity (no longer “Peer Manager” / Beta framing)
+- Documented CLI/JSON compatibility promise: no breaking CLI commands/flags or public `--json` field names without a major version bump (see README)
 - Peers now reference a global node via `peers.node_id`; the `peers.name` column is removed (peer read paths JOIN `nodes` and expose the node name transparently). Device names are managed through `wgpl node`; `peer update` no longer accepts `--name` (rename with `node update`). Pre-release schema change — no migration, nothing was published
 - A node attaches to a given interface at most once while active (partial unique index `idx_peers_active_node`); reclaiming an inactive peer slot is keyed by IP and `node_id`
 - Audit trail gains a `node` entity type and node events; peer audit metadata records `node_id` for device provenance

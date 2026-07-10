@@ -3,9 +3,11 @@
 [![CI](https://github.com/aleaz/wgpl/actions/workflows/ci.yml/badge.svg)](https://github.com/aleaz/wgpl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)
+![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
 
 **WGPL (WireGuard Peer Lite)** is a disconnected Python CLI for **hub-and-spoke VPN topologies**. You declare routing **intent** in SQLite (the single source of truth); WGPL derives WireGuard `AllowedIPs`, allocates IPv4 addresses, tracks peer lifecycle and audit, and applies hub changes with **zero downtime** (`wg syncconf`). You bring your own OS interface (BYOI).
+
+**Compatibility (1.0.x):** The `1.0.x` line follows [Semantic Versioning](https://semver.org/). Patch and minor releases in `1.0.x` will not break existing CLI commands, flags, or public `--json` field names. Breaking CLI or JSON changes require a new major version (`2.0.0`).
 
 **Start here:** [Quick Start](#quick-start) · [Routing intent](#routing-intent) · [Documentation map](#documentation-map)
 

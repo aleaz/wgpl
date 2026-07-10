@@ -1,14 +1,14 @@
 [project]
 name = "wgpl"
 version = "1.0.0"
-description = "WireGuard Peer Lite (WGPL) - Minimalist, secure, and automated WireGuard peer manager."
+description = "WGPL (WireGuard Peer Lite) — disconnected CLI for declarative hub-and-spoke IPv4 VPN intent (SQLite SSOT, BYOI)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Alejandro Azario", email = "alejandroazario@gmail.com" }]
 keywords = ["wireguard", "vpn", "cli", "peers", "sqlite"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
