@@ -55,4 +55,6 @@ attachment to one interface. Node names are **globally unique**.
 1. Mutations update the database only — run **`wgpl apply`** (or remote `interface export | ssh … wg syncconf`) to push changes to WireGuard.
 2. After **`db restore`**, run **`validate`** then **`apply`** on each interface you manage.
 3. Multi-interface hosts: always pass **`-i`** for `peer config`, `peer qr`, `peer show --show-secrets`, and scoped history.
-4. Common traps (forgot `apply`, `-i`, DB permissions, `peer update` argument order): [runbook — Troubleshooting](runbook.md#troubleshooting).
+4. Common traps (forgot `apply`, `-i`, DB permissions, `peer update` argument order, role/policy field clears): [runbook — Troubleshooting](runbook.md#troubleshooting).
+5. `peer update --role endpoint` clears `routed_networks`; non-`custom` `--allowed-ips-policy` clears `custom_allowed_ips`.
+6. Pin `WGPL_DB_PATH` / `--db` when mixing `sudo apply` with non-root mutations.

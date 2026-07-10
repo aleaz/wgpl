@@ -1,5 +1,9 @@
 name: WGPL GitOps Pipeline
 
+# ILLUSTRATIVE ONLY — insecure defaults for demos.
+# Do not use root SSH, keys written to disk, or production secrets as shown below.
+# Prefer short-lived credentials, least privilege, and a pinned WGPL_DB_PATH.
+
 # This workflow reads a desired state (e.g., a YAML file with peers)
 # and synchronizes the VPN Gateway seamlessly whenever code is pushed.
 on:

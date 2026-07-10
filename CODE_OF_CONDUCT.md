@@ -42,7 +42,14 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers via GitHub issues or security advisories.
+reported **privately** to the project maintainers at
+**alejandroazario@gmail.com**. Do **not** use public GitHub issues for Code of
+Conduct reports.
+
+Security vulnerabilities are reported separately via
+[GitHub Security Advisories](https://github.com/aleaz/wgpl/security/advisories/new)
+(see [SECURITY.md](SECURITY.md)).
+
 All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution

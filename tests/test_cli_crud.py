@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 from typer.testing import CliRunner
@@ -96,13 +97,19 @@ def test_cli_peer_remove_already_deleted_raises_not_found(wgpl_db: str) -> None:
 
     second = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
     assert second.exit_code == 0
-    assert "Removed peer" in second.stderr
+    assert "Soft-deleted peer" in second.stderr
 
 
-def test_cli_interface_remove_not_found(wgpl_db: str) -> None:
-    result = runner.invoke(app, ["interface", "remove", "missing"])
-
-    assert result.exit_code == 1
+def test_cli_help_skips_database_open(
+    wgpl_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Subcommand --help must not require a readable database."""
+    monkeypatch.setenv("WGPL_DB_PATH", "/root/forbidden-wgpl.db")
+    # CliRunner does not rewrite sys.argv; the CLI checks argv for --help.
+    monkeypatch.setattr(sys, "argv", ["wgpl", "peer", "add", "--help"])
+    result = runner.invoke(app, ["peer", "add", "--help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.stdout or "help" in result.stdout.lower()
 
 
 def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(

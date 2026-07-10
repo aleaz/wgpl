@@ -370,7 +370,21 @@ Cross-check active peers against your identity source. Remove stale access with
 | `WGPL_EXEC_CMD` | Optional audit metadata (sanitized, bounded) |
 
 Ensure the database path is a regular file with mode `600`, owned by the operator.
-Symlinks at `WGPL_DB_PATH` are rejected.
+Symlinks at `WGPL_DB_PATH` are rejected. Prefer a dedicated directory with mode
+`700` for the DB: SQLite may create `-wal` / `-shm` sidecars that can contain
+secrets; keep the parent directory private.
+
+### Audit log growth
+
+`audit_events` is append-only (no in-place delete). Archive periodically:
+
+```bash
+wgpl db dump -o archive-$(date +%Y%m).db
+chmod 600 archive-$(date +%Y%m).db
+```
+
+After a large archive, operators may `VACUUM` an offline copy for size; do not
+expect WGPL to prune audit history in 1.0.x.
 
 For integrity monitoring, checksum a `wgpl db dump -o …` artifact (or an offline
 copy). Do not rely on a raw hash of the live `.db` file alone: SQLite may rewrite
@@ -387,7 +401,8 @@ WireGuard does not change until you push:
 
 ```bash
 wgpl validate wg0
-sudo wgpl apply wg0
+sudo --preserve-env=WGPL_DB_PATH wgpl apply wg0
+# or: sudo wgpl --db "$HOME/.wgpl.db" apply wg0
 # remote hub:
 wgpl interface export wg0 | ssh hub 'wg syncconf wg0 /dev/stdin'
 ```
@@ -404,16 +419,16 @@ wgpl peer qr PEER_ID -i wg0
 wgpl peer show PEER_ID --show-secrets -i wg0
 ```
 
-### Permission denied on the database / `--help` fails
+### Permission denied on the database
 
 The default path is `~/.wgpl.db` (mode `600`). If the file is owned by another
-user (for example after a `sudo` run), open fails — including some `--help`
-paths that open the DB. Use a writable path or fix ownership:
+user (for example after a bare `sudo wgpl apply` without a shared `--db`),
+open fails. `--help` / `--version` do **not** open the database. Fix ownership
+or pin a path you own:
 
 ```bash
-wgpl --db /tmp/wgpl-ops.db --help
-# or
 export WGPL_DB_PATH=/path/you/own/wgpl.db
+wgpl --db /path/you/own/wgpl.db peer list
 ```
 
 ### `peer update` argument order
@@ -432,3 +447,10 @@ wgpl peer remove wg0 PEER_ID
 
 Rename a device with `wgpl node update REF --name NEW` — `peer update` has no
 `--name`.
+
+### Routing fields cleared on role / policy change
+
+Setting `--role endpoint` clears `routed_networks` (subnet-router LANs are
+invalid for endpoints). Setting `--allowed-ips-policy` to anything other than
+`custom` clears `custom_allowed_ips`. Re-set those fields explicitly if you
+still need them.

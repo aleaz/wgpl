@@ -168,6 +168,11 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _is_help_invocation() -> bool:
+    """True when the user asked for help (skip DB open)."""
+    return any(arg in {"-h", "--help"} for arg in sys.argv[1:])
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -193,6 +198,9 @@ def main(
 
     # Inject execution context for auditing
     os.environ["WGPL_EXEC_CMD"] = " ".join(sys.argv)
+
+    if _is_help_invocation():
+        return
 
     try:
         core.ensure_database()
@@ -287,6 +295,7 @@ def interface_add(
         help="Extra CIDRs behind the hub for split-tunnel client configs",
     ),
 ) -> None:
+    """Register a hub in the database (BYOI: does not create the OS WireGuard netdev)."""
     try:
         result = core.add_interface(
             name,
@@ -304,6 +313,7 @@ def interface_add(
             _output(ctx, result)
         else:
             console.print(f"[green]Added interface {name}[/green]")
+            _print_hints(["apply_server"])
     except InterfaceAlreadyExistsError:
         _exit_error(ctx, f"Interface {name} already exists.")
     except (WgplException, ValueError) as e:
@@ -399,7 +409,10 @@ def interface_export(
 def peer_show(
     ctx: typer.Context,
     interface: str | None = typer.Option(
-        None, help="Interface name or ID (e.g. wg0 or 1)"
+        None,
+        "--interface",
+        "-i",
+        help="Interface name or ID (required when >1 interface for secrets)",
     ),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
     show_secrets: bool = typer.Option(
@@ -824,6 +837,7 @@ def peer_add(
                 f"[green]Added peer {result['name']}{created_note} "
                 f"({result['ip_address']}{dns_note})[/green]"
             )
+            _print_hints(["apply_server"])
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
     except (WgplException, ValueError) as e:
@@ -939,7 +953,18 @@ def peer_remove(
         if ctx.obj.get("json"):
             _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
         else:
-            console.print(f"[green]Removed peer {peer_id}[/green]")
+            if hard:
+                console.print(
+                    f"[green]Hard-deleted peer {peer_id}. "
+                    "Run wgpl apply (or interface export) to sync the hub.[/green]"
+                )
+            else:
+                console.print(
+                    f"[green]Soft-deleted peer {peer_id}. "
+                    "Run wgpl apply to sync the hub; "
+                    "wgpl peer prune to permanently remove inactive rows.[/green]"
+                )
+            _print_hints(["apply_server"])
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -964,7 +989,10 @@ def peer_prune(
         _exit_error(ctx, str(e))
 
 
-@peer_app.command("update")
+@peer_app.command(
+    "update",
+    epilog="Argument order: INTERFACE then PEER_ID (unlike peer show / config / qr).",
+)
 def peer_update(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
@@ -1484,7 +1512,7 @@ def apply(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name to sync (e.g. wg0)"),
 ) -> None:
-    """Syncs the WireGuard interface with the database state."""
+    """Push DB peer state to an existing OS WireGuard interface via wg syncconf (BYOI)."""
     try:
         core.sync_interface(interface)
         if ctx.obj.get("json"):

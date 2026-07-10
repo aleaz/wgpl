@@ -841,3 +841,34 @@ def test_update_peer_resolve_uses_transaction_connection(
 
     assert seen_conn == [seen_conn[0]]
     assert seen_conn[0] is not None
+
+
+def test_update_peer_role_endpoint_clears_routed_networks(wg0_interface: str) -> None:
+    peer = core.add_peer(
+        wg0_interface,
+        "site",
+        role="subnet_router",
+        routed_networks="192.168.1.0/24",
+        keepalive=25,
+    )
+    assert peer["routed_networks"] == "192.168.1.0/24"
+    updated = core.update_peer(wg0_interface, str(peer["id"]), role="endpoint")
+    assert updated["role"] == "endpoint"
+    assert updated["routed_networks"] is None
+
+
+def test_update_peer_non_custom_policy_clears_custom_allowed_ips(
+    wg0_interface: str,
+) -> None:
+    peer = core.add_peer(
+        wg0_interface,
+        "custompeer",
+        allowed_ips_policy="custom",
+        custom_allowed_ips="10.9.9.0/24",
+    )
+    assert peer["custom_allowed_ips"] == "10.9.9.0/24"
+    updated = core.update_peer(
+        wg0_interface, str(peer["id"]), allowed_ips_policy="vpn_only"
+    )
+    assert updated["allowed_ips_policy"] == "vpn_only"
+    assert updated["custom_allowed_ips"] is None

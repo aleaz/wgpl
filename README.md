@@ -133,28 +133,35 @@ WGPL is a **local, auditable intent store** with deterministic derivation — no
 
 ### 1. Install
 
-**Option A: Standalone Binary (Recommended for Linux Routers)**
-
-No dependencies required.
-
-```bash
-curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 -o /usr/local/bin/wgpl
-chmod +x /usr/local/bin/wgpl
-```
-
-> **Update Note:** The standalone binary must be updated manually by re-running this command when a new release is published.
-
-**Option B: Python / uv (Recommended for Developers & Admins)**
-
-Requires Python 3.12+.
+**Recommended: Python / uv** (Python 3.12+)
 
 ```bash
 uv tool install wgpl
+# or: pip install wgpl
+```
+
+**Experimental: standalone Linux binary**
+
+Unsigned release artifact for air-gapped routers. Prefer `uv`/`pip` when possible.
+Verify the checksum from the GitHub Release (`SHA256SUMS`) before running.
+
+```bash
+curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 \
+  -o /usr/local/bin/wgpl
+# Verify SHA-256 against SHA256SUMS from the same release, then:
+chmod +x /usr/local/bin/wgpl
 ```
 
 **Prerequisite (BYOI):** Create the hub WireGuard interface with `wg-quick` (e.g. `wg0`) before `wgpl apply` can sync peers to the kernel.
 
 ### 2. Register a hub and attach a device
+
+Pin a database path so `sudo apply` and non-root mutations share the same SSOT:
+
+```bash
+export WGPL_DB_PATH="$HOME/.wgpl.db"
+# or pass --db "$HOME/.wgpl.db" on every command
+```
 
 A **WGPL interface** row is the hub record for one VPN domain (you may name it `wg0` to match your OS device). The **server endpoint** is where clients connect (`vpn.example.com` below) — not the same as `peer.role = endpoint` (an end-user device).
 
@@ -180,7 +187,8 @@ Canonical flow: **validate → apply → explain → distribute**.
 
 ```bash
 wgpl validate wg0
-sudo wgpl apply wg0
+sudo --preserve-env=WGPL_DB_PATH wgpl apply wg0
+# equivalent: sudo wgpl --db "$HOME/.wgpl.db" apply wg0
 
 # Inspect derived routes (hub/client AllowedIPs; LAN↔LAN checklist for subnet routers)
 wgpl peer explain <PEER_REF>

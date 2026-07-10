@@ -121,14 +121,16 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) is the objective fin
 
 If you do **not** use Antigravity, you can remove local AG Kit with `rm -rf .agents/ .temp_ag_kit` to reduce editor noise.
 
-## GitHub settings (after making the repo public)
+## Repository requirements (maintainers)
 
-Configure in the repository **Settings** on GitHub:
+Before treating the project as production-published or org-ready:
 
-1. **About** — add description and topics: `wireguard`, `vpn`, `python`, `cli`, `sqlite`
-2. **Security** — enable Dependabot alerts and secret scanning
-3. **Branches** — protect `main` (require CI status checks before merge)
-4. **Releases** — when ready to publish, create an annotated tag `vX.Y.Z` matching the version in `pyproject.toml`
+1. **Branch protection** on `main` — require CI status checks before merge
+2. **GitHub Environment `pypi`** — required reviewers (and optional wait timer) for the release workflow
+3. **Security** — Dependabot alerts and secret scanning enabled
+4. **Releases** — annotated tag `vX.Y.Z` must match `version` in `pyproject.toml` (enforced in CI)
+
+See [MAINTAINERS.md](MAINTAINERS.md).
 
 Pre-push checklist:
 

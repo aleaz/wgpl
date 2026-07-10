@@ -198,6 +198,17 @@ peers have no `name` column). Routing intent columns:
 triggers recreated on every `init_db()` (never `IF NOT EXISTS` for security triggers).
 Weakened or extra triggers are **detected on every live DB open**; `wgpl db doctor` diagnoses issues and `wgpl db doctor --repair` reinstalls triggers and normalizes `deleted_at`.
 
+### Schema evolution
+
+There is **no in-place migrator**. `init_db()` uses `CREATE TABLE IF NOT EXISTS` and
+stamps `PRAGMA user_version`; the restore/open contract checks **object names**
+(tables, indexes, triggers), not column-level diffs. `wgpl db doctor --repair`
+reinstalls audit triggers and normalizes `deleted_at` — it does not upgrade schemas.
+
+A breaking schema change requires a **new major version** and operator
+`wgpl db dump` / `restore` (or reprovision). Do not expect automatic `ALTER TABLE`
+upgrades across majors.
+
 ## Scope limits
 
 - IPv4 address pools and peer IPs only.

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Scope (is / is not):** WGPL is a disconnected CLI for declarative hub-and-spoke IPv4 VPN intent (SQLite SSOT, BYOI). It is **not** a daemon/control plane, full-mesh overlay, direct site-to-site without a hub, IPv6 manager, WireGuard `.conf` importer, or self-service portal product (the FastAPI example is illustrative only). See README.
 - **Known limitations:** Bring-your-own interface (BYOI) — WGPL does not create OS interfaces or configure hub forwarding/firewall/NAT; mutations update SQLite only (no auto-apply); remote hub sync is an operator pipe (`wgpl interface export | ssh … wg syncconf`); **IPv4-only** address pools, peer IPs, DNS, and AllowedIPs.
+- **Schema evolution:** no in-place migrator; breaking schema changes require a new major version plus `db dump`/`restore` (see DESIGN.md).
 
 ### Added
 
@@ -37,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CLI skips database open for `--help`; permission-denied guidance prefers `--db` / ownership over bare `sudo`
+- Mutations (`peer add` / `remove`, `interface add`) print apply hints; soft-delete messaging clarifies prune
+- README install path prefers `uv`/`pip`; standalone binary marked experimental with checksum guidance; Quick Start pins `WGPL_DB_PATH` for sudo apply
+- Release workflow: tag must match `pyproject.toml` version; PyInstaller pinned; binary built before PyPI publish; `SHA256SUMS` attached to GitHub Release
+- CI: Python 3.12+3.13 matrix; `uv sync --frozen`; Docker images publish on version tags only; Dockerfile uses `uv.lock`
+- Reject IPv6 interface endpoints; `peer show` accepts `-i`; BYOI noted on `interface add` / `apply` help
+- Governance: CoC private contact, MAINTAINERS.md, CODEOWNERS catch-all, LICENSE copyright aligned to legal name
 - Aligned classifier, README badge, CLI tagline, and package description with the hub-and-spoke intent identity (no longer “Peer Manager” / Beta framing)
 - Documented CLI/JSON compatibility promise: no breaking CLI commands/flags or public `--json` field names without a major version bump (see README)
 - Documentation gate: `docs/cli.md` documents `interface show` and `db doctor [--repair]`; DESIGN/README/SECURITY/routing emit narrative describes `wireformat` as emit formatting with shared validation/cascade (not “formatting only”); `docs/runbook.md` adds Troubleshooting (forgot `apply`, `-i`, DB/`--db`, `peer update` arg order)

@@ -315,7 +315,11 @@ def get_current_actor() -> str:
 
 
 def init_db(path: str | None = None) -> None:
-    """Initializes the database schema and enforces restrictive permissions."""
+    """Initializes the database schema and enforces restrictive permissions.
+
+    No in-place schema migrator: breaking changes require a new major version
+    and dump/restore (see DESIGN.md — Schema evolution).
+    """
     if path:
         os.environ["WGPL_DB_PATH"] = _normalize_db_path(path)
 

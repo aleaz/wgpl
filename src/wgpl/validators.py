@@ -34,23 +34,28 @@ def validate_allowed_ips(allowed_ips: str) -> str:
 
 
 def validate_endpoint(endpoint: str) -> str:
-    """Validate that endpoint is a valid IP address or FQDN."""
+    """Validate that endpoint is a valid IPv4 address or FQDN (IPv6 not supported)."""
     endpoint = endpoint.strip()
     if not endpoint:
         raise ValueError("Endpoint cannot be empty")
     try:
-        ipaddress.ip_address(endpoint)
-        return endpoint
+        addr = ipaddress.ip_address(endpoint)
     except ValueError:
-        pass
+        addr = None
+    if addr is not None:
+        if isinstance(addr, ipaddress.IPv6Address):
+            raise ValueError(
+                f"Invalid endpoint '{endpoint}'. WGPL supports IPv4 endpoints only."
+            )
+        return endpoint
 
     hostname_re = re.compile(
         r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*"
-        r"([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$"
+        r"([A-Za-z0-9]|[A-Za-z0-9][a-zA-Z0-9\-]*[A-Za-z0-9])$"
     )
     if not hostname_re.match(endpoint):
         raise ValueError(
-            f"Invalid endpoint '{endpoint}'. Must be a valid IP or hostname."
+            f"Invalid endpoint '{endpoint}'. Must be a valid IPv4 address or hostname."
         )
     return endpoint
 

@@ -77,7 +77,8 @@ def secure_open(
     except PermissionError:
         raise WgplException(
             f"Permission denied to access database at {path}. "
-            "Try running with sudo or check file permissions."
+            "Check file ownership and mode (expect 600), or pass --db / set "
+            "WGPL_DB_PATH to a path you can read and write."
         ) from None
 
 
@@ -213,7 +214,7 @@ def _fchmod_path(fd: int, path: str) -> None:
     except PermissionError:
         raise WgplException(
             f"Permission denied to secure database at {path}. "
-            "Try running with sudo or check file ownership."
+            "Check file ownership and mode, or use --db / WGPL_DB_PATH."
         ) from None
 
 

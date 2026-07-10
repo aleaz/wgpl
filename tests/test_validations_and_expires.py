@@ -16,6 +16,8 @@ def test_validate_endpoint_invalid():
         validate_endpoint("")
     with pytest.raises(ValueError):
         validate_endpoint("http://example.com")
+    with pytest.raises(ValueError, match="IPv4"):
+        validate_endpoint("2001:db8::1")
 
 
 def test_validate_public_key_valid():
