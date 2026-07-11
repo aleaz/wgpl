@@ -76,6 +76,9 @@ venv.bak/
 .temp_ag_kit
 .DS_Store
 
+# Local-only notes (temporary study guides, scratch) — not versioned
+.local/
+
 # Linters & Typecheckers
 .mypy_cache/
 .ruff_cache/
