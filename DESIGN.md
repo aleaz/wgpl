@@ -62,6 +62,7 @@ Each peer attachment declares how the node participates on that interface:
 The same physical device connected to two hubs is **one node** with **two peer
 rows** (one per interface). Each attachment carries its own `role` and
 `routed_networks`; the shared identity (name, desc) lives once on the node.
+Rename a device with `wgpl node update` — `peer update` has no `--name`.
 
 ### Node lifecycle
 

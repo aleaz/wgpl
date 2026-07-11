@@ -105,7 +105,9 @@ Do not rely on gitignored local paths (for example `.agents/`) for architecture 
 
 - Run `npx @vudovn/ag-kit@2026.6.29 init` to create `.agents/` on your machine.
 - Generic AG Kit skills and workflows are not curated for WGPL; prefer `.cursor/` above.
-- If you use Antigravity memory, keep [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) aligned with `wgpl-architecture.mdc`.
+- If you keep a local Antigravity memory file, keep it aligned with
+  [`.cursor/rules/wgpl-architecture.mdc`](.cursor/rules/wgpl-architecture.mdc)
+  (do not treat gitignored paths as the project source of truth).
 
 ### Maintaining AI context (anti-drift)
 
@@ -115,7 +117,7 @@ When architecture, security, or CI validation commands change, update sources in
 2. Keep [`.cursor/rules/wgpl-git-agent.mdc`](.cursor/rules/wgpl-git-agent.mdc) aligned if git agent policy changes.
 3. Update [`.cursor/skills/wgpl-dev/SKILL.md`](.cursor/skills/wgpl-dev/SKILL.md) only if it mentions the changed behavior explicitly.
 4. Update this file (Validation / Architecture invariants sections) and the PR template if the human checklist changes.
-5. If you use Antigravity locally, sync [`.agents/memory/wgpl-invariants.md`](.agents/memory/wgpl-invariants.md) from step 1.
+5. If you use Antigravity locally, sync any local memory file from step 1.
 
 Do not add duplicate checklists to the skill — link to this file instead.
 Do not add generic always-on Cursor rules (benchmark prompts, web-app templates); they contradict WGPL invariants.

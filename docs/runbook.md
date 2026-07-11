@@ -53,6 +53,35 @@ Mutations (`peer add`, `peer remove`, `peer update`, `peer prune`, `interface up
 update the SQLite database only. The kernel stays stale until `apply` or remote
 `syncconf` runs. This is by design.
 
+### Temporary access (TTL)
+
+```bash
+wgpl peer add wg0 "Contractor_Audit" --expires 48h
+```
+
+Expired peers are ignored by `apply` and `interface export` until pruned.
+
+### Deletion and garbage collection
+
+```bash
+wgpl peer remove wg0 <PEER_REF>          # soft delete — IP freed, audit retained
+wgpl peer prune wg0                      # hard-delete inactive peer rows
+wgpl peer remove wg0 <PEER_REF> --hard   # immediate physical delete + audit event
+wgpl node prune                          # remove orphan device identities
+```
+
+### Audit trail
+
+```bash
+wgpl interface history wg0
+wgpl peer history wg0 <PEER_REF>
+wgpl node history <NODE_REF>
+```
+
+The `audit_events` table is append-only (SQLite triggers block UPDATE/DELETE).
+There is no `audit prune` — audit rows are never deleted in-place by design.
+Retention and compliance archiving: [Audit log growth](#audit-log-growth).
+
 ## Hub routing relay
 
 WGPL derives WireGuard `AllowedIPs` for hub-and-spoke topologies (remote access,
@@ -230,19 +259,37 @@ and LAN↔LAN becomes intermittent. `validate` emits
 
 ### MikroTik / RouterOS hub
 
-On RouterOS v7, map WGPL **hub AllowedIPs** to WireGuard `allowed-address`:
+Map WGPL **hub AllowedIPs** to WireGuard `allowed-address` on RouterOS v7.
+Full import workflow: [Deployment patterns — MikroTik](#mikrotik-routeros-v7).
 
-```bash
-wgpl --json peer list | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
+## Deployment patterns (BYOI)
+
+Run WGPL against hubs you already operate. WGPL does not manage `iptables` or
+system routing — tools that hijack those layers often break Docker, Kubernetes,
+or corporate firewalls.
+
+```mermaid
+graph TD
+  DB[(WGPL SQLite SSOT)]
+  CLI[wgpl CLI]
+  Linux[Linux kernel wg0]
+  Remote[Remote servers]
+  Router[RouterOS / edge]
+  Mobile[iOS / Android]
+
+  DB --> CLI
+  CLI -->|Zero-downtime reload| Linux
+  CLI -->|SSH / Ansible| Remote
+  CLI -->|JSON export| Router
+  CLI -->|QR / conf| Mobile
 ```
 
-Import the script on the router. Subnet-router peers need `/32` plus their LAN
-prefix in `allowed-address`; endpoints need only `/32`. WGPL JSON includes the
-derived list so you do not hard-code `/32` only.
+### Native Linux server (systemd)
 
-## Automated lifecycle (systemd)
+<a id="automated-lifecycle-systemd"></a>
 
-Prune expired peers and hot-reload the kernel on a schedule:
+Automate prune and hot-reload on the VPN gateway. Pin the same DB path the
+operator uses (example assumes `/var/lib/wgpl/wgpl.db`):
 
 ```ini
 # /etc/systemd/system/wgpl-sync.service
@@ -252,8 +299,9 @@ After=wg-quick@wg0.service
 
 [Service]
 Type=oneshot
+Environment=WGPL_DB_PATH=/var/lib/wgpl/wgpl.db
 ExecStartPre=/usr/local/bin/wgpl peer prune wg0
-ExecStart=/usr/bin/sudo /usr/local/bin/wgpl apply wg0
+ExecStart=/usr/bin/sudo --preserve-env=WGPL_DB_PATH /usr/local/bin/wgpl apply wg0
 ```
 
 ```ini
@@ -270,6 +318,80 @@ WantedBy=timers.target
 ```
 
 Enable: `systemctl enable --now wgpl-sync.timer`
+
+### Remote Linux servers (CI/CD)
+
+```bash
+wgpl validate wg0
+wgpl interface export wg0 > hub-peers.conf
+cat hub-peers.conf | ssh root@hub-host "wg syncconf wg0 /dev/stdin"
+```
+
+One-liner form (same effect):
+
+```bash
+wgpl interface export wg0 | ssh root@hub-host "wg syncconf wg0 /dev/stdin"
+```
+
+### MikroTik (RouterOS v7)
+
+```bash
+wgpl --json peer list --interface wg0 | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
+```
+
+Import `mikrotik_sync.rsc` on the router. Subnet-router peers need `/32` plus
+their LAN prefix in `allowed-address`; endpoints need only `/32`. WGPL JSON
+includes the derived list so you do not hard-code `/32` only.
+
+<a id="deployment-patterns-docker"></a>
+
+### Docker
+
+```bash
+alias wgpl='docker run --rm -it -v $(pwd)/wgpl-data:/data ghcr.io/aleaz/wgpl'
+wgpl interface list
+```
+
+To apply on the **host** kernel:
+
+```bash
+docker run --rm -v $(pwd)/wgpl-data:/data \
+  --cap-add NET_ADMIN --network host \
+  ghcr.io/aleaz/wgpl apply wg0
+```
+
+## Client provisioning
+
+Export on the **management host**, then install on the end-user device. For
+non-trivial routing, run `wgpl peer explain` before distributing configs.
+
+### Mobile (iOS / Android)
+
+```bash
+wgpl peer qr <PEER_REF>
+wgpl peer qr <PEER_REF> -o alice-phone.png
+```
+
+### Desktop (Windows / macOS)
+
+```bash
+wgpl peer config <PEER_REF> > alice.conf
+chmod 600 alice.conf
+```
+
+Import `alice.conf` into the official WireGuard desktop app.
+
+### Linux (end-user machine)
+
+On the **client laptop or workstation** (not the VPN hub), install the exported
+config. The interface name is a local choice (`wg-wgpl`, `wg0`, etc.):
+
+```bash
+# Run on the end-user machine after copying alice.conf
+sudo cp alice.conf /etc/wireguard/wg-wgpl.conf
+sudo chmod 600 /etc/wireguard/wg-wgpl.conf
+sudo systemctl enable --now wg-quick@wg-wgpl
+```
 
 ## Backup and disaster recovery
 
