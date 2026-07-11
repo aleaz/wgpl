@@ -390,6 +390,17 @@ For integrity monitoring, checksum a `wgpl db dump -o …` artifact (or an offli
 copy). Do not rely on a raw hash of the live `.db` file alone: SQLite may rewrite
 file bytes on open without changing logical table content.
 
+### Compliance and access reviews
+
+With proper OS-level access controls, centralized lifecycle and audit records can
+simplify SOC2 and ISO27001 access reviews.
+
+| Goal | Tool |
+| --- | --- |
+| Archive history for compliance | `wgpl db dump -o archive-YYYY-MM.db`; store off-host with `chmod 600` |
+| Remove inactive peer rows (not audit) | `wgpl peer prune <interface>` |
+| Query past events | `peer history` / `interface history` / `node history` |
+
 ## Troubleshooting
 
 Common operator traps (also summarized in [cli.md — Operational notes](cli.md#operational-notes)):
@@ -406,6 +417,13 @@ sudo --preserve-env=WGPL_DB_PATH wgpl apply wg0
 # remote hub:
 wgpl interface export wg0 | ssh hub 'wg syncconf wg0 /dev/stdin'
 ```
+
+### `apply` fails because the OS interface does not exist
+
+WGPL is BYOI: `wgpl apply` calls `wg syncconf` on an **existing** kernel
+interface. Create and bring up the netdev first (for example `wg-quick@wg0`),
+then register the same name in WGPL with the hub public key from
+`wg show <ifname> public-key`. See the README Quick Start BYOI section.
 
 ### `peer config` / `peer qr` asks for `-i`
 

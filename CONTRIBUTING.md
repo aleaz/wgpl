@@ -132,6 +132,12 @@ Before treating the project as production-published or org-ready:
 3. **Security** — Dependabot alerts and secret scanning enabled
 4. **Releases** — annotated tag `vX.Y.Z` must match `version` in `pyproject.toml` (enforced in CI)
 
+**Release cut smoke check** (before pushing `vX.Y.Z`):
+
+1. `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) is empty (or only post-release notes); release notes live under `[X.Y.Z]`
+2. `version` in `pyproject.toml` equals the tag without the `v` prefix
+3. [`.github/workflows/release.yml`](.github/workflows/release.yml) still builds `wgpl-linux-amd64` and attaches `SHA256SUMS` (matches README experimental binary section)
+
 See [MAINTAINERS.md](MAINTAINERS.md).
 
 Pre-push checklist:
