@@ -101,6 +101,15 @@ interfaces when traffic should relay — for example LAN A → hub → LAN B.
 | Remote client → hub LAN / internal nets | `interface.routed_networks`, split tunnel | `ip_forward` + FORWARD if hub LAN is a physical interface |
 | Site LAN ↔ site LAN via hub | Subnet routers + `all_remote_networks` | `ip_forward` + FORWARD on `wg0` (and often MASQUERADE off the uplink) |
 | Full tunnel (all traffic via hub) | `allowed_ips_policy=full_tunnel` | FORWARD + MASQUERADE on hub uplink if clients need Internet |
+| Bridge traffic between two VPN domains | Peer model only — see [routing — Bridging two hubs](routing.md#advanced-bridging-two-hubs-hub-as-subnet_router) | `ip_forward` + FORWARD between the **local hub** iface and the **bridge** iface on the host that terminates the bridge |
+
+### Bridging two hubs (operator pattern)
+
+When two hubs must exchange site LANs, treat the remote hub host as a
+`subnet_router` spoke (not a product “federation” feature). Full checklist and
+limits: [routing.md — Advanced: bridging two hubs](routing.md#advanced-bridging-two-hubs-hub-as-subnet_router).
+On the bridge host, forward between the domain’s hub WireGuard interface and the
+separate bridge interface that runs the peer config from the other hub.
 
 ### End-to-end workflow
 

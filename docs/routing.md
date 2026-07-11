@@ -152,6 +152,82 @@ declaratively.
 (pattern 6). You do not need direct site-to-site unless you require no central
 relay (latency, policy, or no hub host).
 
+## Advanced: bridging two hubs (hub as subnet_router)
+
+Prefer **one hub** when all sites must reach each other. When you already run
+**two VPN domains** (two `interfaces` rows) and need a **regional bridge**, you
+can reuse the normal peer model: register the remote hub host as a
+`subnet_router` spoke on the local hub. This is an **operator pattern**, not a
+separate topology type — there is no first-class “hub link” entity.
+
+```text
+Sites on domain 1 ---- HUB1 ==== bridge WG ==== HUB2 ---- Sites on domain 2
+                         ^                        ^
+              Peer Hub2_GW                 client iface
+              role=subnet_router           (peer config from HUB1)
+              routed_networks =            + ip_forward between
+              pool2 + LANs on domain 2     hub-local wg and bridge iface
+```
+
+### Sketch (same database, two interfaces)
+
+Assume disjoint CIDRs (required):
+
+| Domain | Hub pool | Example site LAN |
+|--------|----------|------------------|
+| HUB1 | `10.0.0.0/24` | `192.168.10.0/24` |
+| HUB2 | `10.1.0.0/24` | `192.168.40.0/24` |
+
+On **HUB1**, announce the remote side via a bridge peer:
+
+```bash
+wgpl peer add hub1 "Hub2_GW" --role subnet_router \
+  --routed-networks 10.1.0.0/24,192.168.40.0/24 \
+  --allowed-ips-policy all_remote_networks \
+  --keepalive 25
+wgpl validate hub1
+sudo wgpl apply hub1
+wgpl peer config Hub2_GW > hub2-to-hub1.conf
+```
+
+On **HUB2**:
+
+1. Install `hub2-to-hub1.conf` on a **separate** WireGuard interface (keep the
+   local hub netdev for domain-2 spokes).
+2. Enable `ip_forward` (and firewall `FORWARD`) between the local hub interface
+   and the bridge interface — see [runbook — Hub routing relay](runbook.md#hub-routing-relay).
+3. Keep domain-2 sites as usual (`subnet_router` / `endpoint` on HUB2); `apply`
+   on HUB2 as well.
+
+For **vice versa** (domain-2 sites reaching domain-1 LANs), mirror the pattern:
+suitable client AllowedIPs on the bridge (often `all_remote_networks` if domain-1
+sites already advertise), and/or a symmetric `Hub1_GW` peer on HUB2.
+
+### Operator checklist
+
+- [ ] Address pools and site LANs across domains are **disjoint**
+- [ ] Bridge peer `routed_networks` lists every remote prefix that must be
+      reachable (pool and/or site LANs — or a planned aggregate)
+- [ ] Bridge peer has effective **keepalive** when NAT is involved
+- [ ] `validate` + `apply` on **each** hub after intent changes
+- [ ] Host forwarding between hub-local and bridge interfaces
+- [ ] When you **add a site** on one domain, **update** the bridge peer’s
+      `routed_networks` on the other (advertisements are not automatic)
+- [ ] Bidirectional paths need an explicit return path (policy and/or mirror peer)
+
+### Not in scope today
+
+- Automatic sync of remote LANs when sites are added
+- Mesh of hubs or a dedicated hub-to-hub control channel
+- Multi-host / multi-database route propagation
+
+### Future direction
+
+Future versions may add optional helpers to keep bridge advertisements in sync
+when both VPN domains live in the same database. Automatic multi-host
+federation is not planned as part of the core disconnected CLI model. The
+hub-and-spoke-per-domain model remains.
+
 ## Routing invariants
 
 Formal rules enforced by `integrity.py` (mutation / export) and
@@ -244,6 +320,7 @@ WGPL = **complete hub-and-spoke IPv4 routing intent**, not a full
 ### Partially in scope (operator or future work)
 
 - **Hub relay forwarding** — config yes; `ip_forward` / iptables manual ([runbook](runbook.md#hub-routing-relay))
+- **Bridging two hubs** — operator pattern: remote hub host as `subnet_router` ([Advanced: bridging two hubs](#advanced-bridging-two-hubs-hub-as-subnet_router)); not a first-class topology
 - **Egress / exit node** — not supported in `routed_networks` (`0.0.0.0/0` rejected; use `full_tunnel` on clients)
 - **CLI `--allowed-ips` override** — ad-hoc export only (default is derived from policy)
 
