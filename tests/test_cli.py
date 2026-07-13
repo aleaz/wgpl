@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 import datetime
 import uuid
 
-from wgpl import core, db
+from wgpl import core, db, wireguard
 import wgpl.cli as cli_module
 from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
 
@@ -50,6 +50,7 @@ def test_public_peer_rows_redact_secrets(wgpl_db: str) -> None:
         {
             "id": "peer-id",
             "interface_id": "1",
+            "interface": None,
             "node_id": None,
             "name": "phone",
             "node": "phone",
@@ -89,6 +90,49 @@ def test_peer_list_json_redacts_secrets(wg0_interface: str) -> None:
     assert "private_key" not in peers[0]
     assert "preshared_key" not in peers[0]
     assert peers[0]["name"] == "json_peer"
+    assert peers[0]["interface"] == "wg0"
+    assert peers[0]["interface_id"]
+
+
+def test_peer_show_json_includes_interface_name(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "show_iface")
+    peer_id = str(peer["id"])
+
+    result = runner.invoke(app, ["--json", "peer", "show", peer_id])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["interface"] == "wg0"
+    assert payload["interface_id"]
+
+
+def test_peer_list_json_dual_interface_names(wgpl_db: str) -> None:
+    pk0 = wireguard.generate_keypair().public_key
+    pk1 = wireguard.generate_keypair().public_key
+    runner.invoke(
+        app, ["interface", "add", "wg0", "vpn0.example.com", pk0, "10.0.0.0/24"]
+    )
+    runner.invoke(
+        app,
+        [
+            "interface",
+            "add",
+            "wg1",
+            "vpn1.example.com",
+            pk1,
+            "10.0.1.0/24",
+            "--port",
+            "51821",
+        ],
+    )
+    core.add_peer("wg0", "on_wg0")
+    core.add_peer("wg1", "on_wg1")
+
+    result = runner.invoke(app, ["--json", "peer", "list"])
+
+    assert result.exit_code == 0
+    by_name = {p["name"]: p["interface"] for p in json.loads(result.stdout)}
+    assert by_name == {"on_wg0": "wg0", "on_wg1": "wg1"}
 
 
 def test_cli_version_flag() -> None:

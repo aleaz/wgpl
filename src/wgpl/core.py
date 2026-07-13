@@ -234,6 +234,8 @@ def peer_row_to_public_dict(
 
     Includes ``desc``, effective/override ``mtu`` and ``keepalive`` (same model
     as ``update_peer`` return values) for list/show JSON parity with human UI.
+    Includes ``interface`` (hub name) alongside ``interface_id`` when the
+    interface row is available.
     """
     iface_dns_map = iface_dns or {}
     interface_id = int(str(peer["interface_id"]))
@@ -250,9 +252,13 @@ def peer_row_to_public_dict(
     iface_keepalive = (
         _optional_int_field(iface, "keepalive") if iface is not None else None
     )
+    iface_name = _peer_optional_field(iface, "name") if iface is not None else None
+    if iface_name is not None:
+        iface_name = str(iface_name)
     return {
         "id": str(peer["id"]),
         "interface_id": str(interface_id),
+        "interface": iface_name,
         "node_id": (
             str(_peer_optional_field(peer, "node_id"))
             if _peer_optional_field(peer, "node_id") is not None

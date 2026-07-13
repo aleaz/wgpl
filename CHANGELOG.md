@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Peer `list` / `show` JSON includes additive `interface` (hub name) alongside existing `interface_id`
 - `fields.py` SSOT for entity `NAME_RE` and peer-over-interface DNS/MTU/keepalive cascade helpers
 - Collision subclasses `NodeAlreadyAttachedError` and `RoutedNetworkOverlapError` (inherit `PeerAlreadyExistsError` for CLI compatibility)
 - First-class **Node** entity: `nodes` table (globally unique `name`, optional `desc`) and `wgpl node` command group (`add`, `list`, `show`, `update`, `remove`, `prune`, `history`) for device identity independent of any tunnel
