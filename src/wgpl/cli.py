@@ -351,6 +351,7 @@ def interface_remove(
         help="Delete the interface and all peers (required when peers remain)",
     ),
 ) -> None:
+    """Remove an interface and optionally its associated peers."""
     try:
         core.remove_interface(interface, force=force)
         if ctx.obj.get("json"):
@@ -370,6 +371,7 @@ def interface_remove(
 
 @interface_app.command("list")
 def interface_list(ctx: typer.Context) -> None:
+    """List all interfaces."""
     try:
         data = core.list_interfaces()
         if ctx.obj.get("json"):
@@ -414,6 +416,7 @@ def interface_export(
         ..., help="Interface name or ID to export (e.g. wg0 or 1)"
     ),
 ) -> None:
+    """Export the server WireGuard configuration for an interface."""
     try:
         conf = core.get_interface_config(interface)
         if ctx.obj.get("json"):
@@ -442,6 +445,7 @@ def peer_show(
         help="Include preshared key in human-readable output",
     ),
 ) -> None:
+    """Show detailed information about a peer."""
     try:
         # Fetching peer data
         peers = core.list_peers(interface, expired_only=False, show_all=True)
@@ -499,6 +503,7 @@ def interface_show(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
 ) -> None:
+    """Show detailed information about an interface."""
     try:
         interface = core.get_interface_by_ref(name)
 
@@ -568,6 +573,7 @@ def interface_update(
         help="Remove interface routed_networks",
     ),
 ) -> None:
+    """Update an interface's settings."""
     try:
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
@@ -618,6 +624,7 @@ def node_add(
     name: str = typer.Argument(..., help="Globally unique device name"),
     desc: str | None = typer.Option(None, "--desc", help="Description of the device"),
 ) -> None:
+    """Register a new global device identity (node)."""
     try:
         result = core.add_node(name, desc=desc)
         if ctx.obj.get("json"):
@@ -630,6 +637,7 @@ def node_add(
 
 @node_app.command("list")
 def node_list(ctx: typer.Context) -> None:
+    """List all device identities (nodes)."""
     try:
         data = core.list_nodes()
         if ctx.obj.get("json"):
@@ -664,6 +672,7 @@ def node_show(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Node name or ID prefix"),
 ) -> None:
+    """Show detailed information about a node."""
     try:
         node = core.get_node_by_ref(ref)
         if ctx.obj.get("json"):
@@ -691,6 +700,7 @@ def node_update(
         False, "--clear-desc", help="Remove node description"
     ),
 ) -> None:
+    """Update a node's name or description."""
     try:
         if clear_desc and desc is not None:
             _exit_error(ctx, "Cannot use --desc and --clear-desc together.")
@@ -713,6 +723,7 @@ def node_remove(
         help="Remove the node and all its attachments (required when attachments remain)",
     ),
 ) -> None:
+    """Remove a node and optionally its attached peers."""
     try:
         core.remove_node(ref, force=force)
         if ctx.obj.get("json"):
@@ -725,6 +736,7 @@ def node_remove(
 
 @node_app.command("prune")
 def node_prune(ctx: typer.Context) -> None:
+    """Permanently remove orphaned nodes with no attachments."""
     try:
         removed = core.prune_nodes()
         if ctx.obj.get("json"):
@@ -742,6 +754,7 @@ def node_history(
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
+    """Show the audit event history for a node."""
     try:
         _validate_pagination(ctx, limit, offset)
         events = core.list_node_audit_history(ref, limit=limit, offset=offset)
@@ -828,6 +841,7 @@ def peer_add(
         help="Custom client AllowedIPs when --allowed-ips-policy=custom",
     ),
 ) -> None:
+    """Create a new peer and assign an IP address."""
     try:
         if (name is None) == (node is None):
             if name is None and node is None:
@@ -884,6 +898,7 @@ def interface_history(
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
+    """Show the audit event history for an interface."""
     try:
         _validate_pagination(ctx, limit, offset)
         events = core.list_interface_audit_history(name, limit=limit, offset=offset)
@@ -930,6 +945,7 @@ def peer_history(
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
+    """Show the audit event history for a peer."""
     try:
         _validate_pagination(ctx, limit, offset)
         events = core.list_peer_audit_history(
@@ -978,6 +994,7 @@ def peer_remove(
         False, "--hard", help="Physically delete the peer instead of soft-deleting"
     ),
 ) -> None:
+    """Soft-delete or permanently remove a peer."""
     try:
         canonical_id = core.resolve_peer_ref(
             peer_id, interface, access=core.PeerAccess.MUTATE
@@ -1007,6 +1024,7 @@ def peer_prune(
     ctx: typer.Context,
     interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
 ) -> None:
+    """Permanently remove expired or soft-deleted peers."""
     try:
         deleted = core.prune_peers(interface)
         if ctx.obj.get("json"):
@@ -1098,6 +1116,7 @@ def peer_update(
         help="Remove custom_allowed_ips",
     ),
 ) -> None:
+    """Update a peer's settings (IP, routing, overrides)."""
     try:
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
@@ -1156,12 +1175,18 @@ def peer_update(
 @peer_app.command("list")
 def peer_list(
     ctx: typer.Context,
-    interface: str | None = typer.Option(None, help="Filter by interface"),
+    interface: str | None = typer.Option(
+        None,
+        "--interface",
+        "-i",
+        help="Filter peers by interface",
+    ),
     expired: bool = typer.Option(False, "--expired", help="Show only expired peers"),
     all: bool = typer.Option(
-        False, "--all", help="Show all peers including deleted ones"
+        False, "--all", help="Show all peers including soft-deleted ones"
     ),
 ) -> None:
+    """List peers on an interface."""
     try:
         peers = core.list_peers(interface, expired_only=expired, show_all=all)
 
@@ -1236,6 +1261,7 @@ def peer_config(
         help="Interface name or ID (required when the database has more than one interface)",
     ),
 ) -> None:
+    """Generate the client WireGuard configuration file for a peer."""
     try:
         if allowed_ips is not None:
             _validate_allowed_ips(ctx, allowed_ips)
@@ -1337,6 +1363,7 @@ def peer_qr(
         help="Interface name or ID (required when the database has more than one interface)",
     ),
 ) -> None:
+    """Generate a QR code of the client configuration for a peer."""
     try:
         if allowed_ips is not None:
             _validate_allowed_ips(ctx, allowed_ips)
@@ -1442,11 +1469,12 @@ def db_doctor(
             return
 
         issues = core.diagnose_database()
+        has_error = any(issue.get("severity", "error") == "error" for issue in issues)
         if ctx.obj.get("json"):
             _output(
                 ctx,
                 {
-                    "status": "ok" if not issues else "error",
+                    "status": "ok" if not issues else ("error" if has_error else "warning"),
                     "issues": issues,
                 },
             )
@@ -1462,8 +1490,14 @@ def db_doctor(
                 )
                 code = _safe_markup(str(issue.get("code") or ""))
                 detail = _safe_markup(str(issue.get("detail") or ""))
-                console.print(f"[red]{iface_part}{peer_part}: {code} — {detail}[/red]")
-        if issues:
+                severity = issue.get("severity", "error")
+                style = "yellow" if severity == "warning" else "red"
+                console.print(f"[{style}]{iface_part}{peer_part}: {code} — {detail}[/{style}]")
+            
+            if not has_error and issues:
+                console.print("[yellow]Database diagnostics passed with warnings.[/yellow]")
+
+        if has_error:
             sys.exit(1)
     except WgplException as e:
         _exit_error(ctx, str(e))
