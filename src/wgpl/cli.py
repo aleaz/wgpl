@@ -179,7 +179,11 @@ def main(
     output_json: bool = typer.Option(
         False, "--json", "-j", help="Output results in JSON format"
     ),
-    db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
+    db_path: str | None = typer.Option(
+        None,
+        "--db",
+        help="SQLite database path (default: ~/.wgpl.db; overrides WGPL_DB_PATH)",
+    ),
     version: bool = typer.Option(
         False,
         "--version",
@@ -412,7 +416,7 @@ def peer_show(
         None,
         "--interface",
         "-i",
-        help="Interface name or ID (required when >1 interface for secrets)",
+        help="Interface name or ID (required with --show-secrets when the database has more than one interface)",
     ),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
     show_secrets: bool = typer.Option(
@@ -1200,7 +1204,7 @@ def peer_config(
         None,
         "--interface",
         "-i",
-        help="Interface name or ID (disambiguates peer prefix)",
+        help="Interface name or ID (required when the database has more than one interface)",
     ),
 ) -> None:
     try:
@@ -1228,7 +1232,7 @@ def peer_explain(
         None,
         "--interface",
         "-i",
-        help="Interface name or ID (disambiguates peer prefix)",
+        help="Interface name or ID (required when the database has more than one interface)",
     ),
 ) -> None:
     """Show derived AllowedIPs and LAN↔LAN routing checklist for a peer."""
@@ -1300,7 +1304,7 @@ def peer_qr(
         None,
         "--interface",
         "-i",
-        help="Interface name or ID (disambiguates peer prefix)",
+        help="Interface name or ID (required when the database has more than one interface)",
     ),
 ) -> None:
     try:

@@ -64,9 +64,9 @@ Expired peers are ignored by `apply` and `interface export` until pruned.
 ### Deletion and garbage collection
 
 ```bash
-wgpl peer remove wg0 <PEER_REF>          # soft delete — IP freed, audit retained
+wgpl peer remove wg0 <PEER_ID>          # soft delete — IP freed, audit retained
 wgpl peer prune wg0                      # hard-delete inactive peer rows
-wgpl peer remove wg0 <PEER_REF> --hard   # immediate physical delete + audit event
+wgpl peer remove wg0 <PEER_ID> --hard   # immediate physical delete + audit event
 wgpl node prune                          # remove orphan device identities
 ```
 
@@ -74,7 +74,7 @@ wgpl node prune                          # remove orphan device identities
 
 ```bash
 wgpl interface history wg0
-wgpl peer history wg0 <PEER_REF>
+wgpl peer history wg0 <PEER_ID>
 wgpl node history <NODE_REF>
 ```
 
@@ -127,7 +127,8 @@ separate bridge interface that runs the peer config from the other hub.
 3. **Inspect derived AllowedIPs** before distributing configs:
 
    ```bash
-   wgpl peer explain site-a-gw
+   wgpl peer list                 # note the peer ID / hex prefix for Site_A_GW
+   wgpl peer explain <PEER_ID>
    wgpl --json peer list | jq '.[] | {name, hub_allowed_ips, client_allowed_ips}'
    ```
 
@@ -234,7 +235,8 @@ wgpl peer add wg0 "Site_A_GW" \
   --allowed-ips-policy all_remote_networks \
   --keepalive 25
 sudo wgpl apply wg0
-wgpl peer config Site_A_GW > site-a-wg0.conf
+wgpl peer list                  # copy Site_A_GW's peer ID (or unique hex prefix)
+wgpl peer config <PEER_ID> > site-a-wg0.conf
 # Site gateway: enable ip_forward; wg-quick up; ensure LAN hosts use the GW
 ```
 
@@ -243,8 +245,9 @@ wgpl peer config Site_A_GW > site-a-wg0.conf
 ```bash
 # Site A and Site B: both subnet_router + all_remote_networks + keepalive
 wgpl validate wg0
-wgpl peer explain Site_A_GW
-wgpl peer explain Site_B_GW
+wgpl peer list
+wgpl peer explain <PEER_ID_SITE_A>
+wgpl peer explain <PEER_ID_SITE_B>
 sudo wgpl apply wg0
 # Hub: ip_forward + FORWARD -i wg0 -o wg0 (minimum)
 ```
@@ -377,14 +380,16 @@ non-trivial routing, run `wgpl peer explain` before distributing configs.
 ### Mobile (iOS / Android)
 
 ```bash
-wgpl peer qr <PEER_REF>
-wgpl peer qr <PEER_REF> -o alice-phone.png
+wgpl peer qr <PEER_ID>
+wgpl peer qr <PEER_ID> -o alice-phone.png
 ```
+
+`<PEER_ID>` is the peer UUID or unique hex prefix from `peer list` (not the node name).
 
 ### Desktop (Windows / macOS)
 
 ```bash
-wgpl peer config <PEER_REF> > alice.conf
+wgpl peer config <PEER_ID> > alice.conf
 chmod 600 alice.conf
 ```
 
@@ -477,8 +482,8 @@ public keys only; private keys and PSKs are never logged.
 For periodic access reviews:
 
 ```bash
-wgpl peer list INTERFACE --json
-wgpl peer history INTERFACE PEER_ID --limit 100
+wgpl peer list --interface wg0 --json
+wgpl peer history wg0 <PEER_ID> --limit 100
 ```
 
 Cross-check active peers against your identity source. Remove stale access with

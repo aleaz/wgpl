@@ -1,6 +1,8 @@
 # WGPL CLI Reference
 
-All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs.
+All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs. With `--json`, **data goes to stdout** and **logs/errors go to stderr**. Without `--json`, human tables and success messages typically use stderr for logs/hints while payloads such as `peer config` / `peer qr` print to stdout.
+
+Database path: global `--db PATH` or environment `WGPL_DB_PATH` (default `~/.wgpl.db`).
 
 Routing intent is documented in [routing.md](routing.md). Operational hub
 relay steps are in [runbook.md — Hub routing relay](runbook.md#hub-routing-relay).
@@ -31,12 +33,12 @@ attachment to one interface. Node names are **globally unique**.
 ## Peer Management (`wgpl peer`)
 
 - **`add <INTERFACE_NAME_OR_ID> [NAME] [--node REF] [options]`**: Attaches a device to the interface as a peer. Provide **exactly one** of: a positional `<NAME>` (find-or-create the node by that name, then attach) **or** `--node <REF>` (strictly attach an existing node by name/ID). `<NAME>` must be alphanumeric with optional `_` / `-` and max length 64. A node may attach to a given interface only once. `--expires` accepts durations like `7d` or `24h` (hours or days only; must be greater than zero). Routing: `--role endpoint|subnet_router`, `--routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`. JSON adds `node`, `node_id`, and `node_created`.
-- **`list [--all] [--expired]`**: Shows active/all clients. JSON includes derived `hub_allowed_ips` / `client_allowed_ips`, plus `desc`, effective/override `mtu` and `keepalive` (same model as `peer update` JSON).
-- **`show <ID> [--show-secrets]`**: Peer details; JSON omits private keys (same fields as `list --json`, including derived AllowedIPs and desc/mtu/keepalive).
+- **`list [--interface NAME_OR_ID] [--all] [--expired]`**: Shows active/all clients (optional `--interface` filter). JSON includes derived `hub_allowed_ips` / `client_allowed_ips`, plus `desc`, effective/override `mtu` and `keepalive` (same model as `peer update` JSON).
+- **`show <ID> [-i INTERFACE] [--show-secrets]`**: Peer details (`<ID>` = peer UUID or unique hex prefix from `peer list`, not the node name). JSON omits private keys (same fields as `list --json`, including derived AllowedIPs and desc/mtu/keepalive). Pass `-i` when the database has more than one interface and you use `--show-secrets`.
 - **`explain <ID> [-i INTERFACE]`**: Derived hub/client AllowedIPs and LAN↔LAN four-leg checklist for subnet routers.
 - **`config <ID> [-i INTERFACE] [--allowed-ips …]`**: Client `.conf` with private key. Default AllowedIPs are **derived** from `allowed_ips_policy`; `--allowed-ips` overrides for this export only. When the database has **more than one interface**, `-i` / `--interface` is **required** (even for a full UUID). JSON adds `client_allowed_ips` and `allowed_ips_source` (`derived` | `override`).
 - **`qr <ID> [-i INTERFACE] [-o <PNG_PATH>] [--allowed-ips …]`**: QR code for the client config; same `-i` and AllowedIPs rules as `config`.
-- **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies attachment properties or uses `--clear-*` to inherit from the interface. To rename the device, use `node update` (there is no `--name` here). Fields: `--ip`, `--dns`/`--clear-dns`, `--desc`/`--clear-desc`, `--mtu`/`--clear-mtu`, `--keepalive`/`--clear-keepalive`, `--expires`/`--clear-expires` (`--expires` units: `h` or `d` only, e.g. `24h`, `30d`). Routing fields: `--role`, `--routed-networks`, `--clear-routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`, `--clear-custom-allowed-ips`. `--clear-expires` reactivates an expired peer and runs the same activation checks as `peer add` (IP in pool, no active collisions, wire-safe keys). Cannot combine `--expires` and `--clear-expires`.
+- **`update <INTERFACE_NAME_OR_ID> <ID> [options]`**: Modifies attachment properties or uses `--clear-*` to inherit from the interface. Argument order is **interface first**, then peer `<ID>` (unlike `show` / `config`). To rename the device, use `node update` (there is no `--name` here). Fields: `--ip`, `--dns`/`--clear-dns`, `--desc`/`--clear-desc`, `--mtu`/`--clear-mtu`, `--keepalive`/`--clear-keepalive`, `--expires`/`--clear-expires` (`--expires` units: `h` or `d` only, e.g. `24h`, `30d`). Routing fields: `--role`, `--routed-networks`, `--clear-routed-networks`, `--allowed-ips-policy`, `--custom-allowed-ips`, `--clear-custom-allowed-ips`. `--clear-expires` reactivates an expired peer and runs the same activation checks as `peer add` (IP in pool, no active collisions, wire-safe keys). Cannot combine `--expires` and `--clear-expires`.
 - **`remove <INTERFACE_NAME_OR_ID> <ID> [--hard]`**: Soft-deletes a peer. Use `--hard` for physical deletion.
 - **`prune <INTERFACE_NAME_OR_ID>`**: Purges expired and soft-deleted peers. Recommended before `interface remove` when inactive rows remain.
 - **`history <INTERFACE_NAME_OR_ID> <ID> [--limit N] [--offset N]`**: Shows append-only audit events for a peer (`--limit` max: 1000).

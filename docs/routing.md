@@ -187,7 +187,8 @@ wgpl peer add hub1 "Hub2_GW" --role subnet_router \
   --keepalive 25
 wgpl validate hub1
 sudo wgpl apply hub1
-wgpl peer config Hub2_GW > hub2-to-hub1.conf
+wgpl peer list                  # copy Hub2_GW's peer ID (or unique hex prefix)
+wgpl peer config <PEER_ID> > hub2-to-hub1.conf
 ```
 
 On **HUB2**:

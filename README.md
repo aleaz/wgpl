@@ -97,13 +97,14 @@ wgpl validate wg0
 sudo --preserve-env=WGPL_DB_PATH wgpl apply wg0
 # equivalent: sudo wgpl --db "$HOME/.wgpl.db" apply wg0
 
-wgpl peer explain <PEER_REF>
-wgpl peer qr <PEER_REF>
-wgpl peer config <PEER_REF> > alice.conf
+wgpl peer list                  # copy the peer ID (or unique hex prefix) from the ID column
+wgpl peer explain <PEER_ID>
+wgpl peer qr <PEER_ID>
+wgpl peer config <PEER_ID> > alice.conf
 chmod 600 alice.conf
 ```
 
-`<PEER_REF>` is a peer UUID, UUID prefix, or unambiguous node name from `peer list`. With more than one WGPL interface, pass `-i` on secret-bearing commands — [docs/cli.md](docs/cli.md).
+`<PEER_ID>` is a peer UUID or unique hex prefix from `peer list` (not the node name — use `wgpl node` for device identity / rename). With more than one WGPL interface, pass `-i` on secret-bearing commands — [docs/cli.md](docs/cli.md).
 
 Install on the end-user device: [docs/runbook.md — Client provisioning](docs/runbook.md#client-provisioning).
 
@@ -171,7 +172,7 @@ with the operator — [docs/runbook.md — Hub routing relay](docs/runbook.md#hu
 Eight hub-and-spoke patterns, glossary, LAN↔LAN, and invariants:
 [docs/routing.md](docs/routing.md). Executable topology spec:
 [docs/routing_matrix.md](docs/routing_matrix.md). Inspect with
-`wgpl peer explain <PEER_REF>`.
+`wgpl peer explain <PEER_ID>` (UUID or hex prefix from `peer list`).
 
 Day-2 ops (validate/apply, TTL, prune, backup, deploy, client OS):
 [docs/runbook.md](docs/runbook.md).
@@ -183,7 +184,7 @@ Day-2 ops (validate/apply, TTL, prune, backup, deploy, client OS):
 - **Device identity** via `wgpl node`; the same device can attach to several hubs.
 - **TTL and cleanup:** `--expires`, soft delete, and prune — [runbook](docs/runbook.md#temporary-access-ttl).
 - **Fail-closed** emit/apply/restore; `chmod 600` on DB and sensitive outputs; append-only audit (no secrets in metadata) — [SECURITY.md](SECURITY.md).
-- **Strict `--json`** for automation (including derived `hub_allowed_ips` / `client_allowed_ips`).
+- **Strict `--json`** for automation (including derived `hub_allowed_ips` / `client_allowed_ips`): JSON/data on **stdout**, logs and errors on **stderr**.
 - **Wire-safe MTU** (minimum **1280** or unset); server endpoints RFC 1123 (IPv4/hostname; IPv6 endpoints rejected).
 - **BYOI deploy:** systemd, remote `syncconf`, Docker, MikroTik — [runbook — Deployment](docs/runbook.md#deployment-patterns-byoi).
 
@@ -200,7 +201,7 @@ Copy-paste starting points in `examples/`:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `WGPL_DB_PATH` | Path to the SQLite database | `~/.wgpl.db` |
+| `WGPL_DB_PATH` | Path to the SQLite database (also settable with global `--db`) | `~/.wgpl.db` |
 | `WGPL_WG_BIN` | Path to `wg` for `apply` / `syncconf` (**ignored when UID 0**; defaults to `/usr/bin/wg`) | `wg` (PATH) |
 
 `wireguard-tools` (`wg`) is required only for `wgpl apply` on the same machine.

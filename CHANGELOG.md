@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Docs/help coherence: peer refs documented as UUID/hex prefix only (not node names); runbook examples and `peer list --interface`; `--db` / `WGPL_DB_PATH` and multi-interface `-i` help; `--json` stdout/stderr contract in README and `docs/cli.md`
 - Maintainability (#2–#6): unified DNS/MTU/keepalive cascade and name regex via `fields.py`; removed `PeerResolvePolicy` and unused `wireguard.run_wg_command`; activation IP collisions raise `IpAlreadyInUseError`; trivial `_is_peer_active` / `_normalize_db_path` wrappers removed
 - CLI skips database open for `--help`; permission-denied guidance prefers `--db` / ownership over bare `sudo`
 - Mutations (`peer add` / `remove`, `interface add`) print apply hints; soft-delete messaging clarifies prune

@@ -51,7 +51,8 @@ wgpl interface update wg0 --routed-networks "10.50.0.0/16"
 wgpl peer add wg0 "Site_A_GW" --role subnet_router \
   --routed-networks "192.168.10.0/24" \
   --allowed-ips-policy all_remote_networks --keepalive 25
-wgpl peer explain Site_A_GW
+wgpl peer list                  # copy peer ID / hex prefix for Site_A_GW
+wgpl peer explain <PEER_ID>
 # Hub relay (ip_forward, FORWARD, optional MASQUERADE): docs/runbook.md#hub-routing-relay
 
 # 3. Extract client configuration (full UUID or short prefix from peer list)
