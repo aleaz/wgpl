@@ -142,6 +142,22 @@ def resolve_peer_ref(
     if active_only:
         matches = [peer for peer in matches if integrity.is_peer_active(peer)]
     if not matches:
+        if iface_id is not None:
+            global_matches = db.find_peers_by_id_prefix(normalized, None, conn=conn)
+            if active_only:
+                global_matches = [
+                    peer for peer in global_matches if integrity.is_peer_active(peer)
+                ]
+            if len(global_matches) == 1:
+                peer_id = str(global_matches[0]["id"])
+                _assert_peer_belongs_to_interface(
+                    peer_id, iface_id, interface_label=interface, conn=conn
+                )
+                return peer_id
+            if len(global_matches) > 1:
+                raise AmbiguousPeerIdError(
+                    _ambiguous_peer_message(ref, global_matches)
+                )
         raise PeerNotFoundError(f"Peer {ref} not found")
     if len(matches) == 1:
         peer_id = str(matches[0]["id"])

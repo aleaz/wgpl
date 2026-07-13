@@ -272,6 +272,83 @@ def test_cli_peer_add_invalid_mtu_exits_cleanly(wgpl_db: str) -> None:
     assert "1280" in result.stderr
 
 
+def test_cli_peer_add_single_arg_hints_usage_when_interface_unknown(
+    wgpl_db: str,
+) -> None:
+    result = runner.invoke(app, ["peer", "add", "Alice"])
+
+    assert result.exit_code == 1
+    stderr = " ".join(result.stderr.split())
+    assert "not a known interface" in stderr
+    assert "wgpl peer add <INTERFACE> <NAME>" in stderr
+
+
+def test_cli_peer_add_missing_name_keeps_exact_one_message(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+
+    result = runner.invoke(app, ["peer", "add", "wg0"])
+
+    assert result.exit_code == 1
+    assert "exactly one" in result.stderr.lower()
+    assert "not a known interface" not in result.stderr
+
+
+def test_cli_peer_config_warns_private_keys_on_stderr(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+
+    result = runner.invoke(app, ["peer", "config", peer["id"]])
+
+    assert result.exit_code == 0
+    assert "PrivateKey" in result.stdout
+    assert "contains private keys" in result.stderr
+    assert "PrivateKey" not in result.stderr
+
+
+def test_cli_peer_config_json_skips_private_key_warning(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+
+    result = runner.invoke(app, ["--json", "peer", "config", peer["id"]])
+
+    assert result.exit_code == 0
+    assert "contains private keys" not in result.stderr
+    payload = json.loads(result.stdout)
+    assert "PrivateKey" in payload["config"]
+
+
+def test_cli_peer_qr_warns_private_keys_on_stderr(wgpl_db: str) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+
+    result = runner.invoke(app, ["peer", "qr", peer["id"]])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip()
+    assert "contains private keys" in result.stderr
+
+
+def test_cli_peer_config_wrong_interface_prefix_reports_mismatch(
+    wgpl_db: str,
+) -> None:
+    _setup_interface("wg0")
+    peer = core.add_peer("wg0", "phone")
+    pubkey = wireguard.generate_keypair().public_key
+    runner.invoke(
+        app,
+        ["interface", "add", "wg1", "vpn2.example.com", pubkey, "10.0.1.0/24"],
+    )
+    prefix = str(peer["id"]).replace("-", "")[:12]
+
+    result = runner.invoke(
+        app, ["peer", "config", prefix, "--interface", "wg1"]
+    )
+
+    assert result.exit_code == 1
+    assert "does not belong" in result.stderr
+    assert "not found" not in result.stderr.lower()
+
+
 def test_cli_peer_history_respects_limit(wgpl_db: str) -> None:
     from wgpl.db import AuditEntityType, AuditEventType
 

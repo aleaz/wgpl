@@ -20,10 +20,15 @@ from . import dbpath
 from .exceptions import (
     AmbiguousInterfaceError,
     InterfaceAlreadyExistsError,
+    InterfaceNotFoundError,
     PeerAlreadyExistsError,
     PeerNotFoundError,
     WgBinaryNotFoundError,
     WgplException,
+)
+
+_PRIVATE_KEY_OUTPUT_NOTICE = (
+    "(contains private keys; keep output restricted)"
 )
 
 _HINT_MESSAGES = {
@@ -813,6 +818,18 @@ def peer_add(
 ) -> None:
     try:
         if (name is None) == (node is None):
+            if name is None and node is None:
+                try:
+                    core.resolve_interface_ref(interface)
+                except InterfaceNotFoundError:
+                    _exit_error(
+                        ctx,
+                        f"'{interface}' is not a known interface. "
+                        "Usage: wgpl peer add <INTERFACE> <NAME> "
+                        "(or wgpl peer add <INTERFACE> --node <ref>).",
+                    )
+                except AmbiguousInterfaceError:
+                    pass
             _exit_error(
                 ctx,
                 "Provide exactly one of a device name (positional) or --node <ref>.",
@@ -1219,6 +1236,7 @@ def peer_config(
             config = core.get_peer_config(
                 peer_id, allowed_ips=allowed_ips, interface_ref=interface
             )
+            console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
             print(config)  # print to stdout
     except WgplException as e:
         _exit_error(ctx, str(e))
@@ -1337,6 +1355,7 @@ def peer_qr(
             if ctx.obj.get("json"):
                 _output(ctx, {"qr": qr})
             else:
+                console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
                 print(qr)
     except WgplException as e:
         _exit_error(ctx, str(e))

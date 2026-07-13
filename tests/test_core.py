@@ -157,7 +157,7 @@ def test_resolve_peer_ref_scoped_to_interface(wg0_interface: str, wgpl_db: str) 
 
     assert resolve_peer_ref("55c521ad2d94", wg0_interface) == peer_id
 
-    with pytest.raises(PeerNotFoundError):
+    with pytest.raises(PeerInterfaceMismatchError, match="does not belong"):
         resolve_peer_ref("55c521ad2d94", "wg1")
 
 
