@@ -1,7 +1,7 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from wgpl import core, db, wireguard
 from wgpl.cli import app
+from wgpl.exceptions import WgBinaryNotFoundError
 
 
 runner = CliRunner()
@@ -246,6 +247,48 @@ def test_json_apply(mock_sync: object, wgpl_db: str, iface_pubkey: str) -> None:
         "interface": "wg0",
     }
 
+
+@patch.object(core, "sync_interface")
+def test_json_apply_missing_wg_uses_exit_error_gate(
+    mock_sync: MagicMock, wgpl_db: str, iface_pubkey: str
+) -> None:
+    mock_sync.side_effect = WgBinaryNotFoundError("The 'wg' command was not found.")
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+
+    result = runner.invoke(app, ["--json", "apply", "wg0"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "status": "error",
+        "message": "The 'wg' command was not found.",
+    }
+    assert "interface export" not in payload["message"]
+    assert "Hint:" in result.stderr
+    assert "interface export" in result.stderr
+
+
+@patch.object(core, "sync_interface")
+def test_apply_missing_wg_human_shows_hint(
+    mock_sync: MagicMock, wgpl_db: str, iface_pubkey: str
+) -> None:
+    mock_sync.side_effect = WgBinaryNotFoundError("The 'wg' command was not found.")
+    runner.invoke(
+        app,
+        ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
+    )
+
+    result = runner.invoke(app, ["apply", "wg0"])
+
+    assert result.exit_code == 1
+    assert "WGPL Error:" in result.stderr
+    assert "The 'wg' command was not found." in result.stderr
+    assert "Hint:" in result.stderr
+    assert "interface export" in result.stderr
+    assert not result.stdout.strip().startswith("{")
 
 def test_json_flag_must_precede_subcommand(wgpl_db: str, iface_pubkey: str) -> None:
     runner.invoke(

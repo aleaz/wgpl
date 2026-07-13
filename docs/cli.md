@@ -1,6 +1,6 @@
 # WGPL CLI Reference
 
-All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs. With `--json`, **data goes to stdout** and **logs/errors go to stderr**. Without `--json`, human tables and success messages typically use stderr for logs/hints while payloads such as `peer config` / `peer qr` print to stdout.
+All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer list`) to produce machine-parseable outputs. With `--json`, **data and domain-error payloads** (`{"status":"error","message":…}`) go to **stdout**; human error lines and recovery hints go to **stderr**. Without `--json`, human tables and success messages typically use stderr for logs/hints while payloads such as `peer config` / `peer qr` print to stdout.
 
 Database path: global `--db PATH` or environment `WGPL_DB_PATH` (default `~/.wgpl.db`).
 

@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, NoReturn, Sequence
 
 from rich import box
 from rich.markup import escape
@@ -35,6 +35,10 @@ _HINT_MESSAGES = {
     "re_export_clients": "Re-export client configs (peer config / qr) for peers on this interface.",
     "re_export_client": "Re-export this peer's client config or QR.",
     "apply_server": "Run wgpl apply or interface export to sync the server.",
+    "apply_remote_export": (
+        "If you are running WGPL remotely, use `wgpl interface export <name>` "
+        "instead to extract the config and pipe it via SSH."
+    ),
 }
 
 app = typer.Typer(
@@ -217,9 +221,17 @@ def main(
         _exit_error(ctx, str(e))
 
 
-def _exit_error(ctx: typer.Context | None, message: str, code: int = 1) -> None:
+def _exit_error(
+    ctx: typer.Context | None,
+    message: str,
+    code: int = 1,
+    *,
+    hints: Sequence[str] | None = None,
+) -> NoReturn:
     """Print a user-facing error and exit (JSON on stdout when --json is set)."""
     console.print(f"[red]WGPL Error: {_safe_markup(message)}[/red]")
+    for hint in hints or ():
+        console.print(f"[yellow]Hint: {_safe_markup(hint)}[/yellow]")
     if ctx is not None and ctx.obj.get("json"):
         print(json.dumps({"status": "error", "message": message}))
     sys.exit(code)
@@ -1547,11 +1559,11 @@ def apply(
                 f"[green]Successfully applied DB state to {interface}[/green]"
             )
     except WgBinaryNotFoundError as e:
-        console.print(f"[yellow]Notice: {e}[/yellow]")
-        console.print(
-            "[blue]If you are running WGPL remotely, use `wgpl interface export <name>` instead to extract the config and pipe it via SSH.[/blue]"
+        _exit_error(
+            ctx,
+            str(e),
+            hints=[_HINT_MESSAGES["apply_remote_export"]],
         )
-        sys.exit(1)
     except WgplException as e:
         _exit_error(ctx, str(e))
 

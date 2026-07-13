@@ -87,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `wgpl apply --json` reports a missing/`wg` binary failure as `{"status":"error","message":…}` on stdout (same `_exit_error` gate as other domain failures); the remote `interface export | ssh` tip is a stderr hint and is not embedded in `message`
 - `wgpl db restore` no longer rejects a backup whose only validation issues are warnings (e.g. a subnet router without an effective keepalive); it fails closed on error-severity issues only, so a state the CLI can create is always restorable from its own backup
 - `peer show --json` redacts private keys and preshared keys (consistent with `peer list --json`)
 - Malformed wire-format fields in the database rejected on export, restore, and apply
