@@ -1,21 +1,24 @@
-"""WireGuard configuration builders (emit formatting + shared validation/cascade).
+"""WireGuard configuration builders (emit formatting + shared AllowedIPs validation).
 
 Route derivation lives in ``routing.py``. Callers must pass the emit gate in
-``core.py`` (``assert_exportable_*``) before building configs. This module
-normalizes AllowedIPs and cascades DNS/MTU/keepalive for client output.
+``core.py`` (``assert_exportable_*``) before building configs. DNS/MTU/keepalive
+cascade helpers live in ``fields.py``.
 """
 
 from __future__ import annotations
 
 import ipaddress
-import re
 import sqlite3
 from collections.abc import Mapping
 
 from . import integrity
 from .exceptions import WgplException
-
-_INTERFACE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+from .fields import (
+    NAME_RE,
+    effective_peer_dns,
+    effective_peer_keepalive,
+    effective_peer_mtu,
+)
 
 
 def validate_allowed_ips(allowed_ips: str) -> str:
@@ -41,7 +44,7 @@ def build_server_config(
 ) -> str:
     """Build declarative server syncconf content for active peers only."""
     name = str(iface["name"])
-    if not _INTERFACE_NAME_RE.match(name):
+    if not NAME_RE.match(name):
         raise WgplException(f"Interface name '{name}' is not valid for export")
 
     conf_lines: list[str] = []
@@ -79,15 +82,11 @@ def build_client_config(
         f"Address = {peer['ip_address']}/{network.prefixlen}",
     ]
 
-    peer_dns = peer["dns"] if "dns" in peer.keys() else None
-    iface_dns = iface["dns"] if "dns" in iface.keys() else None
-    effective_dns = peer_dns if peer_dns is not None else iface_dns
+    effective_dns = effective_peer_dns(peer, iface)
     if effective_dns:
         config_lines.append(f"DNS = {effective_dns}")
 
-    peer_mtu = peer["mtu"] if "mtu" in peer.keys() else None
-    iface_mtu = iface["mtu"] if "mtu" in iface.keys() else None
-    effective_mtu = peer_mtu if peer_mtu is not None else iface_mtu
+    effective_mtu = effective_peer_mtu(peer, iface)
     if effective_mtu is not None:
         config_lines.append(f"MTU = {effective_mtu}")
 
@@ -104,11 +103,7 @@ def build_client_config(
         ]
     )
 
-    peer_keepalive = peer["keepalive"] if "keepalive" in peer.keys() else None
-    iface_keepalive = iface["keepalive"] if "keepalive" in iface.keys() else None
-    effective_keepalive = (
-        peer_keepalive if peer_keepalive is not None else iface_keepalive
-    )
+    effective_keepalive = effective_peer_keepalive(peer, iface)
     if effective_keepalive is not None:
         config_lines.append(f"PersistentKeepalive = {effective_keepalive}")
 

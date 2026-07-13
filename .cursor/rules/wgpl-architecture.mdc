@@ -29,18 +29,18 @@ Business invariants live in `integrity.py`, `wireformat.py`, and `routing.py` (c
 
 ## Peer lifecycle and IP allocation
 
-- `_is_peer_active()` delegates to `integrity.is_peer_active()` — SSOT for whether a peer occupies resources (not soft-deleted and not expired).
+- `_is_peer_active()` is not a core wrapper — call `integrity.is_peer_active()` (SSOT for whether a peer occupies resources: not soft-deleted and not expired).
 - `integrity.is_peer_deleted()` is SSOT for soft-delete (`deleted_at` non-null and non-empty).
 - Corrupt `expires_at` values treat the peer as **inactive**; `validate_state` reports `corrupt_expires_at` (no CLI crash).
 - **Activation gate** (`integrity.assert_peer_activation`): every transition to active (`add_peer`, `update_peer` with future `--expires` or `--clear-expires`) validates IP in pool, wire-safe keys, valid name, and no active IP/node collision (a node already attached to the interface is rejected).
-- IP pool reservation (`_pool_used_ips`, `allocate_peer_ip`) MUST use `_is_peer_active()`, not `deleted_at IS NULL` alone.
+- IP pool reservation (`_pool_used_ips`, `allocate_peer_ip`) MUST use `integrity.is_peer_active()`, not `deleted_at IS NULL` alone.
 - SQLite partial unique indexes only know `deleted_at IS NULL`; expired peers still block INSERT until reclaimed — this is a permanent invariant unless schema changes.
 - Expired peers release their IP and node slot for new allocations; `peer prune` physically removes all inactive peers (node identities survive prune).
 - `update_interface` pool shrink uses `integrity.validate_non_deleted_peers_in_pool()` — rejects shrink if any non-soft-deleted peer (including expired) falls outside the new CIDR.
 - Zero-duration expires (`0d`, `0h`) are rejected at mutation time.
-- `core.prune_peers()` uses `_is_peer_active()` (not SQL timestamp comparison) to decide what to hard-delete; log one `pruned` audit event per peer.
+- `core.prune_peers()` uses `integrity.is_peer_active()` (not SQL timestamp comparison) to decide what to hard-delete; log one `pruned` audit event per peer.
 - When reusing an IP or node slot held by an inactive (expired/soft-deleted) peer, `add_peer` / `peer update` call `_reclaim_inactive_peer_slots(ip=…, node_id=…)`: append `reclaimed` audit event (`slot` lists which of `ip`/`node` was reclaimed), then soft-delete via `db.remove_peer` (sets `deleted_at`).
-- `get_peer_status()` MUST delegate expiration to `_is_peer_active()`; `get_effective_dns()` lives in `core.py`; the CLI must not duplicate lifecycle or DNS cascade logic.
+- `get_peer_status()` MUST delegate expiration to `integrity.is_peer_active()`; DNS/MTU/keepalive cascade SSOT lives in `fields.py` (`effective_dns` / `effective_peer_*`); `core.get_effective_dns` re-exports for the public facade. The CLI must not duplicate lifecycle or DNS cascade logic.
 
 ## Wireformat and export boundaries
 
@@ -64,7 +64,6 @@ Business invariants live in `integrity.py`, `wireformat.py`, and `routing.py` (c
 ## Peer reference resolution
 
 - `resolve_peer_ref()` uses `PeerAccess`: `READ_PUBLIC` (active only), `READ_SENSITIVE` (includes inactive; requires `interface` when >1 interface), `EXPORT_SECRET` (active only; requires `interface` when >1 interface), `MUTATE` (includes inactive).
-- `PeerResolvePolicy` remains as backward-compatible aliases mapping to `PeerAccess`.
 - Post-resolve binding: when `interface` is specified, verify `peer.interface_id` matches — no cross-interface fallbacks.
 - `get_peer_config` / `get_peer_qr*` use `EXPORT_SECRET`; `peer show --show-secrets` and `peer history` use `READ_SENSITIVE`.
 - `resolve_node_ref()` resolves a node reference: an **exact node name wins**; otherwise an all-hex prefix (length ≥ 4) is treated as a node-id prefix (`AmbiguousNodeIdError` when >1 match). Raises `NodeNotFoundError` otherwise.

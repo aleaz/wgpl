@@ -93,31 +93,6 @@ def _assert_wg_bin_unchanged(resolved: str) -> None:
         )
 
 
-def run_wg_command(*args: str) -> str:
-    """Wrapper to run wg commands securely."""
-    wg_bin = _get_wg_bin()
-    _assert_wg_bin_unchanged(wg_bin)
-    cmd = [wg_bin] + list(args)
-
-    try:
-        # Command and arguments are explicit and never executed via shell.
-        result = subprocess.run(  # nosec B603
-            cmd,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except FileNotFoundError:
-        raise WgBinaryNotFoundError(
-            "The 'wg' command was not found. Make sure wireguard-tools is installed on the target system."
-        )
-    except subprocess.CalledProcessError as e:
-        raise WireguardConfigError(
-            f"wg command failed: {' '.join(cmd)}\nError: {e.stderr}"
-        )
-
-
 def generate_keypair() -> Keypair:
     """Generates a WireGuard Curve25519 keypair entirely in Python memory."""
     private_key = x25519.X25519PrivateKey.generate()

@@ -27,7 +27,6 @@ from .audit import (
 from .ipam import _reclaim_inactive_peer_slots, allocate_peer_ip
 from .refs import (
     PeerAccess,
-    PeerResolvePolicy,
     get_interface_by_ref,
     resolve_interface_ref,
     resolve_node_ref,
@@ -35,6 +34,12 @@ from .refs import (
 )
 from .restore import dump_database, restore_database
 from .consistency import assert_database_valid, validate_state
+from .fields import (
+    effective_dns,
+    effective_peer_dns,
+    effective_peer_keepalive,
+    effective_peer_mtu,
+)
 from .validators import (
     validate_allowed_ips,
     validate_dns,
@@ -142,7 +147,6 @@ def _resolve_peer_routing_for_write(
 __all__ = [
     "AllowedIpsPolicy",
     "PeerAccess",
-    "PeerResolvePolicy",
     "PeerRole",
     "add_interface",
     "add_node",
@@ -195,16 +199,11 @@ __all__ = [
 ]
 
 
-def _is_peer_active(peer: sqlite3.Row | Mapping[str, object]) -> bool:
-    """Returns True if the peer is not soft-deleted and not expired."""
-    return integrity.is_peer_active(peer)
-
-
 def get_peer_status(peer: sqlite3.Row | Mapping[str, object]) -> str:
     """Return lifecycle label: Active, Expired, or Deleted."""
     if integrity.is_peer_deleted(peer):
         return "Deleted"
-    if not _is_peer_active(peer):
+    if not integrity.is_peer_active(peer):
         return "Expired"
     return "Active"
 
@@ -349,11 +348,7 @@ def peer_rows_to_public_dicts(
 
 def get_effective_dns(peer_dns: str | None, iface_dns: str | None) -> str | None:
     """Return peer DNS override or interface default."""
-    if peer_dns:
-        return str(peer_dns)
-    if iface_dns:
-        return str(iface_dns)
-    return None
+    return effective_dns(peer_dns, iface_dns)
 
 
 def _peer_actual_changed_fields(
@@ -753,27 +748,15 @@ def list_peers(
 
 def _effective_peer_dns(peer: sqlite3.Row, iface: sqlite3.Row) -> str | None:
     """Return peer DNS override or interface default."""
-    return get_effective_dns(peer["dns"], iface["dns"])
+    return effective_peer_dns(peer, iface)
 
 
 def _effective_peer_mtu(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
-    peer_mtu = peer["mtu"]
-    if peer_mtu is not None:
-        return int(peer_mtu)
-    iface_mtu = iface["mtu"]
-    if iface_mtu is not None:
-        return int(iface_mtu)
-    return None
+    return effective_peer_mtu(peer, iface)
 
 
 def _effective_peer_keepalive(peer: sqlite3.Row, iface: sqlite3.Row) -> int | None:
-    peer_ka = peer["keepalive"]
-    if peer_ka is not None:
-        return int(peer_ka)
-    iface_ka = iface["keepalive"]
-    if iface_ka is not None:
-        return int(iface_ka)
-    return None
+    return effective_peer_keepalive(peer, iface)
 
 
 def _resolve_node_for_attachment(
@@ -995,7 +978,7 @@ def prune_peers(interface_ref: str) -> int:
         to_remove = [
             peer
             for peer in db.list_peers(iface_id, conn=conn)
-            if not _is_peer_active(peer)
+            if not integrity.is_peer_active(peer)
         ]
         for peer in to_remove:
             was_expired = get_peer_status(peer) == "Expired"

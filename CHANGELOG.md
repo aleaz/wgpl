@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `fields.py` SSOT for entity `NAME_RE` and peer-over-interface DNS/MTU/keepalive cascade helpers
+- Collision subclasses `NodeAlreadyAttachedError` and `RoutedNetworkOverlapError` (inherit `PeerAlreadyExistsError` for CLI compatibility)
 - First-class **Node** entity: `nodes` table (globally unique `name`, optional `desc`) and `wgpl node` command group (`add`, `list`, `show`, `update`, `remove`, `prune`, `history`) for device identity independent of any tunnel
 - Hybrid `wgpl peer add`: a positional `<name>` find-or-creates the node and attaches it; `--node <ref>` strictly attaches an existing node; exactly one is required. Peer JSON gains `node`, `node_id`, and `node_created`
 - `wgpl validate` hub↔peer routed-network checks: an exact duplicate of an `interface.routed_networks` prefix is an error; a partial overlap is a warning
@@ -38,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Maintainability (#2–#6): unified DNS/MTU/keepalive cascade and name regex via `fields.py`; removed `PeerResolvePolicy` and unused `wireguard.run_wg_command`; activation IP collisions raise `IpAlreadyInUseError`; trivial `_is_peer_active` / `_normalize_db_path` wrappers removed
 - CLI skips database open for `--help`; permission-denied guidance prefers `--db` / ownership over bare `sudo`
 - Mutations (`peer add` / `remove`, `interface add`) print apply hints; soft-delete messaging clarifies prune
 - README install path prefers `uv`/`pip`; standalone binary marked experimental with checksum guidance; Quick Start pins `WGPL_DB_PATH` for sudo apply
@@ -48,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aligned classifier, README badge, CLI tagline, and package description with the hub-and-spoke intent identity (no longer “Peer Manager” / Beta framing)
 - Documented CLI/JSON compatibility promise: no breaking CLI commands/flags or public `--json` field names without a major version bump (see README)
 - Documentation gate: `docs/cli.md` documents `interface show` and `db doctor [--repair]`; DESIGN/README/SECURITY/routing emit narrative describes `wireformat` as emit formatting with shared validation/cascade (not “formatting only”); `docs/runbook.md` adds Troubleshooting (forgot `apply`, `-i`, DB/`--db`, `peer update` arg order)
-- Hygiene: removed unused `integrity.validate_wire_peer_fields` and `consistency.get_peer_status_expired`; production `resolve_peer_ref` call sites use `access=PeerAccess.*` (`PeerResolvePolicy` alias kept)
+- Hygiene: removed unused `integrity.validate_wire_peer_fields` and `consistency.get_peer_status_expired`; production `resolve_peer_ref` uses `access=PeerAccess.*` only
 - Peers now reference a global node via `peers.node_id`; the `peers.name` column is removed (peer read paths JOIN `nodes` and expose the node name transparently). Device names are managed through `wgpl node`; `peer update` no longer accepts `--name` (rename with `node update`). Pre-release schema change — no migration, nothing was published
 - A node attaches to a given interface at most once while active (partial unique index `idx_peers_active_node`); reclaiming an inactive peer slot is keyed by IP and `node_id`
 - Audit trail gains a `node` entity type and node events; peer audit metadata records `node_id` for device provenance

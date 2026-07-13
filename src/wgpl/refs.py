@@ -32,22 +32,6 @@ class PeerAccess(StrEnum):
     MUTATE = "mutate"
 
 
-class PeerResolvePolicy(StrEnum):
-    """Backward-compatible alias; prefer PeerAccess for new code."""
-
-    EXPORT_SECRET = "export_secret"  # nosec B105
-    MUTATE_INACTIVE = "mutate_inactive"
-    READ_ONLY = "read_only"
-
-
-def _access_from_policy(policy: PeerResolvePolicy) -> PeerAccess:
-    if policy == PeerResolvePolicy.EXPORT_SECRET:
-        return PeerAccess.EXPORT_SECRET
-    if policy == PeerResolvePolicy.MUTATE_INACTIVE:
-        return PeerAccess.MUTATE
-    return PeerAccess.READ_PUBLIC
-
-
 def _requires_interface_disambiguation(access: PeerAccess) -> bool:
     return access in {
         PeerAccess.READ_SENSITIVE,
@@ -111,12 +95,11 @@ def resolve_peer_ref(
     ref: str,
     interface: str | None = None,
     *,
-    access: PeerAccess | None = None,
-    policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
+    access: PeerAccess = PeerAccess.READ_PUBLIC,
     conn: sqlite3.Connection | None = None,
 ) -> str:
     """Resolve a peer reference (full UUID or unique hex prefix) to canonical UUID."""
-    resolved_access = access if access is not None else _access_from_policy(policy)
+    resolved_access = access
     normalized = _normalize_peer_ref(ref)
 
     if not normalized or not all(c in "0123456789abcdef" for c in normalized):

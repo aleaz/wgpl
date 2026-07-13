@@ -57,10 +57,6 @@ def get_db_path() -> str:
     return dbpath.normalize_db_path(path)
 
 
-def _normalize_db_path(db_path: str) -> str:
-    return dbpath.normalize_db_path(db_path)
-
-
 _SCHEMA_CONTRACT_MSG = (
     "Database failed schema contract. "
     "Restore from backup or run 'wgpl db doctor' for diagnosis."
@@ -321,7 +317,7 @@ def init_db(path: str | None = None) -> None:
     and dump/restore (see DESIGN.md — Schema evolution).
     """
     if path:
-        os.environ["WGPL_DB_PATH"] = _normalize_db_path(path)
+        os.environ["WGPL_DB_PATH"] = dbpath.normalize_db_path(path)
 
     db_path = get_db_path()
 

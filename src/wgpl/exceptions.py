@@ -107,7 +107,24 @@ class AmbiguousPeerIdError(WgplException):
 
 
 class PeerAlreadyExistsError(WgplException):
-    """Raised when a peer name already exists in an interface."""
+    """Raised when an active peer attachment conflicts on an interface.
+
+    Covers node-already-attached, duplicate peer display name, and (via
+    subclasses) routed-network overlaps. IP collisions use
+    :class:`IpAlreadyInUseError` instead.
+    """
+
+    pass
+
+
+class NodeAlreadyAttachedError(PeerAlreadyExistsError):
+    """Raised when a node is already attached to the interface as an active peer."""
+
+    pass
+
+
+class RoutedNetworkOverlapError(PeerAlreadyExistsError):
+    """Raised when subnet-router routed_networks overlap an active peer's prefixes."""
 
     pass
 

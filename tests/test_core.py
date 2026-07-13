@@ -10,7 +10,6 @@ from typing import Any
 from wgpl import core, db, wireguard
 from wgpl.core import (
     PeerAccess,
-    PeerResolvePolicy,
     validate_dns,
     allocate_peer_ip,
     resolve_peer_ref,
@@ -504,20 +503,6 @@ def test_resolve_peer_ref_includes_soft_deleted_when_mutate(
     assert resolve_peer_ref(peer["id"], access=PeerAccess.MUTATE) == peer["id"]
 
 
-def test_resolve_peer_ref_policy_alias_maps_to_peer_access(
-    wg0_interface: str,
-) -> None:
-    """PeerResolvePolicy remains importable and maps via policy=."""
-    peer = core.add_peer(wg0_interface, "phone")
-    assert peer["id"] is not None
-    core.remove_peer(wg0_interface, peer["id"])
-
-    assert (
-        resolve_peer_ref(peer["id"], policy=PeerResolvePolicy.MUTATE_INACTIVE)
-        == peer["id"]
-    )
-
-
 def test_resolve_peer_ref_excludes_expired_by_default(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone", expires="1h")
     assert peer["id"] is not None
@@ -740,7 +725,7 @@ def test_allocate_peer_ip_raises_when_pool_exhausted(wgpl_db: str) -> None:
 @patch("wgpl.wireguard._assert_wg_bin_unchanged")
 @patch("wgpl.wireguard._get_wg_bin", return_value="/usr/bin/wg")
 @patch("wgpl.wireguard.subprocess.run")
-def test_run_wg_command_raises_wireguard_config_error(
+def test_syncconf_raises_wireguard_config_error(
     mock_run: Any, _mock_wg_bin: Any, _mock_assert: Any
 ) -> None:
     mock_run.side_effect = subprocess.CalledProcessError(
@@ -748,7 +733,7 @@ def test_run_wg_command_raises_wireguard_config_error(
     )
 
     with pytest.raises(WireguardConfigError, match="wg command failed"):
-        wireguard.run_wg_command("syncconf", "wg0", "/tmp/fake.conf")
+        wireguard.syncconf("wg0", "[Interface]\n")
 
 
 def test_naive_expires_at_does_not_crash_status(wg0_interface: str) -> None:
@@ -829,12 +814,11 @@ def test_update_peer_resolve_uses_transaction_connection(
         ref: str,
         interface: str | None = None,
         *,
-        access: PeerAccess | None = None,
-        policy: PeerResolvePolicy = PeerResolvePolicy.READ_ONLY,
+        access: PeerAccess = PeerAccess.READ_PUBLIC,
         conn: sqlite3.Connection | None = None,
     ) -> str:
         seen_conn.append(conn)
-        return original(ref, interface, access=access, policy=policy, conn=conn)
+        return original(ref, interface, access=access, conn=conn)
 
     monkeypatch.setattr(core, "resolve_peer_ref", tracking_resolve)
     core.update_peer(wg0_interface, str(peer["id"]), dns="9.9.9.9")

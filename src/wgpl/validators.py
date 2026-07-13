@@ -8,6 +8,7 @@ import re
 
 from . import wireformat
 from .exceptions import InvalidDnsError
+from .fields import NAME_MAX_LEN, NAME_RE
 
 
 def validate_dns(value: str) -> str:
@@ -77,13 +78,13 @@ def validate_public_key(key: str) -> str:
 
 
 def validate_peer_name(name: str) -> str:
-    """Validate and normalize peer names used in DB and CLI output."""
+    """Validate and normalize peer/node/interface names used in DB and CLI output."""
     normalized = name.strip()
     if not normalized:
         raise ValueError("Name cannot be empty")
-    if len(normalized) > 64:
+    if len(normalized) > NAME_MAX_LEN:
         raise ValueError("Name must be at most 64 characters")
-    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", normalized):
+    if not NAME_RE.match(normalized):
         raise ValueError(
             "Name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
         )

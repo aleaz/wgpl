@@ -10,6 +10,7 @@ from typing import Literal, cast
 from . import db
 from . import integrity
 from . import routing
+from .fields import effective_peer_keepalive
 from .refs import resolve_interface_ref
 from .validators import validate_dns
 from .exceptions import (
@@ -37,21 +38,6 @@ def _issue(
         "detail": detail,
         "severity": severity,
     }
-
-
-def _effective_keepalive(
-    peer: sqlite3.Row | Mapping[str, object],
-    iface: sqlite3.Row | Mapping[str, object],
-) -> int | None:
-    peer_keys = peer.keys() if isinstance(peer, sqlite3.Row) else peer.keys()
-    iface_keys = iface.keys() if isinstance(iface, sqlite3.Row) else iface.keys()
-    peer_keepalive = peer["keepalive"] if "keepalive" in peer_keys else None
-    if peer_keepalive is not None:
-        return int(str(peer_keepalive))
-    iface_keepalive = iface["keepalive"] if "keepalive" in iface_keys else None
-    if iface_keepalive is not None:
-        return int(str(iface_keepalive))
-    return None
 
 
 def _peer_routed_networks(
@@ -138,7 +124,7 @@ def _validate_routing_topology(
                                 detail=str(exc),
                             )
                         )
-                    if _effective_keepalive(peer, iface) is None:
+                    if effective_peer_keepalive(peer, iface) is None:
                         issues.append(
                             _issue(
                                 interface=iface_name,

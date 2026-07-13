@@ -14,14 +14,17 @@ from . import db
 from . import routing
 from .exceptions import (
     InvalidPeerIpError,
+    IpAlreadyInUseError,
+    NodeAlreadyAttachedError,
     PeerAlreadyExistsError,
     PeersOutsidePoolError,
+    RoutedNetworkOverlapError,
     WgplException,
 )
+from .fields import NAME_RE, effective_peer_dns
 
 ExportMode = Literal["server", "client"]
 
-_PEER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 _WIRE_MTU_MIN = 1280
 _WIRE_MTU_MAX = 65535
 _WIRE_KEEPALIVE_MAX = 65535
@@ -318,7 +321,7 @@ def assert_exportable_peer(
 ) -> None:
     """Validate all peer fields interpolated into WireGuard configuration."""
     name = str(peer["name"])
-    if not _PEER_NAME_RE.match(name):
+    if not NAME_RE.match(name):
         raise WgplException(f"Peer name '{name}' is not valid for export")
     validate_wire_public_key(str(peer["public_key"]))
 
@@ -341,9 +344,7 @@ def assert_exportable_peer(
 
     if mode == "client":
         validate_wire_private_key(str(peer["private_key"]))
-        peer_dns = peer["dns"] if "dns" in _peer_keys(peer) else None
-        iface_dns = iface["dns"] if "dns" in iface.keys() else None
-        effective_dns = peer_dns if peer_dns is not None else iface_dns
+        effective_dns = effective_peer_dns(peer, iface)
         if effective_dns:
             validate_wire_safe_text(str(effective_dns), "dns")
 
@@ -351,7 +352,7 @@ def assert_exportable_peer(
 def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) -> None:
     """Validate interface fields embedded in WireGuard configuration output."""
     name = str(iface["name"])
-    if not _PEER_NAME_RE.match(name):
+    if not NAME_RE.match(name):
         raise WgplException(f"Interface name '{name}' is not valid for export")
     validate_wire_public_key(str(iface["public_key"]))
     validate_wire_endpoint(str(iface["endpoint"]))
@@ -411,11 +412,11 @@ def assert_peer_activation(
         if not is_peer_active(other):
             continue
         if node_id is not None and str(other["node_id"]) == node_id:
-            raise PeerAlreadyExistsError(
+            raise NodeAlreadyAttachedError(
                 f"Node '{peer_name}' is already attached to this interface."
             )
         if str(other["ip_address"]) == ip:
-            raise PeerAlreadyExistsError(
+            raise IpAlreadyInUseError(
                 f"IP {ip} is already assigned to active peer '{other['name']}'"
             )
         if str(other["name"]) == peer_name:
@@ -471,7 +472,7 @@ def assert_peer_activation(
         for left in routed_networks:
             for right in other_networks:
                 if left.overlaps(right):
-                    raise PeerAlreadyExistsError(
+                    raise RoutedNetworkOverlapError(
                         f"Routed network {left} overlaps with active peer "
                         f"'{other['name']}' prefix {right}"
                     )
@@ -505,7 +506,7 @@ def assert_peer_slot_invariants(
         if not is_peer_active(other):
             continue
         if str(other["ip_address"]) == ip:
-            raise PeerAlreadyExistsError(
+            raise IpAlreadyInUseError(
                 f"IP {ip} is already assigned to active peer '{other['name']}'"
             )
         if str(other["name"]) == peer_name:
@@ -554,7 +555,7 @@ def validate_database(
         for node in db.list_nodes(conn=conn):
             node_name = str(node["name"])
             try:
-                if not _PEER_NAME_RE.match(node_name):
+                if not NAME_RE.match(node_name):
                     raise WgplException(f"Node name '{node_name}' is not valid")
                 node_desc = node["desc"] if "desc" in node.keys() else None
                 if node_desc is not None:
