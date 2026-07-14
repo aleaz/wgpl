@@ -347,8 +347,10 @@ def transaction(*, verify: bool = True) -> Generator[sqlite3.Connection, None, N
         except sqlite3.OperationalError as e:
             conn.close()
             if "database is locked" in str(e) and attempt < max_retries - 1:
-                # Exponential backoff with jitter
-                delay = (base_delay * (2 ** attempt)) + random.uniform(0, 0.05)
+                # Exponential backoff with jitter (not cryptographic)
+                delay = (base_delay * (2 ** attempt)) + random.SystemRandom().uniform(
+                    0, 0.05
+                )
                 time.sleep(delay)
                 continue
             raise WgplException(f"Database locked or inaccessible: {e}") from e
@@ -364,7 +366,7 @@ def transaction(*, verify: bool = True) -> Generator[sqlite3.Connection, None, N
     # Ensure the connection is always closed properly on success
     try:
         conn.close()
-    except Exception:
+    except sqlite3.Error:
         pass
 
 
