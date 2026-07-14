@@ -304,16 +304,6 @@ def _create_readonly_connection(*, verify: bool = True) -> sqlite3.Connection:
 
 
 @contextmanager
-def get_readonly_db() -> Generator[sqlite3.Connection, None, None]:
-    """Read-only connection context manager."""
-    conn = _create_readonly_connection()
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-@contextmanager
 def _ensure_conn(
     conn: sqlite3.Connection | None, commit: bool = False
 ) -> Generator[sqlite3.Connection, None, None]:

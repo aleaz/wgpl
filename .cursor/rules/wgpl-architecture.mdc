@@ -11,9 +11,12 @@ WGPL (WireGuard Peer Lite) is a disconnected Python CLI that manages WireGuard
 ## Layers (one direction only)
 
 `cli.py` (Typer / presentation) → `core.py` (business) → `db.py` / `wireguard.py` / `dbpath.py` (infra).
-Business invariants live in `integrity.py`, `wireformat.py`, and `routing.py` (called from `core`, not from `cli` or `db`). `routing.py` derives AllowedIPs (pure functions, no I/O).
+Business helpers around `core`: `refs`, `ipam`, `audit`, `restore`, `consistency`, `validators`, `fields`.
+Invariants: `integrity.py`, `wireformat.py`, and `routing.py` (called from `core`, not from `cli` or `db`). `routing.py` derives AllowedIPs (pure functions, no I/O).
 
 - `cli.py` MUST NOT import `db.py`; use `core.ensure_database()`, `core.list_interfaces()`, `core.list_peers()`, etc.
+- `cli.py` MUST wrap read-only commands in `core.force_readonly()` (list/show/status/validate/doctor diagnose/dump, config/qr reads) so they neither create nor mutate the live DB. Mutations and `db doctor --repair` / `restore` stay writable.
+- Validation ownership: **input** → `validators.py`; **activation/export fail-closed** → `integrity.py`; **operator issue reports** (`wgpl validate`) → `consistency.py`; **`.conf` emit text + shared cascade** → `wireformat.py`; leaf name/cascade helpers → `fields.py`. Do not merge integrity and consistency.
 - `core.py` MUST NOT import Typer or format output (no stdout/stderr writes; use return values such as `dump_database(path)` and `restore_database(source_path) -> list[str]` warnings).
 - `db.py` / `wireguard.py` MUST NOT contain business logic.
 

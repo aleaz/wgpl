@@ -85,21 +85,7 @@ def _iface_add_args() -> list[str]:
     [
         ["validate"],
         ["db", "dump"],
-    ],
-)
-def test_read_commands_on_fresh_db_initializes(
-    fresh_db_path: str,
-    command: list[str],
-) -> None:
-    result = runner.invoke(app, command)
-    _no_traceback(result)
-    assert result.exit_code == 0
-    assert os.path.exists(fresh_db_path)
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
+        ["db", "doctor"],
         ["interface", "list"],
         ["peer", "list"],
     ],
@@ -136,9 +122,11 @@ def test_read_commands_on_empty_db(
 def test_validate_fresh_db_json(fresh_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
-    assert result.exit_code == 0
-    assert json_status_payload(result) == {"status": "ok", "issues": []}
-
+    assert result.exit_code == 1
+    assert not os.path.exists(fresh_db_path)
+    payload = json_status_payload(result)
+    assert payload["status"] == "error"
+    assert "does not exist" in payload["message"].lower()
 
 def test_interface_list_empty_db_shows_message(empty_db_path: str) -> None:
     result = runner.invoke(app, ["interface", "list"])
@@ -258,7 +246,7 @@ def test_bad_db_path_json_error(bad_db_path: str) -> None:
     assert result.exit_code == 1
     payload = json_status_payload(result)
     assert payload["status"] == "error"
-    assert "directory does not exist" in payload["message"].lower()
+    assert "database does not exist" in payload["message"].lower()
 
 
 def test_corrupt_db_json_error(corrupt_db_path: str) -> None:

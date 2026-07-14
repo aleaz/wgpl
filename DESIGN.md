@@ -148,15 +148,28 @@ cli.py (Typer / presentation)
         → routing.py (derive AllowedIPs — pure functions)
         → integrity.py / wireformat.py (invariants and export boundaries)
         → refs.py / ipam.py / audit.py / restore.py / consistency.py / validators.py
+        → fields.py (leaf: name regex + DNS/MTU/keepalive cascade helpers)
 ```
 
 | Layer | Modules | Rules |
 |-------|---------|-------|
-| Presentation | `cli.py` | No direct `db` access; stdout/stderr contract; `--json` redaction |
+| Presentation | `cli.py` | No direct `db` access; stdout/stderr contract; `--json` redaction. May call `dbpath` only for exclusive secret output paths (e.g. QR PNG). Read commands wrap `core.force_readonly()` so they never create or mutate the live DB. |
 | Business | `core.py`, `refs.py`, `ipam.py`, `audit.py`, `restore.py`, `consistency.py`, `validators.py` | No Typer; no stdout/stderr; orchestrates mutations and reads |
 | Routing derivation | `routing.py` | Pure functions; single source of AllowedIPs; no I/O |
 | Invariants | `integrity.py`, `wireformat.py` | Called from `core`, not from `cli` or `db`; `wireformat` also owns emit formatting + shared AllowedIPs/DNS/MTU/keepalive cascade |
 | Infrastructure | `db.py`, `dbpath.py`, `wireguard.py` | No business logic |
+
+### Validation ownership (put checks in the right module)
+
+| Kind of check | Module | Examples |
+|---------------|--------|----------|
+| CLI / mutation **input** shape | `validators.py` | endpoint, DNS string, public key (normalize), name charset |
+| Activation / export **fail-closed** invariants | `integrity.py` | `assert_peer_activation`, `assert_exportable_*`, wire-safe keys, pool membership |
+| Read-only **issue reports** for operators | `consistency.py` | `validate_state` / topology warnings and errors for `wgpl validate` |
+| Emit **formatting** of `.conf` + shared AllowedIPs/cascade | `wireformat.py` | `build_server_config` / `build_client_config`; does not choose routes |
+| Leaf cascade helpers (no other `wgpl` imports) | `fields.py` | `NAME_RE`, effective DNS/MTU/keepalive |
+
+Do **not** merge `integrity` and `consistency`: the first fails closed on mutate/emit; the second reports severities for humans/CI. Avoid top-level import cycles between `validators` ↔ `wireformat` ↔ `integrity` (lazy imports are intentional there).
 
 ## Data flow
 

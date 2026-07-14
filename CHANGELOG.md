@@ -44,9 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking (pre-release):** peer mutations require `-i` / `--interface` (no positional interface); examples: `peer add NAME -i IFACE`, `peer update PEER_ID -i IFACE`
 - **Breaking (pre-release):** `--json` resource/list success always uses `{"status":"success","data":…}`; typed actions/reports (`apply`, `validate`, `db doctor`, restore/remove acks) expose top-level `status` without double-wrapping under `data`
-- Read commands open the database readonly (no empty DB file created on list/show/status)
+- Read commands open the database readonly via `force_readonly` (list/show/status/validate/doctor diagnose/dump); missing DB no longer creates an empty file on those paths
+- Removed unused `db.get_readonly_db`; readonly access is solely via `force_readonly` + `get_db`
 - CLI UX messages: human-mode `peer config` / ASCII `peer qr` warn on stderr about private keys; wrong `-i` with a unique peer prefix raises interface mismatch (not "not found"); `peer add -i` with an unknown interface hints `wgpl peer add <NAME> -i <INTERFACE>`
 - Docs/help coherence: peer refs documented as UUID/hex prefix only (not node names); runbook examples and `peer list --interface`; `--db` / `WGPL_DB_PATH` and multi-interface `-i` help; `--json` stdout/stderr contract in README and `docs/cli.md`
+- DESIGN/architecture: documented validation ownership (`validators` / `integrity` / `consistency` / `wireformat` / `fields`) and the helper ring around `core`
 - Maintainability (#2–#6): unified DNS/MTU/keepalive cascade and name regex via `fields.py`; removed `PeerResolvePolicy` and unused `wireguard.run_wg_command`; activation IP collisions raise `IpAlreadyInUseError`; trivial `_is_peer_active` / `_normalize_db_path` wrappers removed
 - CLI skips database open for `--help`; permission-denied guidance prefers `--db` / ownership over bare `sudo`
 - Mutations (`peer add` / `remove`, `interface add`) print apply hints; soft-delete messaging clarifies prune

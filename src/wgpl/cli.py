@@ -226,8 +226,6 @@ def main(
     if _is_help_invocation():
         return
 
-    # Remove core.ensure_database() since we auto-initialize on write connections
-
 
 def _exit_error(
     ctx: typer.Context | None,
@@ -1574,42 +1572,47 @@ def validate_cmd(
 ) -> None:
     """Validate routing topology, IP pool allocations, and semantic consistency of the active configuration."""
     try:
-        result = core.validate_state(interface)
-        if ctx.obj.get("json"):
-            _output_status(
-                ctx,
-                str(result["status"]),
-                **{k: v for k, v in dict(result).items() if k != "status"},
-            )
-        elif result["status"] == "ok":
-            scope = interface or "database"
-            peers_count = len(list(core.list_peers(interface, show_all=True)))
-            console.print(f"[green]Validation passed for {scope} ({peers_count} peers)[/green]")
-        else:
-            issues = result["issues"]
-            if not isinstance(issues, list):
-                raise WgplException(
-                    "Invalid validate_state response: issues must be a list"
+        with core.force_readonly():
+            result = core.validate_state(interface)
+            if ctx.obj.get("json"):
+                _output_status(
+                    ctx,
+                    str(result["status"]),
+                    **{k: v for k, v in dict(result).items() if k != "status"},
                 )
-            for issue in issues:
-                iface = _safe_markup(str(issue.get("interface") or ""))
-                peer = (
-                    f" peer {_safe_markup(str(issue['peer']))}"
-                    if issue.get("peer")
-                    else ""
-                )
-                code = _safe_markup(str(issue.get("code") or ""))
-                detail = _safe_markup(str(issue.get("detail") or ""))
-                severity = issue.get("severity", "error")
-                style = "yellow" if severity == "warning" else "red"
-                console.print(f"[{style}]{iface}{peer}: {code} — {detail}[/{style}]")
-            if result["status"] == "warning":
+            elif result["status"] == "ok":
                 scope = interface or "database"
+                peers_count = len(list(core.list_peers(interface, show_all=True)))
                 console.print(
-                    f"[yellow]Validation passed with warnings for {scope}[/yellow]"
+                    f"[green]Validation passed for {scope} ({peers_count} peers)[/green]"
                 )
-        if result["status"] == "error":
-            sys.exit(1)
+            else:
+                issues = result["issues"]
+                if not isinstance(issues, list):
+                    raise WgplException(
+                        "Invalid validate_state response: issues must be a list"
+                    )
+                for issue in issues:
+                    iface = _safe_markup(str(issue.get("interface") or ""))
+                    peer = (
+                        f" peer {_safe_markup(str(issue['peer']))}"
+                        if issue.get("peer")
+                        else ""
+                    )
+                    code = _safe_markup(str(issue.get("code") or ""))
+                    detail = _safe_markup(str(issue.get("detail") or ""))
+                    severity = issue.get("severity", "error")
+                    style = "yellow" if severity == "warning" else "red"
+                    console.print(
+                        f"[{style}]{iface}{peer}: {code} — {detail}[/{style}]"
+                    )
+                if result["status"] == "warning":
+                    scope = interface or "database"
+                    console.print(
+                        f"[yellow]Validation passed with warnings for {scope}[/yellow]"
+                    )
+            if result["status"] == "error":
+                sys.exit(1)
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -1635,7 +1638,8 @@ def db_doctor(
                     console.print(f"[green]{action}[/green]")
             return
 
-        issues = core.diagnose_database()
+        with core.force_readonly():
+            issues = core.diagnose_database()
         has_error = any(issue.get("severity", "error") == "error" for issue in issues)
         if ctx.obj.get("json"):
             _output_status(
@@ -1657,10 +1661,14 @@ def db_doctor(
                 detail = _safe_markup(str(issue.get("detail") or ""))
                 severity = issue.get("severity", "error")
                 style = "yellow" if severity == "warning" else "red"
-                console.print(f"[{style}]{iface_part}{peer_part}: {code} — {detail}[/{style}]")
-            
+                console.print(
+                    f"[{style}]{iface_part}{peer_part}: {code} — {detail}[/{style}]"
+                )
+
             if not has_error and issues:
-                console.print("[yellow]Database diagnostics passed with warnings.[/yellow]")
+                console.print(
+                    "[yellow]Database diagnostics passed with warnings.[/yellow]"
+                )
 
         if has_error:
             sys.exit(1)
@@ -1681,21 +1689,22 @@ def db_dump(
             console.print(
                 "[yellow]Warning: Output is a binary SQLite database file.[/yellow]"
             )
-        if output:
-            core.dump_database(str(output))
-        else:
-            fd, path = tempfile.mkstemp()
-            try:
-                os.close(fd)
-                os.unlink(path)
-                core.dump_database(path)
-                with open(path, "rb") as f:
-                    shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]
-            finally:
+        with core.force_readonly():
+            if output:
+                core.dump_database(str(output))
+            else:
+                fd, path = tempfile.mkstemp()
                 try:
-                    os.remove(path)
-                except FileNotFoundError:
-                    pass
+                    os.close(fd)
+                    os.unlink(path)
+                    core.dump_database(path)
+                    with open(path, "rb") as f:
+                        shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]
+                finally:
+                    try:
+                        os.remove(path)
+                    except FileNotFoundError:
+                        pass
     except WgplException as e:
         _exit_error(ctx, str(e))
 
