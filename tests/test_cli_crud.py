@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import datetime
 
@@ -277,7 +278,9 @@ def test_cli_peer_add_single_arg_hints_usage_when_interface_unknown(
     result = runner.invoke(app, ["peer", "add", "Alice"])
 
     assert result.exit_code == 2
-    output = " ".join(result.output.lower().split())
+    # Rich may insert ANSI between the two dashes of --interface when color is on.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    output = " ".join(plain.lower().split())
     assert "missing option '--interface'" in output or "missing parameter '--interface'" in output
 
 
