@@ -7,7 +7,7 @@
 
 **WGPL** is a disconnected Python CLI for **hub-and-spoke VPN topologies**. You declare **routing intent** in SQLite (the single source of truth); WGPL derives WireGuard `AllowedIPs`, allocates IPv4 addresses, tracks peer lifecycle and audit, and applies hub changes with **zero downtime** (`wg syncconf`). Bring your own OS interface (BYOI) — no more hand-picking free IPs or restarting the hub to add a peer. The kernel stays unchanged until you `apply` or remote `syncconf`.
 
-**Compatibility (1.0.x):** The `1.0.x` line follows [Semantic Versioning](https://semver.org/). Patch and minor releases in `1.0.x` will not break existing CLI commands, flags, or public `--json` field names. Breaking CLI or JSON changes require a new major version (`2.0.0`).
+**Compatibility (1.0.x):** Once `1.0.0` is released, the `1.0.x` line follows [Semantic Versioning](https://semver.org/). Patch and minor releases in `1.0.x` will not break existing CLI commands, flags, or public `--json` field names. Breaking CLI or JSON changes require a new major version (`2.0.0`).
 
 **Start here:** [Quick Start](#quick-start) · [docs/routing.md](docs/routing.md) · [Documentation map](#documentation-map)
 
@@ -82,7 +82,7 @@ A **WGPL interface** row is the hub record for one VPN domain (you may name it `
 wgpl interface add wg0 vpn.example.com <WG0_PUBKEY> 10.0.0.0/24
 
 # Attach a device (default policy: vpn_only). Positional name find-or-creates the Node.
-wgpl peer add wg0 "Alice_Laptop"
+wgpl peer add "Alice_Laptop" -i wg0
 wgpl peer list
 ```
 
@@ -184,7 +184,7 @@ Day-2 ops (validate/apply, TTL, prune, backup, deploy, client OS):
 - **Device identity** via `wgpl node`; the same device can attach to several hubs.
 - **TTL and cleanup:** `--expires`, soft delete, and prune — [runbook](docs/runbook.md#temporary-access-ttl).
 - **Fail-closed** emit/apply/restore; `chmod 600` on DB and sensitive outputs; append-only audit (no secrets in metadata) — [SECURITY.md](SECURITY.md).
-- **Strict `--json`** for automation (including derived `hub_allowed_ips` / `client_allowed_ips`): JSON/data on **stdout**, logs and errors on **stderr**.
+- **Strict `--json`** for automation (including derived `hub_allowed_ips` / `client_allowed_ips`): resource payloads use `{"status":"success","data":…}` on **stdout**; domain errors use `{"status":"error","message":…}` on stdout with human hints on **stderr**. Use `jq '.data'` / `.data[]` for resources.
 - **Wire-safe MTU** (minimum **1280** or unset); server endpoints RFC 1123 (IPv4/hostname; IPv6 endpoints rejected).
 - **BYOI deploy:** systemd, remote `syncconf`, Docker, MikroTik — [runbook — Deployment](docs/runbook.md#deployment-patterns-byoi).
 

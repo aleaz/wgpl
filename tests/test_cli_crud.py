@@ -281,6 +281,15 @@ def test_cli_peer_add_single_arg_hints_usage_when_interface_unknown(
     assert "missing option '--interface'" in output or "missing parameter '--interface'" in output
 
 
+def test_cli_peer_add_unknown_interface_flag_hints_usage(wgpl_db: str) -> None:
+    result = runner.invoke(app, ["peer", "add", "-i", "Alice"])
+
+    assert result.exit_code == 1
+    stderr = " ".join(result.stderr.split())
+    assert "not a known interface" in stderr
+    assert "wgpl peer add <NAME> -i <INTERFACE>" in stderr
+
+
 def test_cli_peer_add_missing_name_keeps_exact_one_message(wgpl_db: str) -> None:
     _setup_interface("wg0")
 

@@ -12,17 +12,17 @@ MTU values must be ≥ 1280 or unset (null); explicit low values block `validate
 1. List MTU values on live data:
 
    ```bash
-   wgpl interface list --json | jq '.[] | {name, mtu}'
-   wgpl peer list --json | jq '.[] | {name, mtu}'
+   wgpl interface list --json | jq '.data[] | {name, mtu}'
+   wgpl peer list --json | jq '.data[] | {name, mtu}'
    ```
 
 2. Fix any interface or peer with MTU below 1280:
 
    ```bash
    wgpl interface update wg0 --mtu 1280
-   wgpl peer update wg0 <PEER_ID> --mtu 1280
+   wgpl peer update <PEER_ID> -i wg0 --mtu 1280
    # or remove the override:
-   wgpl peer update wg0 <PEER_ID> --clear-mtu
+   wgpl peer update <PEER_ID> -i wg0 --clear-mtu
    ```
 
 3. Run `wgpl validate` — it must pass before you rely on `apply` or client export.
@@ -56,7 +56,7 @@ update the SQLite database only. The kernel stays stale until `apply` or remote
 ### Temporary access (TTL)
 
 ```bash
-wgpl peer add wg0 "Contractor_Audit" --expires 48h
+wgpl peer add "Contractor_Audit" -i wg0 --expires 48h
 ```
 
 Expired peers are ignored by `apply` and `interface export` until pruned.
@@ -64,9 +64,9 @@ Expired peers are ignored by `apply` and `interface export` until pruned.
 ### Deletion and garbage collection
 
 ```bash
-wgpl peer remove wg0 <PEER_ID>          # soft delete — IP freed, audit retained
-wgpl peer prune wg0                      # hard-delete inactive peer rows
-wgpl peer remove wg0 <PEER_ID> --hard   # immediate physical delete + audit event
+wgpl peer remove <PEER_ID> -i wg0          # soft delete — IP freed, audit retained
+wgpl peer prune -i wg0                      # hard-delete inactive peer rows
+wgpl peer remove <PEER_ID> -i wg0 --hard   # immediate physical delete + audit event
 wgpl node prune                          # remove orphan device identities
 ```
 
@@ -74,7 +74,7 @@ wgpl node prune                          # remove orphan device identities
 
 ```bash
 wgpl interface history wg0
-wgpl peer history wg0 <PEER_ID>
+wgpl peer history <PEER_ID> -i wg0
 wgpl node history <NODE_REF>
 ```
 
@@ -129,7 +129,7 @@ separate bridge interface that runs the peer config from the other hub.
    ```bash
    wgpl peer list                 # note the peer ID / hex prefix for Site_A_GW
    wgpl peer explain <PEER_ID>
-   wgpl --json peer list | jq '.[] | {name, hub_allowed_ips, client_allowed_ips}'
+   wgpl --json peer list | jq '.data[] | {name, hub_allowed_ips, client_allowed_ips}'
    ```
 
    For LAN↔LAN, confirm the four-leg checklist in `peer explain` shows
@@ -212,7 +212,7 @@ the full matrix. Typical WGPL commands:
 **Remote access — full tunnel**
 
 ```bash
-wgpl peer add wg0 "Road_Warrior" --allowed-ips-policy full_tunnel
+wgpl peer add "Road_Warrior" -i wg0 --allowed-ips-policy full_tunnel
 sudo wgpl apply wg0
 # Hub: FORWARD + MASQUERADE on uplink if clients need Internet
 ```
@@ -221,7 +221,7 @@ sudo wgpl apply wg0
 
 ```bash
 wgpl interface update wg0 --routed-networks "10.50.0.0/16,192.168.100.0/24"
-wgpl peer add wg0 "Road_Warrior" --allowed-ips-policy split_tunnel
+wgpl peer add "Road_Warrior" -i wg0 --allowed-ips-policy split_tunnel
 sudo wgpl apply wg0
 # Hub: ip_forward + FORWARD wg0 ↔ interface carrying those prefixes
 ```
@@ -229,7 +229,7 @@ sudo wgpl apply wg0
 **Site subnet router (LAN behind a gateway)**
 
 ```bash
-wgpl peer add wg0 "Site_A_GW" \
+wgpl peer add "Site_A_GW" -i wg0 \
   --role subnet_router \
   --routed-networks "192.168.10.0/24" \
   --allowed-ips-policy all_remote_networks \
@@ -312,7 +312,7 @@ After=wg-quick@wg0.service
 [Service]
 Type=oneshot
 Environment=WGPL_DB_PATH=/var/lib/wgpl/wgpl.db
-ExecStartPre=/usr/local/bin/wgpl peer prune wg0
+ExecStartPre=/usr/local/bin/wgpl peer prune -i wg0
 ExecStart=/usr/bin/sudo --preserve-env=WGPL_DB_PATH /usr/local/bin/wgpl apply wg0
 ```
 
@@ -348,7 +348,7 @@ wgpl interface export wg0 | ssh root@hub-host "wg syncconf wg0 /dev/stdin"
 ### MikroTik (RouterOS v7)
 
 ```bash
-wgpl --json peer list --interface wg0 | jq -r '.[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
+wgpl --json peer list -i wg0 | jq -r '.data[] | "/interface wireguard peers add interface=wg0 public-key=\"\(.public_key)\" allowed-address=\"\(.hub_allowed_ips | join(","))\""' > mikrotik_sync.rsc
 ```
 
 Import `mikrotik_sync.rsc` on the router. Subnet-router peers need `/32` plus
@@ -457,9 +457,9 @@ export — there is no weaker export path.
 WGPL does not rotate keys via `peer update`. If a private key or PSK may have
 been exposed:
 
-1. `wgpl peer remove INTERFACE PEER_ID`
+1. `wgpl peer remove PEER_ID -i INTERFACE`
 2. `sudo wgpl apply INTERFACE`
-3. `wgpl peer add INTERFACE "New_Device_Name"`
+3. `wgpl peer add "New_Device_Name" -i INTERFACE`
 4. Distribute the new client config or QR to the user.
 
 Revoke the old config on the client device.
@@ -482,8 +482,8 @@ public keys only; private keys and PSKs are never logged.
 For periodic access reviews:
 
 ```bash
-wgpl peer list --interface wg0 --json
-wgpl peer history wg0 <PEER_ID> --limit 100
+wgpl peer list -i wg0 --json
+wgpl peer history <PEER_ID> -i wg0 --limit 100
 ```
 
 Cross-check active peers against your identity source. Remove stale access with
@@ -534,7 +534,7 @@ simplify SOC2 and ISO27001 access reviews.
 | Goal | Tool |
 | --- | --- |
 | Archive history for compliance | `wgpl db dump -o archive-YYYY-MM.db`; store off-host with `chmod 600` |
-| Remove inactive peer rows (not audit) | `wgpl peer prune <interface>` |
+| Remove inactive peer rows (not audit) | `wgpl peer prune -i <interface>` |
 | Query past events | `peer history` / `interface history` / `node history` |
 
 ## Troubleshooting
@@ -585,18 +585,23 @@ export WGPL_DB_PATH=/path/you/own/wgpl.db
 wgpl --db /path/you/own/wgpl.db peer list
 ```
 
-### `peer update` argument order
+### Mutations require `-i`
 
-Unlike `peer show` / `peer config` (peer ref first, optional `-i`), mutate
-commands take **interface then peer**:
+`peer add`, `peer update`, `peer remove`, `peer prune`, and `peer history`
+always take **`-i` / `--interface`**. Peer refs come first (same as `show` /
+`config`); the interface is never a positional argument:
 
 ```bash
 # correct
-wgpl peer update wg0 PEER_ID --desc "laptop"
-wgpl peer remove wg0 PEER_ID
+wgpl peer add "Alice" -i wg0
+wgpl peer update PEER_ID -i wg0 --desc "laptop"
+wgpl peer remove PEER_ID -i wg0
+wgpl peer prune -i wg0
+wgpl peer history PEER_ID -i wg0
 
-# wrong — looks like peer show, but update requires INTERFACE first
-# wgpl peer update PEER_ID --desc "laptop"
+# wrong — interface is not positional
+# wgpl peer add wg0 "Alice"
+# wgpl peer update wg0 PEER_ID --desc "laptop"
 ```
 
 Rename a device with `wgpl node update REF --name NEW` — `peer update` has no

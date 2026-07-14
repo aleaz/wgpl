@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from typer.testing import CliRunner
 
 from wgpl.cli import app
 from wgpl import core, db
 from wgpl.routing import AllowedIpsPolicy, PeerRole
+
+from tests.json_helpers import json_success_data
 
 
 runner = CliRunner()
@@ -80,7 +80,7 @@ def test_cli_peer_config_json_derived(seeded: dict) -> None:
     peer_id = seeded["peer"]["id"]
     result = _invoke(["--json", "peer", "config", peer_id])
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert "AllowedIPs = 10.0.0.0/24" in payload["config"]
     assert payload["allowed_ips_source"] == "derived"
     assert payload["client_allowed_ips"] == ["10.0.0.0/24"]
@@ -92,7 +92,7 @@ def test_cli_peer_config_json_override(seeded: dict) -> None:
         ["--json", "peer", "config", peer_id, "--allowed-ips", "0.0.0.0/0"]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["allowed_ips_source"] == "override"
     assert payload["client_allowed_ips"] == ["0.0.0.0/0"]
     assert "AllowedIPs = 0.0.0.0/0" in payload["config"]
@@ -114,7 +114,7 @@ def test_cli_peer_list_json_includes_hub_allowed_ips(wgpl_db: str) -> None:
 
     result = _invoke(["--json", "peer", "list"])
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     site = next(p for p in payload if p["name"] == "site-a-gw")
     assert site["hub_allowed_ips"] == [
         f"{site['ip_address']}/32",
@@ -146,7 +146,7 @@ def test_cli_peer_explain_lan_to_lan(wgpl_db: str) -> None:
 
     result = _invoke(["--json", "peer", "explain", site_b["id"]])
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["hub_allowed_ips"] == [
         f"{site_b['ip_address']}/32",
         "192.168.20.0/24",
@@ -206,7 +206,7 @@ def test_cli_interface_update_routed_networks(wgpl_db: str) -> None:
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["routed_networks"] == "10.50.0.0/16,192.168.1.0/24"
 
 

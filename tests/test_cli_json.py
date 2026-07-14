@@ -11,6 +11,8 @@ from wgpl import core, db, wireguard
 from wgpl.cli import app
 from wgpl.exceptions import WgBinaryNotFoundError
 
+from tests.json_helpers import json_status_payload, json_success_data
+
 
 runner = CliRunner()
 
@@ -55,7 +57,7 @@ def test_json_interface_add_includes_dns(wgpl_db: str) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["dns"] == "1.1.1.1"
     assert payload["name"] == "wg0"
 
@@ -79,7 +81,7 @@ def test_json_interface_list(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "list"])
 
     assert result.exit_code == 0
-    interfaces = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    interfaces = json_success_data(result)
     assert len(interfaces) == 1
     assert interfaces[0]["dns"] == "1.1.1.1"
 
@@ -93,7 +95,7 @@ def test_json_interface_remove(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "remove", "wg0"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == {
+    assert json_status_payload(result) == {
         "status": "success",
         "interface": "wg0",
         "force": False,
@@ -105,14 +107,14 @@ def test_json_interface_export(wgpl_db: str, iface_pubkey: str) -> None:
         app,
         ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
     )
-    peer = json.loads(
-        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"]).stdout
-    )["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"])
+    )
 
     result = runner.invoke(app, ["--json", "interface", "export", "wg0"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert "[Peer]" in payload["config"]
     assert peer["public_key"] in payload["config"]
 
@@ -123,7 +125,7 @@ def test_json_peer_add_effective_dns(wgpl_db: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["dns"] == "1.1.1.1"
     assert len(payload["id"]) == 36
 
@@ -136,7 +138,7 @@ def test_json_peer_list_dns_fields(wgpl_db: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert result.exit_code == 0
-    peers = {p["name"]: p for p in json.loads(result.stdout).get("data", json.loads(result.stdout))}
+    peers = {p["name"]: p for p in json_success_data(result)}
     assert peers["inherited"]["dns"] == "1.1.1.1"
     assert peers["inherited"]["dns_override"] is None
     assert peers["override"]["dns"] == "9.9.9.9"
@@ -147,14 +149,14 @@ def test_json_peer_list_dns_fields(wgpl_db: str) -> None:
 def test_json_peer_list_dns_matches_peer_config(wgpl_db: str) -> None:
     _add_test_interface("wg0", dns="1.1.1.1")
     inherited_result = runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "inherited"])
-    inherited = json.loads(inherited_result.stdout).get("data", json.loads(inherited_result.stdout))
+    inherited = json_success_data(inherited_result)
 
     override_result = runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "override", "--dns", "9.9.9.9"])
-    override = json.loads(override_result.stdout).get("data", json.loads(override_result.stdout))
+    override = json_success_data(override_result)
 
     list_result = runner.invoke(app, ["--json", "peer", "list"])
     assert list_result.exit_code == 0
-    peers = {p["name"]: p for p in json.loads(list_result.stdout).get("data", json.loads(list_result.stdout))}
+    peers = {p["name"]: p for p in json_success_data(list_result)}
 
     assert peers["inherited"]["status"] == "Active"
     assert peers["override"]["status"] == "Active"
@@ -171,13 +173,15 @@ def test_json_peer_list_dns_matches_peer_config(wgpl_db: str) -> None:
 
 def test_json_peer_remove_canonical_id(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "rm"]).stdout)["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "rm"])
+    )
     short_id = peer["id"].replace("-", "")[:12]
 
     result = runner.invoke(app, ["--json", "peer", "remove", "-i", "wg0", short_id])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["id"] == peer["id"]
     assert payload["input"] == short_id
     assert payload["status"] == "success"
@@ -185,34 +189,36 @@ def test_json_peer_remove_canonical_id(wgpl_db: str) -> None:
 
 def test_json_peer_config_includes_private_key(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(
-        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "cfg"]).stdout
-    )["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "cfg"])
+    )
 
     result = runner.invoke(app, ["--json", "peer", "config", peer["id"]])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert "PrivateKey" in payload["config"]
 
 
 def test_json_peer_qr_ascii(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "qr"]).stdout)["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "qr"])
+    )
 
     result = runner.invoke(app, ["--json", "peer", "qr", peer["id"]])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert "qr" in payload
     assert payload["qr"]
 
 
 def test_json_peer_qr_output_file(wgpl_db: str) -> None:
     _add_test_interface("wg0")
-    peer = json.loads(
-        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "qrfile"]).stdout
-    )["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "qrfile"])
+    )
     output_path = Path(tempfile.mkdtemp()) / "peer.png"
 
     result = runner.invoke(
@@ -220,7 +226,7 @@ def test_json_peer_qr_output_file(wgpl_db: str) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload == {
         "status": "success",
         "path": str(output_path),
@@ -238,7 +244,7 @@ def test_json_apply(mock_sync: object, wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "apply", "wg0"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == {
+    assert json_status_payload(result) == {
         "status": "success",
         "action": "apply",
         "interface": "wg0",
@@ -258,7 +264,7 @@ def test_json_apply_missing_wg_uses_exit_error_gate(
     result = runner.invoke(app, ["--json", "apply", "wg0"])
 
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json.loads(result.stdout)
     assert payload == {
         "status": "error",
         "message": "The 'wg' command was not found.",
@@ -311,7 +317,7 @@ def test_json_interface_update(wgpl_db: str, iface_pubkey: str) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["endpoint"] == "vpn2.example.com"
     assert "re_export_clients" in payload["hints"]
 
@@ -321,9 +327,9 @@ def test_json_peer_update(wgpl_db: str, iface_pubkey: str) -> None:
         app,
         ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
     )
-    peer = json.loads(
-        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"]).stdout
-    )["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"])
+    )
 
     result = runner.invoke(
         app,
@@ -331,7 +337,7 @@ def test_json_peer_update(wgpl_db: str, iface_pubkey: str) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["dns"] == "8.8.8.8"
     assert payload["id"] == peer["id"]
 
@@ -346,7 +352,7 @@ def test_json_validate(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "validate", "wg0"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == {"status": "ok", "issues": []}
+    assert json_status_payload(result) == {"status": "ok", "issues": []}
 
 
 def test_json_validate_error(wgpl_db: str, iface_pubkey: str) -> None:
@@ -354,9 +360,9 @@ def test_json_validate_error(wgpl_db: str, iface_pubkey: str) -> None:
         app,
         ["interface", "add", "wg0", "vpn.example.com", iface_pubkey, "10.0.0.0/24"],
     )
-    peer = json.loads(
-        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"]).stdout
-    )["data"]
+    peer = json_success_data(
+        runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "phone"])
+    )
     with db.get_db() as conn:
         conn.execute(
             "UPDATE peers SET ip_address = ? WHERE id = ?",
@@ -367,7 +373,7 @@ def test_json_validate_error(wgpl_db: str, iface_pubkey: str) -> None:
     result = runner.invoke(app, ["--json", "validate", "wg0"])
 
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert len(payload["issues"]) >= 1
 
@@ -385,6 +391,6 @@ def test_json_interface_update_pool_rejected(wgpl_db: str, iface_pubkey: str) ->
     )
 
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert "pool" in payload["message"].lower()

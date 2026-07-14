@@ -56,7 +56,6 @@ from .exceptions import (
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
-    PeersOutsidePoolError,
     WgplException,
 )
 

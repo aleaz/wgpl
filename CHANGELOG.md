@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `wgpl status` overview command; `peer list --format compact`; honor `COLUMNS` for stdout table width
 - Peer `list` / `show` JSON includes additive `interface` (hub name) alongside existing `interface_id`
 - `fields.py` SSOT for entity `NAME_RE` and peer-over-interface DNS/MTU/keepalive cascade helpers
 - Collision subclasses `NodeAlreadyAttachedError` and `RoutedNetworkOverlapError` (inherit `PeerAlreadyExistsError` for CLI compatibility)
@@ -41,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- CLI UX messages: human-mode `peer config` / ASCII `peer qr` warn on stderr about private keys; wrong `-i` with a unique peer prefix raises interface mismatch (not "not found"); `peer add` with a single unknown positional hints `wgpl peer add <INTERFACE> <NAME>`
+- **Breaking (pre-release):** peer mutations require `-i` / `--interface` (no positional interface); examples: `peer add NAME -i IFACE`, `peer update PEER_ID -i IFACE`
+- **Breaking (pre-release):** `--json` resource/list success always uses `{"status":"success","data":…}`; typed actions/reports (`apply`, `validate`, `db doctor`, restore/remove acks) expose top-level `status` without double-wrapping under `data`
+- Read commands open the database readonly (no empty DB file created on list/show/status)
+- CLI UX messages: human-mode `peer config` / ASCII `peer qr` warn on stderr about private keys; wrong `-i` with a unique peer prefix raises interface mismatch (not "not found"); `peer add -i` with an unknown interface hints `wgpl peer add <NAME> -i <INTERFACE>`
 - Docs/help coherence: peer refs documented as UUID/hex prefix only (not node names); runbook examples and `peer list --interface`; `--db` / `WGPL_DB_PATH` and multi-interface `-i` help; `--json` stdout/stderr contract in README and `docs/cli.md`
 - Maintainability (#2–#6): unified DNS/MTU/keepalive cascade and name regex via `fields.py`; removed `PeerResolvePolicy` and unused `wireguard.run_wg_command`; activation IP collisions raise `IpAlreadyInUseError`; trivial `_is_peer_active` / `_normalize_db_path` wrappers removed
 - CLI skips database open for `--help`; permission-denied guidance prefers `--db` / ownership over bare `sudo`
@@ -89,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `wgpl apply --json` reports a missing/`wg` binary failure as `{"status":"error","message":…}` on stdout (same `_exit_error` gate as other domain failures); the remote `interface export | ssh` tip is a stderr hint and is not embedded in `message`
+- Peer-add usage hint matches required `-i` syntax
 - `wgpl db restore` no longer rejects a backup whose only validation issues are warnings (e.g. a subnet router without an effective keepalive); it fails closed on error-severity issues only, so a state the CLI can create is always restorable from its own backup
 - `peer show --json` redacts private keys and preshared keys (consistent with `peer list --json`)
 - Malformed wire-format fields in the database rejected on export, restore, and apply

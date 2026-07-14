@@ -246,13 +246,15 @@ def _exit_error(
 
 
 def _output(ctx: typer.Context, data: dict[str, Any] | list[Any]) -> None:
-    """Output data as JSON to stdout if the --json flag was provided."""
+    """Emit resource/list JSON as ``{"status": "success", "data": ...}`` on stdout."""
     if ctx.obj.get("json"):
-        if isinstance(data, dict) and "status" in data:
-            print(json.dumps(data))
-        else:
-            print(json.dumps({"status": "success", "data": data}))
+        print(json.dumps({"status": "success", "data": data}))
 
+
+def _output_status(ctx: typer.Context, status: str, **fields: Any) -> None:
+    """Emit a typed action/report JSON object with top-level ``status`` (no ``data`` wrap)."""
+    if ctx.obj.get("json"):
+        print(json.dumps({"status": status, **fields}))
 
 def _extract_hints(result: Mapping[str, object]) -> list[str]:
     hints = result.get("hints")
@@ -367,7 +369,9 @@ def interface_remove(
     try:
         core.remove_interface(interface, force=force)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "interface": interface, "force": force})
+            _output_status(
+                ctx, "success", interface=interface, force=force
+            )
         else:
             if force:
                 console.print(
@@ -745,7 +749,7 @@ def node_remove(
     try:
         core.remove_node(ref, force=force)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "node": ref, "force": force})
+            _output_status(ctx, "success", node=ref, force=force)
         else:
             console.print(f"[green]Removed node {ref}[/green]")
     except WgplException as e:
@@ -758,7 +762,7 @@ def node_prune(ctx: typer.Context) -> None:
     try:
         removed = core.prune_nodes()
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "removed_count": removed})
+            _output_status(ctx, "success", removed_count=removed)
         else:
             console.print(f"[green]Pruned {removed} orphan node(s)[/green]")
     except WgplException as e:
@@ -875,8 +879,8 @@ def peer_add(
                     _exit_error(
                         ctx,
                         f"'{interface}' is not a known interface. "
-                        "Usage: wgpl peer add <INTERFACE> <NAME> "
-                        "(or wgpl peer add <INTERFACE> --node <ref>).",
+                        "Usage: wgpl peer add <NAME> -i <INTERFACE> "
+                        "(or wgpl peer add -i <INTERFACE> --node <ref>).",
                     )
                 except AmbiguousInterfaceError:
                     pass
@@ -1037,7 +1041,9 @@ def peer_remove(
         )
         core.remove_peer(interface, canonical_id, hard=hard)
         if ctx.obj.get("json"):
-            _output(ctx, {"status": "success", "id": canonical_id, "input": peer_id})
+            _output_status(
+                ctx, "success", id=canonical_id, input=peer_id
+            )
         else:
             if hard:
                 console.print(
@@ -1069,9 +1075,11 @@ def peer_prune(
     try:
         deleted = core.prune_peers(interface)
         if ctx.obj.get("json"):
-            _output(
+            _output_status(
                 ctx,
-                {"status": "success", "interface": interface, "deleted_count": deleted},
+                "success",
+                interface=interface,
+                deleted_count=deleted,
             )
         else:
             console.print(
@@ -1081,10 +1089,7 @@ def peer_prune(
         _exit_error(ctx, str(e))
 
 
-@peer_app.command(
-    "update",
-    epilog="Argument order: INTERFACE then PEER_ID (unlike peer show / config / qr).",
-)
+@peer_app.command("update")
 def peer_update(
     ctx: typer.Context,
     peer_id: str = typer.Argument(
@@ -1097,7 +1102,9 @@ def peer_update(
         help="Interface name or ID (e.g. wg0 or 1)",
     ),
     name: str | None = typer.Option(
-        None, "--name", help="DEPRECATED: Use 'node update' to change names"
+        None,
+        "--name",
+        help="Removed: use 'wgpl node update <ref> --name' to rename a device",
     ),
     ip: str | None = typer.Option(
         None, "--ip", help="New peer IP from the interface pool"
@@ -1454,9 +1461,11 @@ def peer_qr(
                     peer_id, interface, access=core.PeerAccess.EXPORT_SECRET
                 )
                 if ctx.obj.get("json"):
-                    _output(
+                    _output_status(
                         ctx,
-                        {"status": "success", "path": str(output), "peer_id": canonical_id},
+                        "success",
+                        path=str(output),
+                        peer_id=canonical_id,
                     )
                 else:
                     console.print(
@@ -1510,7 +1519,7 @@ def status_cmd(ctx: typer.Context) -> None:
 
         db_path = _safe_markup(str(core.get_db_path()))
         out_console.print()
-        out_console.print(f"[bold]WGPL Status[/bold]", justify="center")
+        out_console.print("[bold]WGPL Status[/bold]", justify="center")
         out_console.print()
         _print_show_table(
             "Database Overview",
@@ -1567,7 +1576,11 @@ def validate_cmd(
     try:
         result = core.validate_state(interface)
         if ctx.obj.get("json"):
-            _output(ctx, result)
+            _output_status(
+                ctx,
+                str(result["status"]),
+                **{k: v for k, v in dict(result).items() if k != "status"},
+            )
         elif result["status"] == "ok":
             scope = interface or "database"
             peers_count = len(list(core.list_peers(interface, show_all=True)))
@@ -1616,7 +1629,7 @@ def db_doctor(
         if repair:
             actions = core.repair_database()
             if ctx.obj.get("json"):
-                _output(ctx, {"status": "repaired", "actions": actions})
+                _output_status(ctx, "repaired", actions=actions)
             else:
                 for action in actions:
                     console.print(f"[green]{action}[/green]")
@@ -1625,12 +1638,10 @@ def db_doctor(
         issues = core.diagnose_database()
         has_error = any(issue.get("severity", "error") == "error" for issue in issues)
         if ctx.obj.get("json"):
-            _output(
+            _output_status(
                 ctx,
-                {
-                    "status": "ok" if not issues else ("error" if has_error else "warning"),
-                    "issues": issues,
-                },
+                "ok" if not issues else ("error" if has_error else "warning"),
+                issues=issues,
             )
         elif not issues:
             console.print("[green]No database issues detected.[/green]")
@@ -1729,8 +1740,8 @@ def db_restore(
         for warning in warnings:
             console.print(f"[yellow]{warning}[/yellow]")
         if ctx.obj.get("json"):
-            _output(
-                ctx, {"status": "success", "action": "restore", "warnings": warnings}
+            _output_status(
+                ctx, "success", action="restore", warnings=warnings
             )
         else:
             console.print("[green]Database successfully restored.[/green]")
@@ -1750,8 +1761,8 @@ def apply(
     try:
         core.sync_interface(interface)
         if ctx.obj.get("json"):
-            _output(
-                ctx, {"status": "success", "action": "apply", "interface": interface}
+            _output_status(
+                ctx, "success", action="apply", interface=interface
             )
         else:
             console.print(

@@ -181,7 +181,7 @@ Assume disjoint CIDRs (required):
 On **HUB1**, announce the remote side via a bridge peer:
 
 ```bash
-wgpl peer add hub1 "Hub2_GW" --role subnet_router \
+wgpl peer add "Hub2_GW" -i hub1 --role subnet_router \
   --routed-networks 10.1.0.0/24,192.168.40.0/24 \
   --allowed-ips-policy all_remote_networks \
   --keepalive 25

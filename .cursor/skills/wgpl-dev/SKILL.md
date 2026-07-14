@@ -23,13 +23,15 @@ wgpl interface list
 
 # 2. Create peers (IP, keypair, and PSK are generated automatically)
 #    A positional name find-or-creates the device node; --node attaches an existing one
-wgpl peer add wg0 "Johns_Phone"
-wgpl peer add wg0 "Server" --ip 10.0.0.50
-wgpl peer add wg0 --node "Johns_Phone"   # attach an existing device (e.g. to a 2nd hub)
-wgpl peer add wg0 "Guest" --expires 7d
-wgpl peer list --interface wg0
-wgpl peer list --interface wg0 --expired
-wgpl peer list --interface wg0 --all
+wgpl peer add "Johns_Phone" -i wg0
+wgpl peer add "Server" -i wg0 --ip 10.0.0.50
+wgpl peer add -i wg0 --node "Johns_Phone"   # attach an existing device (e.g. to a 2nd hub)
+wgpl peer add "Guest" -i wg0 --expires 7d
+wgpl peer list -i wg0
+wgpl peer list -i wg0 --expired
+wgpl peer list -i wg0 --all
+wgpl peer list -i wg0 -f compact
+wgpl status
 
 # 2a. Device identity (global nodes)
 wgpl node add "Work_Laptop" --desc "CEO laptop"
@@ -42,13 +44,13 @@ wgpl node history "Johns_Phone"
 
 # 2b. Update peer attachment without rotating keys (device rename is `node update`)
 wgpl interface update wg0 --endpoint vpn2.example.com
-wgpl peer update wg0 <PEER_ID> --ip 10.0.0.55
-wgpl peer update wg0 <PEER_ID> --desc "CEO laptop" --mtu 1280
+wgpl peer update <PEER_ID> -i wg0 --ip 10.0.0.55
+wgpl peer update <PEER_ID> -i wg0 --desc "CEO laptop" --mtu 1280
 wgpl validate wg0
 
 # 2c. Routing (subnet routers, split/full tunnel) — see docs/routing.md
 wgpl interface update wg0 --routed-networks "10.50.0.0/16"
-wgpl peer add wg0 "Site_A_GW" --role subnet_router \
+wgpl peer add "Site_A_GW" -i wg0 --role subnet_router \
   --routed-networks "192.168.10.0/24" \
   --allowed-ips-policy all_remote_networks --keepalive 25
 wgpl peer list                  # copy peer ID / hex prefix for Site_A_GW
@@ -63,10 +65,10 @@ wgpl peer qr <PEER_ID>
 wgpl peer qr <PEER_ID> -o phone.png
 
 # 3b. Remove peers (soft-delete by default)
-wgpl peer remove wg0 <PEER_ID>
-wgpl peer remove wg0 <PEER_ID> --hard
-wgpl peer prune wg0
-wgpl peer history wg0 <PEER_ID>
+wgpl peer remove <PEER_ID> -i wg0
+wgpl peer remove <PEER_ID> -i wg0 --hard
+wgpl peer prune -i wg0
+wgpl peer history <PEER_ID> -i wg0
 
 # 3c. Remove interface (blocked if peers remain unless --force)
 wgpl interface remove wg0 --force
@@ -87,7 +89,9 @@ wgpl db restore --yes backup.db
 ## Automation (M2M)
 
 - Global flag `--json` / `-j`: data on stdout, logs on stderr.
-- Example: `NEW_IP=$(wgpl --json peer add wg0 "Backup" | jq -r '.ip_address')`
+- Resource/list success: `{"status":"success","data":…}`; domain errors: `{"status":"error","message":…}` on stdout.
+- Typed reports/actions (`validate`, `doctor`, `apply`, `restore`, remove/prune ack): top-level `status` without a `data` wrap.
+- Example: `NEW_IP=$(wgpl --json peer add "Backup" -i wg0 | jq -r '.data.ip_address')`
 - Database location: `~/.wgpl.db` by default; override with `WGPL_DB_PATH` or `--db`.
 
 ## Operational notes
@@ -101,6 +105,7 @@ wgpl db restore --yes backup.db
   `peer prune` hard-deletes inactive peer rows with a `pruned` audit event each (audit log itself is never pruned). Node identities survive `peer prune`; use `node prune` to drop orphan devices.
 - `interface remove` fails if any peer rows exist; use `peer prune` / `peer remove` first, or `--force` (audited cascade).
 - After `peer remove` or `peer prune`, run `wgpl apply` or `interface export` to sync the server.
+- Mutations (`peer add` / `update` / `remove` / `prune` / `history`) require `-i INTERFACE`.
 
 ## Code map
 
@@ -122,8 +127,8 @@ wgpl db restore --yes backup.db
 ## Commands
 
 Implemented: `interface` CRUD + update, `node` CRUD + prune + history, `peer` CRUD
-+ update + prune + `explain` (hybrid `peer add <name>` / `--node <ref>`),
-routing flags (`--role`, `--routed-networks`, `--allowed-ips-policy`), `validate`,
++ update + prune + `explain` (hybrid `peer add <name> -i <iface>` / `-i <iface> --node <ref>`),
+`status`, routing flags (`--role`, `--routed-networks`, `--allowed-ips-policy`), `validate`,
 `apply`, `db dump`, `db restore`, `--json` M2M mode.
 
 Routing model: [docs/routing.md](../../docs/routing.md). Hub relay ops:

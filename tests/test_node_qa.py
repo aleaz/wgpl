@@ -15,7 +15,6 @@ from wgpl.exceptions import (
     NodeAlreadyExistsError,
     NodeHasPeersError,
     NodeNotFoundError,
-    PeerAlreadyExistsError,
     WgplException,
 )
 

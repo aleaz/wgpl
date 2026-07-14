@@ -2,19 +2,17 @@ import datetime
 import json
 import sqlite3
 import os
-import stat
 import threading
 from contextlib import contextmanager
 from enum import StrEnum
 from typing import Any, Generator
-from contextvars import ContextVar
 import time
 import random
 
 try:
     import pwd
 except ImportError:
-    pwd = None
+    pwd = None  # type: ignore[assignment]
 
 
 from .exceptions import (

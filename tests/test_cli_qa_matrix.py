@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 import tempfile
@@ -12,6 +11,8 @@ from typer.testing import CliRunner
 
 from wgpl import db, wireguard
 from wgpl.cli import app
+
+from tests.json_helpers import json_status_payload, json_success_data
 
 
 runner = CliRunner()
@@ -136,7 +137,7 @@ def test_validate_fresh_db_json(fresh_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == {"status": "ok", "issues": []}
+    assert json_status_payload(result) == {"status": "ok", "issues": []}
 
 
 def test_interface_list_empty_db_shows_message(empty_db_path: str) -> None:
@@ -157,7 +158,7 @@ def test_interface_list_empty_db_json(empty_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "list"])
     _no_traceback(result)
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == []
+    assert json_success_data(result) == []
 
 
 # --- S3: missing entities on empty DB ---
@@ -196,7 +197,7 @@ def test_validate_missing_interface_json(empty_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate", MISSING_IFACE])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert "not found" in payload["message"].lower()
 
@@ -255,7 +256,7 @@ def test_bad_db_path_json_error(bad_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert "directory does not exist" in payload["message"].lower()
 
@@ -264,6 +265,6 @@ def test_corrupt_db_json_error(corrupt_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert payload["message"]

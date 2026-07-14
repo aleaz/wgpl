@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 import os
 import stat
 import tempfile
@@ -16,6 +15,8 @@ from typer.testing import CliRunner, Result
 
 from wgpl import core, db, wireguard
 from wgpl.cli import app
+
+from tests.json_helpers import json_status_payload, json_success_data
 
 runner = CliRunner()
 
@@ -76,7 +77,7 @@ def _add_peer(
         args.extend([f"--{key.replace('_', '-')}", str(value)])
     result = _invoke(args)
     assert result.exit_code == 0, result.output
-    return json.loads(result.stdout).get("data", json.loads(result.stdout))
+    return json_success_data(result)
 
 
 @pytest.fixture
@@ -123,7 +124,7 @@ def test_cli_interface_add_all_options_json(wgpl_db: str) -> None:
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["port"] == 51821
     assert payload["dns"] == "1.1.1.1"
     assert payload["desc"] == "lab"
@@ -138,7 +139,7 @@ def test_cli_interface_show_human_and_json(seeded: dict) -> None:
 
     j = _invoke(["--json", "interface", "show", "wg0"])
     assert j.exit_code == 0
-    payload = json.loads(j.stdout).get("data", json.loads(j.stdout))
+    payload = json_success_data(j)
     assert payload["name"] == "wg0"
     assert payload["mtu"] == 1420
 
@@ -176,7 +177,7 @@ def test_cli_interface_update_set_fields_json(seeded: dict) -> None:
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["endpoint"] == "vpn2.example.com"
     assert payload["port"] == 51900
     assert payload["public_key"] == new_key
@@ -201,7 +202,7 @@ def test_cli_interface_update_clear_flags_json(seeded: dict) -> None:
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload.get("dns") is None
     assert payload.get("desc") is None
     assert payload.get("mtu") is None
@@ -232,7 +233,7 @@ def test_cli_interface_export_human_and_json(seeded: dict) -> None:
 
     j = _invoke(["--json", "interface", "export", "wg0"])
     assert j.exit_code == 0
-    assert "[Peer]" in json.loads(j.stdout).get("data", json.loads(j.stdout))["config"]
+    assert "[Peer]" in json_success_data(j)["config"]
 
 
 def test_cli_interface_history_pagination(seeded: dict) -> None:
@@ -240,7 +241,7 @@ def test_cli_interface_history_pagination(seeded: dict) -> None:
         ["--json", "interface", "history", "wg0", "--limit", "2", "--offset", "0"]
     )
     assert j.exit_code == 0
-    events = json.loads(j.stdout).get("data", json.loads(j.stdout))
+    events = json_success_data(j)
     assert isinstance(events, list)
     assert len(events) >= 1
 
@@ -288,7 +289,7 @@ def test_cli_peer_show_json_redacts(seeded: dict) -> None:
     peer_id = seeded["peer"]["id"]
     result = _invoke(["--json", "peer", "show", peer_id])
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert "private_key" not in payload
     assert "preshared_key" not in payload
 
@@ -311,21 +312,21 @@ def test_cli_peer_list_filters(wgpl_db: str) -> None:
 
     by_iface = _invoke(["--json", "peer", "list", "--interface", "wg0"])
     assert by_iface.exit_code == 0
-    names = {p["name"] for p in json.loads(by_iface.stdout).get("data", json.loads(by_iface.stdout))}
+    names = {p["name"] for p in json_success_data(by_iface)}
     assert "active" in names
     assert "removed" not in names
 
     expired_only = _invoke(["--json", "peer", "list", "--expired"])
     assert expired_only.exit_code == 0
-    expired_peers = json.loads(expired_only.stdout).get("data", json.loads(expired_only.stdout))
+    expired_peers = json_success_data(expired_only)
     assert any(p["name"] == "expired" for p in expired_peers)
     assert all(p["status"] == "Expired" for p in expired_peers)
 
     all_peers = _invoke(["--json", "peer", "list", "--all"])
     assert all_peers.exit_code == 0
-    all_names = {p["name"] for p in json.loads(all_peers.stdout).get("data", json.loads(all_peers.stdout))}
+    all_names = {p["name"] for p in json_success_data(all_peers)}
     assert "removed" in all_names
-    assert active["id"] in {p["id"] for p in json.loads(all_peers.stdout).get("data", json.loads(all_peers.stdout))}
+    assert active["id"] in {p["id"] for p in json_success_data(all_peers)}
 
 
 def test_cli_peer_update_set_and_clear_json(seeded: dict) -> None:
@@ -352,7 +353,7 @@ def test_cli_peer_update_set_and_clear_json(seeded: dict) -> None:
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
+    payload = json_success_data(result)
     assert payload["ip_address"] == "10.0.0.10"
     assert payload["dns"] == "8.8.8.8"
     assert payload["desc"] == "new-desc"
@@ -374,7 +375,7 @@ def test_cli_peer_update_set_and_clear_json(seeded: dict) -> None:
         ]
     )
     assert cleared.exit_code == 0
-    cp = json.loads(cleared.stdout).get("data", json.loads(cleared.stdout))
+    cp = json_success_data(cleared)
     assert cp.get("dns_override") is None
     assert cp.get("desc") is None
     assert cp.get("mtu_override") is None
@@ -436,7 +437,7 @@ def test_cli_peer_config_allowed_ips(seeded: dict) -> None:
         ]
     )
     assert j.exit_code == 0
-    assert "AllowedIPs" in json.loads(j.stdout).get("data", json.loads(j.stdout))["config"]
+    assert "AllowedIPs" in json_success_data(j)["config"]
 
 
 def test_cli_peer_config_requires_interface_with_two_vpn(wgpl_db: str) -> None:
@@ -467,7 +468,7 @@ def test_cli_peer_qr_allowed_ips_json(seeded: dict) -> None:
         ]
     )
     assert result.exit_code == 0
-    assert json.loads(result.stdout).get("data", json.loads(result.stdout))["qr"]
+    assert json_success_data(result)["qr"]
 
 
 # --- Top-level and DB ---
@@ -476,7 +477,7 @@ def test_cli_peer_qr_allowed_ips_json(seeded: dict) -> None:
 def test_cli_validate_global_and_scoped(seeded: dict) -> None:
     ok = _invoke(["--json", "validate"])
     assert ok.exit_code == 0
-    assert json.loads(ok.stdout).get("data", json.loads(ok.stdout))["status"] == "ok"
+    assert json_status_payload(ok)["status"] == "ok"
 
     scoped = _invoke(["--json", "validate", "wg0"])
     assert scoped.exit_code == 0
@@ -508,7 +509,7 @@ def test_cli_db_restore_round_trip(seeded: dict, wgpl_db: str) -> None:
             binary = handle.read()
         result = _invoke(["--json", "db", "restore", "--yes", "-"], input=binary)
         assert result.exit_code == 0
-        assert json.loads(result.stdout).get("data", json.loads(result.stdout))["status"] == "success"
+        assert json_status_payload(result)["status"] == "success"
         restored = db.get_peer(peer_id)
         assert restored is not None
         assert restored["name"] == "phone"
