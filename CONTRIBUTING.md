@@ -130,15 +130,27 @@ If you do **not** use Antigravity, you can remove local AG Kit with `rm -rf .age
 Before treating the project as production-published or org-ready:
 
 1. **Branch protection** on `main` — require CI status checks before merge
-2. **GitHub Environment `pypi`** — required reviewers (and optional wait timer) for the release workflow
-3. **Security** — Dependabot alerts and secret scanning enabled
-4. **Releases** — annotated tag `vX.Y.Z` must match `version` in `pyproject.toml` (enforced in CI)
+2. **GitHub Environment `pypi`** — optional required reviewers / wait timer for the release workflow’s Publish job
+3. **PyPI Trusted Publisher** — on [PyPI publishing settings](https://pypi.org/manage/account/publishing/) (pending publisher is fine before the first upload), register project `wgpl` with:
+   - Owner: `aleaz`
+   - Repository: `wgpl`
+   - Workflow filename: `release.yml`
+   - Environment name: `pypi`
+4. **GHCR** — container package `wgpl` linked to this repo with Actions write access (tag workflow pushes `ghcr.io/aleaz/wgpl`)
+5. **Security** — Dependabot alerts and secret scanning enabled
+6. **Releases** — annotated tag `vX.Y.Z` must match `version` in `pyproject.toml` (enforced in CI)
 
 **Release cut smoke check** (before pushing `vX.Y.Z`):
 
 1. `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) is empty (or only post-release notes); release notes live under `[X.Y.Z]`
 2. `version` in `pyproject.toml` equals the tag without the `v` prefix
-3. [`.github/workflows/release.yml`](.github/workflows/release.yml) still builds `wgpl-linux-amd64` and attaches `SHA256SUMS` (matches README experimental binary section)
+3. [`.github/workflows/release.yml`](.github/workflows/release.yml) still builds `wgpl-linux-amd64` and attaches `SHA256SUMS` with a basename path (matches README experimental binary section)
+
+**After the tag workflow finishes:**
+
+1. GitHub Release assets: `wgpl-linux-amd64` and `SHA256SUMS` (`sha256sum -c SHA256SUMS` next to the binary)
+2. `curl -sI https://pypi.org/pypi/wgpl/json` returns 200; `uv tool install wgpl` / `wgpl --version`
+3. `docker pull ghcr.io/aleaz/wgpl:X.Y.Z` succeeds
 
 See [MAINTAINERS.md](MAINTAINERS.md).
 
