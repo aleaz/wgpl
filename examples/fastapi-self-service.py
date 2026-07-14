@@ -68,8 +68,9 @@ async def onboard_employee(
             "-j",
             "peer",
             "add",
-            req.interface_name,
             safe_name,
+            "-i",
+            req.interface_name,
             "--expires",
             req.expires,
         ]
@@ -77,8 +78,11 @@ async def onboard_employee(
         result = subprocess.run(
             add_cmd, capture_output=True, text=True, check=True, timeout=10
         )
-        peer_data = json.loads(result.stdout)
+        peer_envelope = json.loads(result.stdout)
+        peer_data = peer_envelope.get("data") or {}
         peer_id = peer_data.get("id")
+        if not peer_id:
+            raise HTTPException(status_code=500, detail="WGPL peer add returned no id")
 
         fd, qr_path = tempfile.mkstemp(suffix=".png")
         os.close(fd)

@@ -67,7 +67,7 @@ Rename a device with `wgpl node update` — `peer update` has no `--name`.
 ### Node lifecycle
 
 - A node is created explicitly (`wgpl node add`) or implicitly via the
-  find-or-create path of `wgpl peer add <iface> <name>`.
+  find-or-create path of `wgpl peer add <name> -i <iface>`.
 - Node identity **persists** when its peers are soft-deleted or expire — the
   device is still "known" even with zero active attachments.
 - `wgpl node remove` is guarded: it refuses while attachments remain unless

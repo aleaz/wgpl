@@ -122,8 +122,37 @@ def test_peer_add_same_node_twice_idempotent(wg0_interface: str) -> None:
     peer1 = core.add_peer(wg0_interface, "phone")
     peer2 = core.add_peer(wg0_interface, "phone")
     assert peer1["id"] == peer2["id"]
+    assert peer2["name"] == "phone"
+    assert "private_key" not in peer2
+    assert "preshared_key" not in peer2
     peer3 = core.add_peer(wg0_interface, node_ref="phone")
     assert peer1["id"] == peer3["id"]
+    assert "private_key" not in peer3
+    assert "preshared_key" not in peer3
+
+
+def test_cli_peer_add_idempotent_no_secrets_human_and_json(
+    wg0_interface: str,
+) -> None:
+    from typer.testing import CliRunner
+
+    from tests.json_helpers import json_success_data
+    from wgpl.cli import app
+
+    runner = CliRunner()
+    first = runner.invoke(app, ["peer", "add", "phone", "-i", wg0_interface])
+    assert first.exit_code == 0
+    human = runner.invoke(app, ["peer", "add", "phone", "-i", wg0_interface])
+    assert human.exit_code == 0
+    human_text = (human.stdout or "") + (human.stderr or "")
+    assert "Added peer phone" in human_text
+    assert "WGPL Error" not in human.stderr
+    js = runner.invoke(app, ["--json", "peer", "add", "phone", "-i", wg0_interface])
+    assert js.exit_code == 0
+    data = json_success_data(js)
+    assert data["name"] == "phone"
+    assert "private_key" not in data
+    assert "preshared_key" not in data
 
 
 def test_peer_add_requires_exactly_one_of_name_or_node(wg0_interface: str) -> None:

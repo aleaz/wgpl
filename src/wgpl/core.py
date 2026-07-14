@@ -864,15 +864,23 @@ def add_peer(
                     f"Use 'wgpl peer update' to modify it."
                 )
             
+            # Public shape matches a fresh create; never return private/PSK keys.
             return {
                 "id": existing_peer["id"],
-                "node_name": node_name,
-                "interface_id": iface_id,
+                "name": node_name,
+                "node": node_name,
+                "node_id": node_id,
+                "node_created": node_created,
                 "ip_address": existing_peer["ip_address"],
                 "public_key": existing_peer["public_key"],
-                "private_key": existing_peer["private_key"],
-                "preshared_key": existing_peer["preshared_key"],
                 "dns": existing_peer["dns"],
+                "desc": existing_peer["desc"],
+                "mtu": existing_peer["mtu"],
+                "keepalive": existing_peer["keepalive"],
+                "role": existing_peer["role"],
+                "routed_networks": existing_peer["routed_networks"],
+                "allowed_ips_policy": existing_peer["allowed_ips_policy"],
+                "custom_allowed_ips": existing_peer["custom_allowed_ips"],
             }
 
         allocated_ip = allocate_peer_ip(iface_id, conn, ip_address)

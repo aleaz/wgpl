@@ -1099,11 +1099,6 @@ def peer_update(
         "-i",
         help="Interface name or ID (e.g. wg0 or 1)",
     ),
-    name: str | None = typer.Option(
-        None,
-        "--name",
-        help="Removed: use 'wgpl node update <ref> --name' to rename a device",
-    ),
     ip: str | None = typer.Option(
         None, "--ip", help="New peer IP from the interface pool"
     ),
@@ -1172,8 +1167,6 @@ def peer_update(
 ) -> None:
     """Update a peer's settings (IP, routing, overrides)."""
     try:
-        if name is not None:
-            _exit_error(ctx, "Peer names come from their node identity. Use 'wgpl node update <ref> --name NewName' instead.")
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
         if clear_desc and desc is not None:

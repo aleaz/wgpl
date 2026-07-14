@@ -36,8 +36,8 @@ jobs:
           wgpl interface add wg0 vpn.example.com "PubKey123456789012345678901234567890123456=" 10.0.0.0/24
 
           # Example: adding a peer from a variable or YAML loop
-          wgpl peer add wg0 "Developer_A"
-          wgpl peer add wg0 "Developer_B"
+          wgpl peer add "Developer_A" -i wg0
+          wgpl peer add "Developer_B" -i wg0
 
           # Generate the declarative configuration
           wgpl interface export wg0 > wg0.conf
