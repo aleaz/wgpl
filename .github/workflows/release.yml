@@ -90,11 +90,20 @@ jobs:
       - name: Build Standalone Linux Binary
         run: |
           uv pip install "pyinstaller==6.14.1"
-          uv run pyinstaller --onefile --name wgpl-linux-amd64 src/wgpl/cli.py
+          uv run pyinstaller \
+            --onefile \
+            --name wgpl-linux-amd64 \
+            --collect-submodules wgpl \
+            --copy-metadata wgpl \
+            --paths src \
+            src/wgpl/__main__.py
           (
             cd dist
             sha256sum wgpl-linux-amd64 > SHA256SUMS
           )
+          ./dist/wgpl-linux-amd64 --version
+          ./dist/wgpl-linux-amd64 --help >/dev/null
+
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
