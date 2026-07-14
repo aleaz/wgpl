@@ -57,8 +57,10 @@ app.add_typer(node_app, name="node")
 app.add_typer(peer_app, name="peer")
 app.add_typer(db_app, name="db")
 
+# Respect COLUMNS env var if set (useful in CI or narrow terminals)
+_TERMINAL_WIDTH = int(os.environ.get("COLUMNS", 0)) or None
 console = Console(stderr=True)  # Always write logs to stderr
-out_console = Console()  # For stdout tables if not JSON
+out_console = Console(width=_TERMINAL_WIDTH)  # For stdout tables if not JSON
 
 _STYLE_ID = typer_styles.STYLE_COMMANDS_TABLE_FIRST_COLUMN
 _STYLE_VALUE = typer_styles.STYLE_TYPES
@@ -1234,6 +1236,12 @@ def peer_list(
     all: bool = typer.Option(
         False, "--all", help="Show all peers including soft-deleted ones"
     ),
+    format: str = typer.Option(
+        "table",
+        "--format",
+        "-f",
+        help="Output format: 'table' (default) or 'compact' (one line per peer)",
+    ),
 ) -> None:
     """List peers on an interface."""
     try:
@@ -1244,6 +1252,28 @@ def peer_list(
             iface_map = {iface["id"]: iface["name"] for iface in core.list_interfaces()}
         if ctx.obj.get("json"):
             _output(ctx, _public_peer_rows(peers, iface_dns))
+        elif format == "compact":
+            if not peers:
+                console.print(
+                    f"[{typer_styles.STYLE_USAGE}]No peers found.[/{typer_styles.STYLE_USAGE}]"
+                )
+            else:
+                for p in peers:
+                    pid = _format_peer_id_display(str(p["id"]), len(peers))
+                    iface_name = iface_map.get(p["interface_id"], str(p["interface_id"]))
+                    status = core.get_peer_status(p)
+                    status_color = {
+                        "Active": "green",
+                        "Expired": "yellow",
+                        "Deleted": "red",
+                    }.get(status, "white")
+                    out_console.print(
+                        f"[{_STYLE_ID}]{pid}[/{_STYLE_ID}]  "
+                        f"{_safe_markup(iface_name)}  "
+                        f"[{_STYLE_ID}]{_safe_markup(p['name'])}[/{_STYLE_ID}]  "
+                        f"[{_STYLE_VALUE}]{p['ip_address']}[/{_STYLE_VALUE}]  "
+                        f"[{status_color}]{status}[/{status_color}]"
+                    )
         else:
             data = [dict(p) for p in peers]
             total_peers = len(data)
@@ -1442,6 +1472,83 @@ def peer_qr(
                 else:
                     console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
                     print(qr)
+    except WgplException as e:
+        _exit_error(ctx, str(e))
+
+
+# --- Status ---
+
+
+@app.command("status")
+def status_cmd(ctx: typer.Context) -> None:
+    """Show a high-level overview of the database: interfaces, peers, and nodes."""
+    try:
+        with core.force_readonly():
+            interfaces = core.list_interfaces()
+            peers = core.list_peers(show_all=False)
+            all_peers = core.list_peers(show_all=True)
+            nodes = core.list_nodes()
+
+        active_peers = [p for p in peers if core.get_peer_status(p) == "Active"]
+        expired_peers = [p for p in all_peers if core.get_peer_status(p) == "Expired"]
+
+        if ctx.obj.get("json"):
+            _output(
+                ctx,
+                {
+                    "interfaces": len(interfaces),
+                    "nodes": len(nodes),
+                    "peers": {
+                        "active": len(active_peers),
+                        "expired": len(expired_peers),
+                        "total": len(all_peers),
+                    },
+                    "db_path": str(core.get_db_path()),
+                },
+            )
+            return
+
+        db_path = _safe_markup(str(core.get_db_path()))
+        out_console.print()
+        out_console.print(f"[bold]WGPL Status[/bold]", justify="center")
+        out_console.print()
+        _print_show_table(
+            "Database Overview",
+            [
+                ("Database", db_path),
+                ("Interfaces", str(len(interfaces))),
+                ("Nodes", str(len(nodes))),
+                ("Active peers", f"[green]{len(active_peers)}[/green]"),
+                ("Expired peers", f"[yellow]{len(expired_peers)}[/yellow]" if expired_peers else "0"),
+                ("Total peers (incl. expired)", str(len(all_peers))),
+            ],
+        )
+        if interfaces:
+            rows = [
+                [
+                    _styled(_format_short_id(iface["id"]), _STYLE_ID),
+                    _styled(_safe_markup(str(iface["name"])), _STYLE_ID),
+                    _styled(_safe_markup(str(iface.get("endpoint", "—"))), _STYLE_VALUE),
+                    _styled(str(iface.get("address_pool", "—")), _STYLE_META),
+                    _styled(
+                        str(len([p for p in active_peers if p["interface_id"] == iface["id"]])),
+                        _STYLE_VALUE,
+                    ),
+                ]
+                for iface in interfaces
+            ]
+            _print_list_table(
+                "Interfaces",
+                "interfaces",
+                [
+                    ("ID", {"no_wrap": True, "min_width": 12}),
+                    ("Name", {"no_wrap": True}),
+                    ("Endpoint", {}),
+                    ("Pool", {"no_wrap": True}),
+                    ("Active Peers", {"no_wrap": True}),
+                ],
+                rows,
+            )
     except WgplException as e:
         _exit_error(ctx, str(e))
 
