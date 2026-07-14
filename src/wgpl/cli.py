@@ -42,7 +42,10 @@ _HINT_MESSAGES = {
 }
 
 app = typer.Typer(
-    help="WGPL — declarative hub-and-spoke VPN intent CLI (WireGuard Peer Lite)"
+    help=(
+        "WGPL — declarative hub-and-spoke VPN intent CLI (WireGuard Peer Lite)\n\n"
+        "Conceptual model: Node (device) -> Peer (VPN attachment) -> Interface (hub)"
+    )
 )
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
 node_app = typer.Typer(help="Manage device identities (nodes)")
@@ -98,10 +101,15 @@ def _safe_markup(value: str) -> str:
 
 
 def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
-    """Docker-like ID: full UUID when alone, short prefix when multiple peers."""
+    """Docker-like ID: full UUID when alone, 12-char hex prefix when multiple."""
     if total_peers == 1:
         return peer_id
     return peer_id.replace("-", "")[:12]
+
+
+def _format_short_id(entity_id: str) -> str:
+    """Return the 12-char hex prefix used consistently in all list tables."""
+    return str(entity_id).replace("-", "")[:12]
 
 
 def _create_base_table(
@@ -113,6 +121,7 @@ def _create_base_table(
     return Table(
         box=box.ROUNDED,
         expand=expand,
+        width=None,  # let Rich respect terminal width
         border_style=_STYLE_BORDER,
         show_edge=True,
         pad_edge=True,
@@ -651,7 +660,7 @@ def node_list(ctx: typer.Context) -> None:
         else:
             rows = [
                 [
-                    _styled(str(n["id"]).replace("-", "")[:12], _STYLE_ID),
+                    _styled(_format_short_id(n["id"]), _STYLE_ID),
                     _styled(_safe_markup(str(n["name"])), _STYLE_ID),
                     _styled(str(n.get("attachment_count", 0)), _STYLE_VALUE),
                     _styled(_safe_markup(_truncate_desc(n.get("desc"))), ""),
@@ -1261,10 +1270,10 @@ def peer_list(
                 "WireGuard Peers",
                 "peers",
                 [
-                    ("ID", {"no_wrap": True}),
-                    ("Interface", {}),
+                    ("ID", {"no_wrap": True, "min_width": 12}),
+                    ("Interface", {"no_wrap": True}),
                     ("Node", {"overflow": "fold"}),
-                    ("IP", {"overflow": "fold"}),
+                    ("IP", {"no_wrap": True}),
                     ("Status", {}),
                     ("Role", {"overflow": "fold"}),
                     ("Policy", {"overflow": "fold"}),
@@ -1447,7 +1456,7 @@ def validate_cmd(
         None, help="Interface name to check (all if omitted)"
     ),
 ) -> None:
-    """Validate database consistency (peer IPs in pool, DNS, routing topology)."""
+    """Validate routing topology, IP pool allocations, and semantic consistency of the active configuration."""
     try:
         result = core.validate_state(interface)
         if ctx.obj.get("json"):
@@ -1495,7 +1504,7 @@ def db_doctor(
         False, "--repair", help="Apply documented repairs (triggers, deleted_at)"
     ),
 ) -> None:
-    """Diagnose schema and data issues; optionally repair documented problems."""
+    """Diagnose low-level SQLite schema health, database constraints, triggers, and physical integrity."""
     try:
         if repair:
             actions = core.repair_database()
