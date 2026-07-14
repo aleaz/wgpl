@@ -46,10 +46,16 @@ def validate_path_target(db_path: str, *, label: str = "Database path") -> None:
         )
 
 
-def _connect_via_fd(fd: int) -> sqlite3.Connection:
+def _connect_via_fd(fd: int, read_only: bool = False) -> sqlite3.Connection:
     if sys.platform.startswith("linux"):
-        return sqlite3.connect(f"/proc/self/fd/{fd}")
-    return sqlite3.connect(f"/dev/fd/{fd}")
+        uri = f"file:/proc/self/fd/{fd}"
+    else:
+        uri = f"file:/dev/fd/{fd}"
+    
+    if read_only:
+        uri += "?mode=ro"
+        
+    return sqlite3.connect(uri, uri=True)
 
 
 def secure_open(
@@ -57,12 +63,13 @@ def secure_open(
     *,
     create: bool = False,
     exclusive_create: bool = False,
+    read_only: bool = False,
 ) -> int:
     """Open a database file with O_NOFOLLOW when available."""
     path = normalize_db_path(db_path)
     validate_path_target(path)
 
-    flags = os.O_RDWR
+    flags = os.O_RDONLY if read_only else os.O_RDWR
     if create:
         flags |= os.O_CREAT
     if exclusive_create:
@@ -228,6 +235,7 @@ def open_database(
     *,
     create: bool = True,
     exclusive_create: bool = False,
+    read_only: bool = False,
 ) -> sqlite3.Connection:
     """Open a SQLite database through a validated file descriptor."""
     path = normalize_db_path(db_path)
@@ -235,21 +243,22 @@ def open_database(
 
     fd: int | None = None
     try:
-        if create and not os.path.exists(path):
+        if create and not read_only and not os.path.exists(path):
             fd = secure_open(path, create=True, exclusive_create=True)
         else:
-            fd = secure_open(path, create=False)
+            fd = secure_open(path, create=False, read_only=read_only)
     except FileExistsError:
-        fd = secure_open(path, create=False)
+        fd = secure_open(path, create=False, read_only=read_only)
 
     if fd is None:
         raise WgplException(f"Failed to open database at {path}")
 
-    _fchmod_path(fd, path)
+    if not read_only:
+        _fchmod_path(fd, path)
 
     if sys.platform.startswith("linux"):
         try:
-            conn = _connect_via_fd(fd)
+            conn = _connect_via_fd(fd, read_only=read_only)
         except sqlite3.Error as exc:
             os.close(fd)
             raise WgplException(
@@ -277,13 +286,16 @@ def open_database(
             f"Database path changed between validation and open: {path}"
         )
     try:
-        conn = sqlite3.connect(path)
+        uri = f"file:{path}"
+        if read_only:
+            uri += "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
         _configure_connection(conn)
     except sqlite3.Error as exc:
         raise WgplException(f"Failed to connect to database at {path}: {exc}") from exc
     return conn
 
 
-def open_existing_database(db_path: str) -> sqlite3.Connection:
+def open_existing_database(db_path: str, read_only: bool = False) -> sqlite3.Connection:
     """Open an existing database file without creating it."""
-    return open_database(db_path, create=False)
+    return open_database(db_path, create=False, read_only=read_only)

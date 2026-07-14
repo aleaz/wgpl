@@ -65,6 +65,11 @@ def get_db_path() -> str:
     return db.get_db_path()
 
 
+def force_readonly():
+    """Force all database connections in this thread to be read-only."""
+    return db.force_readonly()
+
+
 def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
     """Reject mtu/keepalive values outside wire-safe ranges at mutation time."""
     try:

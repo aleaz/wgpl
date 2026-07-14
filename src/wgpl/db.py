@@ -2,9 +2,12 @@ import datetime
 import json
 import sqlite3
 import os
+import stat
+import threading
 from contextlib import contextmanager
 from enum import StrEnum
 from typing import Any, Generator
+from contextvars import ContextVar
 
 from .exceptions import (
     InterfaceAlreadyExistsError,
@@ -241,16 +244,63 @@ def _run_query(
 
 def _create_connection(*, verify: bool = True) -> sqlite3.Connection:
     """Creates a secure, atomic connection to the SQLite database."""
-    conn = dbpath.open_database(get_db_path(), create=True, exclusive_create=True)
+    db_path_val = get_db_path()
+    needs_init = not os.path.exists(db_path_val)
+    if needs_init:
+        init_db()
+
+    conn = dbpath.open_database(db_path_val, create=True, exclusive_create=False)
+    if verify:
+        assert_trusted_connection(conn)
+    return conn
+
+
+_thread_local = threading.local()
+
+@contextmanager
+def force_readonly() -> Generator[None, None, None]:
+    """Force all database connections in this thread to be read-only."""
+    old_val = getattr(_thread_local, "force_readonly", False)
+    _thread_local.force_readonly = True
+    try:
+        yield
+    finally:
+        _thread_local.force_readonly = old_val
+
+
+@contextmanager
+def get_db() -> Generator[sqlite3.Connection, None, None]:
+    """Simple connection context manager for single-query operations."""
+    if getattr(_thread_local, "force_readonly", False):
+        conn = _create_readonly_connection()
+    else:
+        conn = _create_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _create_readonly_connection(*, verify: bool = True) -> sqlite3.Connection:
+    """Creates a read-only secure connection to the SQLite database."""
+    try:
+        conn = dbpath.open_existing_database(get_db_path(), read_only=True)
+    except FileNotFoundError:
+        raise WgplException(f"Database does not exist: {get_db_path()}") from None
+    except WgplException as exc:
+        if "Database directory does not exist" in str(exc):
+            raise WgplException(f"Database does not exist: {get_db_path()}") from None
+        raise
+    
     if verify:
         assert_trusted_connection(conn)
     return conn
 
 
 @contextmanager
-def get_db() -> Generator[sqlite3.Connection, None, None]:
-    """Simple connection context manager for single-query operations."""
-    conn = _create_connection()
+def get_readonly_db() -> Generator[sqlite3.Connection, None, None]:
+    """Read-only connection context manager."""
+    conn = _create_readonly_connection()
     try:
         yield conn
     finally:
@@ -279,6 +329,14 @@ def _ensure_conn(
 @contextmanager
 def transaction(*, verify: bool = True) -> Generator[sqlite3.Connection, None, None]:
     """Provides an exclusive transaction context for multiple operations."""
+    if getattr(_thread_local, "force_readonly", False):
+        conn = _create_readonly_connection(verify=verify)
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
+
     conn = _create_connection(verify=verify)
     try:
         # Prevent concurrent writes entirely

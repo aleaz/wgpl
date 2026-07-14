@@ -215,10 +215,7 @@ def main(
     if _is_help_invocation():
         return
 
-    try:
-        core.ensure_database()
-    except WgplException as e:
-        _exit_error(ctx, str(e))
+    # Remove core.ensure_database() since we auto-initialize on write connections
 
 
 def _exit_error(
@@ -372,9 +369,10 @@ def interface_remove(
 
 @interface_app.command("list")
 def interface_list(ctx: typer.Context) -> None:
-    """List all interfaces."""
+    """List all WireGuard interfaces."""
     try:
-        data = core.list_interfaces()
+        with core.force_readonly():
+            data = core.list_interfaces()
         if ctx.obj.get("json"):
             _output(ctx, data)
         else:
@@ -417,9 +415,10 @@ def interface_export(
         ..., help="Interface name or ID to export (e.g. wg0 or 1)"
     ),
 ) -> None:
-    """Export the server WireGuard configuration for an interface."""
+    """Generate the declarative config string for the server interface."""
     try:
-        conf = core.get_interface_config(interface)
+        with core.force_readonly():
+            conf = core.get_interface_config(interface)
         if ctx.obj.get("json"):
             _output(ctx, {"config": conf})
         else:
@@ -448,21 +447,22 @@ def peer_show(
 ) -> None:
     """Show detailed information about a peer."""
     try:
-        # Fetching peer data
-        peers = core.list_peers(interface, expired_only=False, show_all=True)
-        # Resolve ID correctly
-        access = (
-            core.PeerAccess.READ_SENSITIVE if show_secrets else core.PeerAccess.MUTATE
-        )
-        resolved_id = core.resolve_peer_ref(peer_id, interface, access=access)
-        peer = next((p for p in peers if p["id"] == resolved_id), None)
-        if not peer:
-            raise PeerNotFoundError(f"Peer {peer_id} not found")
+        with core.force_readonly():
+            # Fetching peer data
+            peers = core.list_peers(interface, expired_only=False, show_all=True)
+            # Resolve ID correctly
+            access = (
+                core.PeerAccess.READ_SENSITIVE if show_secrets else core.PeerAccess.MUTATE
+            )
+            resolved_id = core.resolve_peer_ref(peer_id, interface, access=access)
+            peer = next((p for p in peers if p["id"] == resolved_id), None)
+            if not peer:
+                raise PeerNotFoundError(f"Peer {peer_id} not found")
 
-        iface_dns = core.interface_dns_map()
-        ifaces = core.list_interfaces()
-        iface_map = {i["id"]: i["name"] for i in ifaces}
-        iface_name = iface_map.get(peer["interface_id"], peer["interface_id"])
+            iface_dns = core.interface_dns_map()
+            ifaces = core.list_interfaces()
+            iface_map = {i["id"]: i["name"] for i in ifaces}
+            iface_name = iface_map.get(peer["interface_id"], peer["interface_id"])
 
         if ctx.obj.get("json"):
             public_rows = core.peer_rows_to_public_dicts([peer], iface_dns)
@@ -504,9 +504,10 @@ def interface_show(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
 ) -> None:
-    """Show detailed information about an interface."""
+    """Show detailed information about an interface and its peers."""
     try:
-        interface = core.get_interface_by_ref(name)
+        with core.force_readonly():
+            interface = core.get_interface_by_ref(name)
 
         if ctx.obj.get("json"):
             _output(ctx, dict(interface))
@@ -640,7 +641,8 @@ def node_add(
 def node_list(ctx: typer.Context) -> None:
     """List all device identities (nodes)."""
     try:
-        data = core.list_nodes()
+        with core.force_readonly():
+            data = core.list_nodes()
         if ctx.obj.get("json"):
             _output(ctx, data)
         else:
@@ -673,9 +675,10 @@ def node_show(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Node name or ID prefix"),
 ) -> None:
-    """Show detailed information about a node."""
+    """Show detailed information about a node and its attached peers."""
     try:
-        node = core.get_node_by_ref(ref)
+        with core.force_readonly():
+            node = core.get_node_by_ref(ref)
         if ctx.obj.get("json"):
             _output(ctx, node)
         else:
@@ -758,7 +761,8 @@ def node_history(
     """Show the audit event history for a node."""
     try:
         _validate_pagination(ctx, limit, offset)
-        events = core.list_node_audit_history(ref, limit=limit, offset=offset)
+        with core.force_readonly():
+            events = core.list_node_audit_history(ref, limit=limit, offset=offset)
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:
@@ -795,10 +799,15 @@ def node_history(
 @peer_app.command("add")
 def peer_add(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     name: str | None = typer.Argument(
         None,
         help="Device name (find-or-create the node and attach it)",
+    ),
+    interface: str = typer.Option(
+        ...,
+        "--interface",
+        "-i",
+        help="Interface name or ID (e.g. wg0 or 1)",
     ),
     node: str | None = typer.Option(
         None,
@@ -902,7 +911,8 @@ def interface_history(
     """Show the audit event history for an interface."""
     try:
         _validate_pagination(ctx, limit, offset)
-        events = core.list_interface_audit_history(name, limit=limit, offset=offset)
+        with core.force_readonly():
+            events = core.list_interface_audit_history(name, limit=limit, offset=offset)
         if ctx.obj.get("json"):
             _output(ctx, events)
         else:
@@ -941,15 +951,21 @@ def interface_history(
 @peer_app.command("history")
 def peer_history(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(..., help="Peer ID or unique prefix"),
+    interface: str = typer.Option(
+        ...,
+        "--interface",
+        "-i",
+        help="Interface name or ID (e.g. wg0 or 1)",
+    ),
     limit: int = typer.Option(100, "--limit", help="Maximum audit events to return"),
     offset: int = typer.Option(0, "--offset", help="Number of newest events to skip"),
 ) -> None:
     """Show the audit event history for a peer."""
     try:
         _validate_pagination(ctx, limit, offset)
-        events = core.list_peer_audit_history(
+        with core.force_readonly():
+            events = core.list_peer_audit_history(
             peer_id, interface, limit=limit, offset=offset
         )
         if ctx.obj.get("json"):
@@ -987,9 +1003,14 @@ def peer_history(
 @peer_app.command("remove")
 def peer_remove(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
+    ),
+    interface: str = typer.Option(
+        ...,
+        "--interface",
+        "-i",
+        help="Interface name or ID (e.g. wg0 or 1)",
     ),
     hard: bool = typer.Option(
         False, "--hard", help="Physically delete the peer instead of soft-deleting"
@@ -1023,7 +1044,12 @@ def peer_remove(
 @peer_app.command("prune")
 def peer_prune(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
+    interface: str = typer.Option(
+        ...,
+        "--interface",
+        "-i",
+        help="Interface name or ID (e.g. wg0 or 1)",
+    ),
 ) -> None:
     """Permanently remove expired or soft-deleted peers."""
     try:
@@ -1047,9 +1073,14 @@ def peer_prune(
 )
 def peer_update(
     ctx: typer.Context,
-    interface: str = typer.Argument(..., help="Interface name or ID (e.g. wg0 or 1)"),
     peer_id: str = typer.Argument(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
+    ),
+    interface: str = typer.Option(
+        ...,
+        "--interface",
+        "-i",
+        help="Interface name or ID (e.g. wg0 or 1)",
     ),
     name: str | None = typer.Option(
         None, "--name", help="DEPRECATED: Use 'node update' to change names"
@@ -1194,10 +1225,11 @@ def peer_list(
 ) -> None:
     """List peers on an interface."""
     try:
-        peers = core.list_peers(interface, expired_only=expired, show_all=all)
+        with core.force_readonly():
+            peers = core.list_peers(interface, expired_only=expired, show_all=all)
 
-        iface_dns: dict[int, str | None] = core.interface_dns_map()
-        iface_map = {iface["id"]: iface["name"] for iface in core.list_interfaces()}
+            iface_dns: dict[int, str | None] = core.interface_dns_map()
+            iface_map = {iface["id"]: iface["name"] for iface in core.list_interfaces()}
         if ctx.obj.get("json"):
             _output(ctx, _public_peer_rows(peers, iface_dns))
         else:
@@ -1264,17 +1296,18 @@ def peer_config(
     try:
         if allowed_ips is not None:
             _validate_allowed_ips(ctx, allowed_ips)
-        if ctx.obj.get("json"):
-            payload = core.get_peer_config_payload(
-                peer_id, allowed_ips=allowed_ips, interface_ref=interface
-            )
-            _output(ctx, payload)
-        else:
-            config = core.get_peer_config(
-                peer_id, allowed_ips=allowed_ips, interface_ref=interface
-            )
-            console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
-            print(config)  # print to stdout
+        with core.force_readonly():
+            if ctx.obj.get("json"):
+                payload = core.get_peer_config_payload(
+                    peer_id, allowed_ips=allowed_ips, interface_ref=interface
+                )
+                _output(ctx, payload)
+            else:
+                config = core.get_peer_config(
+                    peer_id, allowed_ips=allowed_ips, interface_ref=interface
+                )
+                console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
+                print(config)  # print to stdout
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -1292,7 +1325,8 @@ def peer_explain(
 ) -> None:
     """Show derived AllowedIPs and LAN↔LAN routing checklist for a peer."""
     try:
-        explanation = core.explain_peer_routing(peer_id, interface_ref=interface)
+        with core.force_readonly():
+            explanation = core.explain_peer_routing(peer_id, interface_ref=interface)
         if ctx.obj.get("json"):
             _output(ctx, explanation)
             return
@@ -1366,35 +1400,36 @@ def peer_qr(
     try:
         if allowed_ips is not None:
             _validate_allowed_ips(ctx, allowed_ips)
-        if output is not None:
-            png_bytes = core.get_peer_qr_png_bytes(
-                peer_id, allowed_ips=allowed_ips, interface_ref=interface
-            )
-            fd = dbpath.open_exclusive_output(str(output))
-            with os.fdopen(fd, "wb") as f:
-                f.write(png_bytes)
-            canonical_id = core.resolve_peer_ref(
-                peer_id, interface, access=core.PeerAccess.EXPORT_SECRET
-            )
-            if ctx.obj.get("json"):
-                _output(
-                    ctx,
-                    {"status": "success", "path": str(output), "peer_id": canonical_id},
+        with core.force_readonly():
+            if output is not None:
+                png_bytes = core.get_peer_qr_png_bytes(
+                    peer_id, allowed_ips=allowed_ips, interface_ref=interface
                 )
-            else:
-                console.print(
-                    f"[green]Wrote QR code to {output}[/green] "
-                    "[yellow](contains private keys; keep file permissions restricted)[/yellow]"
+                fd = dbpath.open_exclusive_output(str(output))
+                with os.fdopen(fd, "wb") as f:
+                    f.write(png_bytes)
+                canonical_id = core.resolve_peer_ref(
+                    peer_id, interface, access=core.PeerAccess.EXPORT_SECRET
                 )
-        else:
-            qr = core.get_peer_qr(
-                peer_id, allowed_ips=allowed_ips, interface_ref=interface
-            )
-            if ctx.obj.get("json"):
-                _output(ctx, {"qr": qr})
+                if ctx.obj.get("json"):
+                    _output(
+                        ctx,
+                        {"status": "success", "path": str(output), "peer_id": canonical_id},
+                    )
+                else:
+                    console.print(
+                        f"[green]Wrote QR code to {output}[/green] "
+                        "[yellow](contains private keys; keep file permissions restricted)[/yellow]"
+                    )
             else:
-                console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
-                print(qr)
+                qr = core.get_peer_qr(
+                    peer_id, allowed_ips=allowed_ips, interface_ref=interface
+                )
+                if ctx.obj.get("json"):
+                    _output(ctx, {"qr": qr})
+                else:
+                    console.print(f"[yellow]{_PRIVATE_KEY_OUTPUT_NOTICE}[/yellow]")
+                    print(qr)
     except WgplException as e:
         _exit_error(ctx, str(e))
 

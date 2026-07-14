@@ -263,7 +263,7 @@ def test_peer_remove_accepts_short_prefix(wg0_interface: str) -> None:
     assert peer_id is not None
     short_id = peer_id.replace("-", "")[:12]
 
-    remove_result = runner.invoke(app, ["peer", "remove", wg0_interface, short_id])
+    remove_result = runner.invoke(app, ["peer", "remove", short_id, "-i", wg0_interface])
 
     assert remove_result.exit_code == 0
     peer = db.get_peer(peer_id)
@@ -359,8 +359,9 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
             "--json",
             "peer",
             "add",
-            "wg_dns",
             "Work",
+            "-i",
+            "wg_dns",
             "--ip",
             "10.0.3.50",
             "--dns",
@@ -374,7 +375,7 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
     assert config.exit_code == 0
     assert "DNS = 9.9.9.9" in config.stdout
 
-    inherited = runner.invoke(app, ["--json", "peer", "add", "wg_dns", "Phone"])
+    inherited = runner.invoke(app, ["--json", "peer", "add", "Phone", "-i", "wg_dns"])
     assert inherited.exit_code == 0
     phone_id = json.loads(inherited.stdout)["id"]
     inherited_config = runner.invoke(app, ["peer", "config", phone_id])
@@ -425,7 +426,7 @@ def test_cli_db_restore_requires_yes(wgpl_db: str) -> None:
 def test_peer_history_limit_capped(wg0_interface: str) -> None:
     peer = core.add_peer(wg0_interface, "phone")
     result = runner.invoke(
-        app, ["peer", "history", wg0_interface, str(peer["id"]), "--limit", "1001"]
+        app, ["peer", "history", str(peer["id"]), "-i", wg0_interface, "--limit", "1001"]
     )
 
     assert result.exit_code == 1
@@ -482,3 +483,15 @@ def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:
     assert result.exit_code == 0
     assert "vpn1.example.com:51820" in result.stdout
     assert "vpn2.example.com" not in result.stdout
+
+def test_peer_list_nonexistent_db(tmp_path) -> None:
+    """Ensure read-only commands do not create the database if it doesn't exist."""
+    db_path = tmp_path / "missing.db"
+    import os
+    os.environ["WGPL_DB_PATH"] = str(db_path)
+    
+    result = runner.invoke(app, ["peer", "list"])
+    
+    assert result.exit_code == 1
+    assert not db_path.exists()
+    assert "Database does not exist" in result.stdout or "Database does not exist" in result.stderr
