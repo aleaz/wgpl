@@ -136,7 +136,7 @@ def resolve_peer_ref(
             raise AmbiguousPeerIdError(_ambiguous_peer_message(ref, exact))
 
     if len(normalized) < _MIN_PEER_ID_PREFIX_LEN:
-        raise PeerNotFoundError(f"Peer {ref} not found")
+        raise PeerNotFoundError(f"Peer prefix '{ref}' is too short (minimum {_MIN_PEER_ID_PREFIX_LEN} hex characters).")
 
     matches = db.find_peers_by_id_prefix(normalized, iface_id, conn=conn)
     if active_only:
@@ -204,11 +204,10 @@ def resolve_node_ref(
         return str(node["id"])
 
     normalized = ref.replace("-", "").lower()
-    if (
-        normalized
-        and len(normalized) >= _MIN_NODE_ID_PREFIX_LEN
-        and all(c in "0123456789abcdef" for c in normalized)
-    ):
+    if normalized and all(c in "0123456789abcdef" for c in normalized):
+        if len(normalized) < _MIN_NODE_ID_PREFIX_LEN:
+            raise NodeNotFoundError(f"Node prefix '{ref}' is too short (minimum {_MIN_NODE_ID_PREFIX_LEN} hex characters).")
+
         matches = db.find_nodes_by_id_prefix(normalized, conn=conn)
         exact = [
             n for n in matches if str(n["id"]).replace("-", "").lower() == normalized

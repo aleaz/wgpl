@@ -333,7 +333,8 @@ def interface_add(
         if ctx.obj.get("json"):
             _output(ctx, result)
         else:
-            console.print(f"[green]Added interface {name}[/green]")
+            db_path = _safe_markup(str(core.get_db_path()))
+            console.print(f"[green]Added interface {name} (db: {db_path})[/green]")
             _print_hints(["apply_server"])
     except InterfaceAlreadyExistsError:
         _exit_error(ctx, f"Interface {name} already exists.")
@@ -1050,6 +1051,9 @@ def peer_update(
     peer_id: str = typer.Argument(
         ..., help="Peer ID or unique prefix (e.g. 55c521ad2d94)"
     ),
+    name: str | None = typer.Option(
+        None, "--name", help="DEPRECATED: Use 'node update' to change names"
+    ),
     ip: str | None = typer.Option(
         None, "--ip", help="New peer IP from the interface pool"
     ),
@@ -1118,6 +1122,8 @@ def peer_update(
 ) -> None:
     """Update a peer's settings (IP, routing, overrides)."""
     try:
+        if name is not None:
+            _exit_error(ctx, "Peer names come from their node identity. Use 'wgpl node update <ref> --name NewName' instead.")
         if clear_dns and dns is not None:
             _exit_error(ctx, "Cannot use --dns and --clear-dns together.")
         if clear_desc and desc is not None:
@@ -1209,15 +1215,8 @@ def peer_list(
                     _styled(_safe_markup(p["name"]), _STYLE_ID),
                     _styled(p["ip_address"], _STYLE_VALUE),
                     _styled(core.get_peer_status(p), _STYLE_META),
-                    _styled(
-                        _display_dns(
-                            core.get_effective_dns(
-                                p["dns"], iface_dns.get(p["interface_id"])
-                            )
-                        ),
-                        _STYLE_META,
-                    ),
-                    _styled(str(p.get("mtu") or "—"), _STYLE_META),
+                    _styled(str(p.get("role") or "—"), _STYLE_META),
+                    _styled(str(p.get("allowed_ips_policy") or "—"), _STYLE_META),
                     _styled(str(p.get("keepalive") or "—"), _STYLE_META),
                     _styled(_safe_markup(_truncate_desc(p.get("desc"))), ""),
                 ]
@@ -1227,13 +1226,13 @@ def peer_list(
                 "WireGuard Peers",
                 "peers",
                 [
-                    ("ID", {"overflow": "fold"}),
+                    ("ID", {"no_wrap": True}),
                     ("Interface", {}),
                     ("Node", {"overflow": "fold"}),
                     ("IP", {"overflow": "fold"}),
                     ("Status", {}),
-                    ("DNS", {"overflow": "fold"}),
-                    ("MTU", {"overflow": "fold"}),
+                    ("Role", {"overflow": "fold"}),
+                    ("Policy", {"overflow": "fold"}),
                     ("Keepalive", {"overflow": "fold"}),
                     ("Desc", {"overflow": "fold"}),
                 ],
@@ -1417,7 +1416,8 @@ def validate_cmd(
             _output(ctx, result)
         elif result["status"] == "ok":
             scope = interface or "database"
-            console.print(f"[green]Validation passed for {scope}[/green]")
+            peers_count = len(list(core.list_peers(interface, show_all=True)))
+            console.print(f"[green]Validation passed for {scope} ({peers_count} peers)[/green]")
         else:
             issues = result["issues"]
             if not isinstance(issues, list):
@@ -1512,9 +1512,10 @@ def db_dump(
 ) -> None:
     """Export the database as a binary SQLite backup."""
     try:
-        console.print(
-            "[yellow]Warning: Output is a binary SQLite database file.[/yellow]"
-        )
+        if sys.stdout.isatty():
+            console.print(
+                "[yellow]Warning: Output is a binary SQLite database file.[/yellow]"
+            )
         if output:
             core.dump_database(str(output))
         else:
@@ -1548,6 +1549,9 @@ def db_restore(
                 ctx,
                 "Refusing to restore without --yes (this replaces the live database)",
             )
+        if file != "-" and not os.path.isfile(file):
+            raise WgplException(f"Source file not found: {file}")
+
         if file == "-":
             fd, path = tempfile.mkstemp()
             try:

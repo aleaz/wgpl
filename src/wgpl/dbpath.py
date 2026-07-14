@@ -36,6 +36,11 @@ def validate_path_target(db_path: str, *, label: str = "Database path") -> None:
         raise WgplException(f"{label} is a directory: {db_path}")
 
     if not stat.S_ISREG(st.st_mode):
+        if stat.S_ISCHR(st.st_mode):
+            raise WgplException(
+                f"Cannot write to a character device like {db_path}. "
+                "Use stdout to discard output."
+            )
         raise WgplException(
             f"{label} must be a regular file (got mode {st.st_mode:o}): {db_path}"
         )

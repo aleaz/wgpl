@@ -60,6 +60,11 @@ from .exceptions import (
 )
 
 
+def get_db_path() -> str:
+    """Returns the absolute path to the active SQLite database file."""
+    return db.get_db_path()
+
+
 def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
     """Reject mtu/keepalive values outside wire-safe ranges at mutation time."""
     try:

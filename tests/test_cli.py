@@ -330,7 +330,7 @@ def test_db_dump_cli_writes_hints_to_stderr(wg0_interface: str) -> None:
     result = runner.invoke(app, ["db", "dump"])
 
     assert result.exit_code == 0
-    assert "Warning: Output is a binary SQLite database file." in result.stderr
+    assert "Warning: Output is a binary SQLite database file." not in result.stderr
     assert b"SQLite format 3" in result.stdout_bytes
 
 
