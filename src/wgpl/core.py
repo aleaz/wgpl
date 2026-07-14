@@ -56,6 +56,7 @@ from .exceptions import (
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
+    PeersOutsidePoolError,
     WgplException,
 )
 
@@ -846,6 +847,34 @@ def add_peer(
         node_id, node_name, node_created = _resolve_node_for_attachment(
             conn, name=name, node_ref=node_ref, created_at=created_at
         )
+
+        existing_peer = db.get_peer_by_node_and_interface(node_id, iface_id, conn=conn)
+        if existing_peer and integrity.is_peer_active(existing_peer):
+            # Idempotency check: if peer exists and is active, ensure configs don't conflict
+            conflicts = []
+            if ip_address and ip_address != existing_peer["ip_address"]:
+                conflicts.append(f"ip_address (existing: {existing_peer['ip_address']})")
+            if dns and dns != existing_peer["dns"]:
+                conflicts.append(f"dns (existing: {existing_peer['dns']})")
+            if role and role != existing_peer["role"]:
+                conflicts.append(f"role (existing: {existing_peer['role']})")
+            
+            if conflicts:
+                raise PeerAlreadyExistsError(
+                    f"Peer for node '{node_name}' already exists with different configuration: {', '.join(conflicts)}. "
+                    f"Use 'wgpl peer update' to modify it."
+                )
+            
+            return {
+                "id": existing_peer["id"],
+                "node_name": node_name,
+                "interface_id": iface_id,
+                "ip_address": existing_peer["ip_address"],
+                "public_key": existing_peer["public_key"],
+                "private_key": existing_peer["private_key"],
+                "preshared_key": existing_peer["preshared_key"],
+                "dns": existing_peer["dns"],
+            }
 
         allocated_ip = allocate_peer_ip(iface_id, conn, ip_address)
 

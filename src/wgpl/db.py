@@ -8,6 +8,14 @@ from contextlib import contextmanager
 from enum import StrEnum
 from typing import Any, Generator
 from contextvars import ContextVar
+import time
+import random
+
+try:
+    import pwd
+except ImportError:
+    pwd = None
+
 
 from .exceptions import (
     InterfaceAlreadyExistsError,
@@ -337,17 +345,39 @@ def transaction(*, verify: bool = True) -> Generator[sqlite3.Connection, None, N
             conn.close()
         return
 
-    conn = _create_connection(verify=verify)
+    max_retries = 10
+    base_delay = 0.05  # 50ms
+
+    for attempt in range(max_retries):
+        conn = _create_connection(verify=verify)
+        try:
+            # Prevent concurrent writes entirely
+            conn.execute("BEGIN EXCLUSIVE TRANSACTION")
+            yield conn
+            conn.commit()
+            break  # Success
+        except sqlite3.OperationalError as e:
+            conn.close()
+            if "database is locked" in str(e) and attempt < max_retries - 1:
+                # Exponential backoff with jitter
+                delay = (base_delay * (2 ** attempt)) + random.uniform(0, 0.05)
+                time.sleep(delay)
+                continue
+            raise WgplException(f"Database locked or inaccessible: {e}") from e
+        except BaseException:
+            conn.rollback()
+            conn.close()
+            raise
+        finally:
+            # We don't close here if we broke early or raised,
+            # because the try-finally structure is different now.
+            pass
+
+    # Ensure the connection is always closed properly on success
     try:
-        # Prevent concurrent writes entirely
-        conn.execute("BEGIN EXCLUSIVE TRANSACTION")
-        yield conn
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
-    finally:
         conn.close()
+    except Exception:
+        pass
 
 
 def get_current_actor() -> str:
@@ -360,9 +390,10 @@ def get_current_actor() -> str:
             actor = os.getlogin()
         except OSError:
             try:
-                import pwd
-
-                actor = pwd.getpwuid(os.getuid()).pw_name
+                if pwd:
+                    actor = pwd.getpwuid(os.getuid()).pw_name
+                else:
+                    actor = "unknown"
             except Exception:
                 actor = "unknown"
     return actor
@@ -548,6 +579,19 @@ def add_interface(
         raise InterfaceAlreadyExistsError(
             f"Interface {name} with the same endpoint and port already exists."
         )
+
+
+def get_peer_by_node_and_interface(
+    node_id: str, interface_id: int, conn: sqlite3.Connection | None = None
+) -> sqlite3.Row | None:
+    """Retrieve an active peer by its node_id and interface_id."""
+    with _ensure_conn(conn) as c:
+        cursor = _run_query(
+            c,
+            f"{_PEER_SELECT} WHERE p.node_id = ? AND p.interface_id = ? AND p.deleted_at IS NULL",
+            (node_id, interface_id),
+        )
+        return cursor.fetchone()
 
 
 def get_interface(

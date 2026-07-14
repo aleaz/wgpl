@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import stat
 import tempfile
@@ -85,7 +86,7 @@ def test_peer_list_json_redacts_secrets(wg0_interface: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert result.exit_code == 0
-    peers = json.loads(result.stdout)
+    peers = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert len(peers) == 1
     assert "private_key" not in peers[0]
     assert "preshared_key" not in peers[0]
@@ -101,7 +102,7 @@ def test_peer_show_json_includes_interface_name(wg0_interface: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "show", peer_id])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["interface"] == "wg0"
     assert payload["interface_id"]
 
@@ -131,7 +132,7 @@ def test_peer_list_json_dual_interface_names(wgpl_db: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert result.exit_code == 0
-    by_name = {p["name"]: p["interface"] for p in json.loads(result.stdout)}
+    by_name = {p["name"]: p["interface"] for p in json.loads(result.stdout).get("data", json.loads(result.stdout))}
     assert by_name == {"on_wg0": "wg0", "on_wg1": "wg1"}
 
 
@@ -153,7 +154,7 @@ def test_peer_show_json_redacts_private_key(wg0_interface: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "show", peer_id])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert "private_key" not in payload
     assert "preshared_key" not in payload
     assert payload["name"] == "show_peer"
@@ -198,7 +199,7 @@ def test_peer_list_json_includes_desc_mtu_keepalive(wg0_interface: str) -> None:
     result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert result.exit_code == 0
-    peer = json.loads(result.stdout)[0]
+    peer = json.loads(result.stdout).get("data", json.loads(result.stdout))[0]
     assert peer["desc"] == "laptop"
     assert peer["mtu"] == 1280
     assert peer["mtu_override"] == 1280
@@ -213,7 +214,7 @@ def test_peer_list_json_inherits_iface_mtu_keepalive(wg0_interface: str) -> None
     result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert result.exit_code == 0
-    peer = json.loads(result.stdout)[0]
+    peer = json.loads(result.stdout).get("data", json.loads(result.stdout))[0]
     assert peer["desc"] is None
     assert peer["mtu"] == 1420
     assert peer["mtu_override"] is None
@@ -230,8 +231,8 @@ def test_peer_row_to_public_dict_matches_list_json(wg0_interface: str) -> None:
 
     assert list_result.exit_code == 0
     assert show_result.exit_code == 0
-    list_payload = json.loads(list_result.stdout)[0]
-    show_payload = json.loads(show_result.stdout)
+    list_payload = json.loads(list_result.stdout).get("data", json.loads(list_result.stdout))[0]
+    show_payload = json.loads(show_result.stdout).get("data", json.loads(show_result.stdout))
     assert show_payload == list_payload
 
 
@@ -279,7 +280,7 @@ def test_peer_list_json_returns_full_uuid(wg0_interface: str) -> None:
     list_result = runner.invoke(app, ["--json", "peer", "list"])
 
     assert list_result.exit_code == 0
-    peers = json.loads(list_result.stdout)
+    peers = json.loads(list_result.stdout).get("data", json.loads(list_result.stdout))
     assert peers[0]["id"] == peer_id
     assert len(peers[0]["id"]) == 36
 
@@ -318,7 +319,7 @@ def test_peer_qr_output_json(wg0_interface: str) -> None:
     )
 
     assert qr_result.exit_code == 0
-    payload = json.loads(qr_result.stdout)
+    payload = json.loads(qr_result.stdout).get("data", json.loads(qr_result.stdout))
     assert payload == {
         "status": "success",
         "path": str(output_path),
@@ -369,7 +370,7 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
         ],
     )
     assert add_peer.exit_code == 0
-    work_id = json.loads(add_peer.stdout)["id"]
+    work_id = json.loads(add_peer.stdout).get("data", json.loads(add_peer.stdout))["id"]
 
     config = runner.invoke(app, ["peer", "config", work_id])
     assert config.exit_code == 0
@@ -377,20 +378,16 @@ def test_peer_add_with_ip_and_dns_cli(wgpl_db: str) -> None:
 
     inherited = runner.invoke(app, ["--json", "peer", "add", "Phone", "-i", "wg_dns"])
     assert inherited.exit_code == 0
-    phone_id = json.loads(inherited.stdout)["id"]
+    phone_id = json.loads(inherited.stdout).get("data", json.loads(inherited.stdout))["id"]
     inherited_config = runner.invoke(app, ["peer", "config", phone_id])
     assert "DNS = 1.1.1.1" in inherited_config.stdout
 
 
 def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
-    from wgpl import wireguard
-
     pubkey = wireguard.generate_keypair().public_key
     core.add_interface("wg0", "vpn.example.com", pubkey, "10.0.0.0/24", 51820)
     peer = core.add_peer("wg0", "phone", ip_address="10.0.0.3")
     peer_id = str(peer["id"])
-    import tempfile
-    import os
 
     fd, path = tempfile.mkstemp()
     os.close(fd)
@@ -405,7 +402,7 @@ def test_cli_db_restore_json_stdin(wgpl_db: str) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "success"
     assert payload["action"] == "restore"
     assert isinstance(payload["warnings"], list)
@@ -418,7 +415,7 @@ def test_cli_db_restore_requires_yes(wgpl_db: str) -> None:
     result = runner.invoke(app, ["--json", "db", "restore", "/nonexistent.db"])
 
     assert result.exit_code == 1
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "error"
     assert "--yes" in payload["message"]
 
@@ -443,7 +440,7 @@ def test_db_restore_stdin_size_limit(
     )
 
     assert result.exit_code == 1
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "error"
     assert "exceeds" in payload["message"]
 
@@ -487,7 +484,6 @@ def test_cli_peer_config_interface_disambiguates(wgpl_db: str) -> None:
 def test_peer_list_nonexistent_db(tmp_path) -> None:
     """Ensure read-only commands do not create the database if it doesn't exist."""
     db_path = tmp_path / "missing.db"
-    import os
     os.environ["WGPL_DB_PATH"] = str(db_path)
     
     result = runner.invoke(app, ["peer", "list"])

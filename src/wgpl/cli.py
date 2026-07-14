@@ -237,7 +237,10 @@ def _exit_error(
 def _output(ctx: typer.Context, data: dict[str, Any] | list[Any]) -> None:
     """Output data as JSON to stdout if the --json flag was provided."""
     if ctx.obj.get("json"):
-        print(json.dumps(data))
+        if isinstance(data, dict) and "status" in data:
+            print(json.dumps(data))
+        else:
+            print(json.dumps({"status": "success", "data": data}))
 
 
 def _extract_hints(result: Mapping[str, object]) -> list[str]:
@@ -1562,7 +1565,10 @@ def db_dump(
                 with open(path, "rb") as f:
                     shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]
             finally:
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -1580,10 +1586,14 @@ def db_restore(
     """Restore the database from a binary SQLite backup (destructive)."""
     try:
         if not yes:
-            _exit_error(
-                ctx,
-                "Refusing to restore without --yes (this replaces the live database)",
-            )
+            if not sys.stdout.isatty() or ctx.obj.get("json"):
+                _exit_error(
+                    ctx,
+                    "Refusing to restore without --yes (this replaces the live database)",
+                )
+            typer.echo("WARNING: This will permanently replace the live database with the backup.")
+            if not typer.confirm("Are you sure you want to continue?"):
+                raise typer.Abort()
         if file != "-" and not os.path.isfile(file):
             raise WgplException(f"Source file not found: {file}")
 

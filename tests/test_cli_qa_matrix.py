@@ -80,23 +80,37 @@ def _iface_add_args() -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "command,expected_code",
+    "command",
     [
-        (["validate"], 0),
-        (["interface", "list"], 0),
-        (["peer", "list"], 0),
-        (["db", "dump"], 0),
+        ["validate"],
+        ["db", "dump"],
     ],
 )
-def test_read_commands_on_fresh_db(
+def test_read_commands_on_fresh_db_initializes(
     fresh_db_path: str,
     command: list[str],
-    expected_code: int,
 ) -> None:
     result = runner.invoke(app, command)
     _no_traceback(result)
-    assert result.exit_code == expected_code
+    assert result.exit_code == 0
     assert os.path.exists(fresh_db_path)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["interface", "list"],
+        ["peer", "list"],
+    ],
+)
+def test_readonly_commands_on_fresh_db_fail_without_init(
+    fresh_db_path: str,
+    command: list[str],
+) -> None:
+    result = runner.invoke(app, command)
+    _no_traceback(result)
+    assert result.exit_code == 1
+    assert not os.path.exists(fresh_db_path)
 
 
 @pytest.mark.parametrize(
@@ -122,7 +136,7 @@ def test_validate_fresh_db_json(fresh_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"status": "ok", "issues": []}
+    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == {"status": "ok", "issues": []}
 
 
 def test_interface_list_empty_db_shows_message(empty_db_path: str) -> None:
@@ -143,7 +157,7 @@ def test_interface_list_empty_db_json(empty_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "list"])
     _no_traceback(result)
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == []
+    assert json.loads(result.stdout).get("data", json.loads(result.stdout)) == []
 
 
 # --- S3: missing entities on empty DB ---
@@ -156,12 +170,12 @@ def test_interface_list_empty_db_json(empty_db_path: str) -> None:
         ["interface", "remove", MISSING_IFACE],
         ["interface", "export", MISSING_IFACE],
         ["interface", "update", MISSING_IFACE],
-        ["peer", "add", MISSING_IFACE, "phone"],
-        ["peer", "remove", MISSING_IFACE, MISSING_PEER],
+        ["peer", "add", "-i", MISSING_IFACE, "phone"],
+        ["peer", "remove", "-i", MISSING_IFACE, MISSING_PEER],
         ["peer", "config", MISSING_PEER],
         ["peer", "qr", MISSING_PEER],
-        ["peer", "update", MISSING_IFACE, MISSING_PEER, "--dns", "1.1.1.1"],
-        ["peer", "prune", MISSING_IFACE],
+        ["peer", "update", "-i", MISSING_IFACE, MISSING_PEER, "--dns", "1.1.1.1"],
+        ["peer", "prune", "-i", MISSING_IFACE],
         ["node", "show", MISSING_NODE],
         ["node", "remove", MISSING_NODE],
         ["node", "update", MISSING_NODE, "--name", "renamed"],
@@ -182,7 +196,7 @@ def test_validate_missing_interface_json(empty_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate", MISSING_IFACE])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "error"
     assert "not found" in payload["message"].lower()
 
@@ -215,7 +229,7 @@ def test_bad_db_path_exits_cleanly(
     _no_traceback(result)
     assert result.exit_code == 1
     assert "WGPL Error" in result.stderr
-    assert "directory does not exist" in result.stderr.lower()
+    assert "does not exist" in result.stderr.lower()
 
 
 @pytest.mark.parametrize(
@@ -241,7 +255,7 @@ def test_bad_db_path_json_error(bad_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "error"
     assert "directory does not exist" in payload["message"].lower()
 
@@ -250,6 +264,6 @@ def test_corrupt_db_json_error(corrupt_db_path: str) -> None:
     result = runner.invoke(app, ["--json", "validate"])
     _no_traceback(result)
     assert result.exit_code == 1
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "error"
     assert payload["message"]

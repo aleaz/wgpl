@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+import json
 
 from typer.testing import CliRunner
 
@@ -202,8 +203,6 @@ def test_assert_database_valid_allows_warnings(wgpl_db: str) -> None:
 
 
 def test_cli_validate_warning_exits_zero(wgpl_db: str) -> None:
-    import json
-
     _add_iface()
     core.add_peer(
         "wg0",
@@ -214,7 +213,7 @@ def test_cli_validate_warning_exits_zero(wgpl_db: str) -> None:
 
     result = runner.invoke(app, ["--json", "validate", "wg0"], catch_exceptions=False)
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout).get("data", json.loads(result.stdout))
     assert payload["status"] == "warning"
     assert any(
         i["code"] == "subnet_router_missing_keepalive" for i in payload["issues"]

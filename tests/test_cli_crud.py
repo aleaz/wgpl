@@ -1,5 +1,6 @@
 import json
 import sys
+import datetime
 
 import pytest
 from typer.testing import CliRunner
@@ -77,10 +78,10 @@ def test_cli_interface_update_no_fields(wgpl_db: str) -> None:
 
 def test_cli_peer_update_ip_hints_on_stderr(wgpl_db: str) -> None:
     _setup_interface()
-    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "wg0", "p"]).stdout)
+    peer = json.loads(runner.invoke(app, ["--json", "peer", "add", "-i", "wg0", "p"]).stdout)["data"]
 
     result = runner.invoke(
-        app, ["peer", "update", "wg0", peer["id"], "--ip", "10.0.0.50"]
+        app, ["peer", "update", "-i", "wg0", peer["id"], "--ip", "10.0.0.50"]
     )
 
     assert result.exit_code == 0
@@ -92,10 +93,10 @@ def test_cli_peer_remove_already_deleted_raises_not_found(wgpl_db: str) -> None:
     peer = core.add_peer("wg0", "phone")
     assert peer["id"] is not None
 
-    first = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
+    first = runner.invoke(app, ["peer", "remove", "-i", "wg0", peer["id"]])
     assert first.exit_code == 0
 
-    second = runner.invoke(app, ["peer", "remove", "wg0", peer["id"]])
+    second = runner.invoke(app, ["peer", "remove", "-i", "wg0", peer["id"]])
     assert second.exit_code == 0
     assert "Soft-deleted peer" in second.stderr
 
@@ -129,7 +130,7 @@ def test_cli_peer_remove_interface_mismatch_reports_wgpl_error(
     )
 
     assert peer["id"] is not None
-    result = runner.invoke(app, ["peer", "remove", "wg1", peer["id"]])
+    result = runner.invoke(app, ["peer", "remove", "-i", "wg1", peer["id"]])
 
     assert result.exit_code == 1
     assert "WGPL Error" in result.stderr
@@ -181,7 +182,7 @@ def test_cli_interface_pool_conflict(wgpl_db: str) -> None:
 
 def test_cli_interface_update_pool_rejected(wgpl_db: str) -> None:
     _setup_interface("wg0")
-    runner.invoke(app, ["peer", "add", "wg0", "high", "--ip", "10.0.0.200"])
+    runner.invoke(app, ["peer", "add", "-i", "wg0", "high", "--ip", "10.0.0.200"])
 
     result = runner.invoke(
         app,
@@ -194,8 +195,6 @@ def test_cli_interface_update_pool_rejected(wgpl_db: str) -> None:
 
 
 def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
-    import datetime
-
     _setup_interface("wg0")
     peer = core.add_peer("wg0", "guest", expires="1h")
     assert peer["id"] is not None
@@ -207,7 +206,7 @@ def test_cli_peer_prune_json_removes_inactive_peers(wgpl_db: str) -> None:
         conn.execute("UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"]))
         conn.commit()
 
-    result = runner.invoke(app, ["--json", "peer", "prune", "wg0"])
+    result = runner.invoke(app, ["--json", "peer", "prune", "-i", "wg0"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -241,10 +240,10 @@ def test_cli_peer_history_json(wgpl_db: str) -> None:
     _setup_interface("wg0")
     peer = core.add_peer("wg0", "phone")
 
-    result = runner.invoke(app, ["--json", "peer", "history", "wg0", str(peer["id"])])
+    result = runner.invoke(app, ["--json", "peer", "history", "-i", "wg0", str(peer["id"])])
 
     assert result.exit_code == 0
-    events = json.loads(result.stdout)
+    events = json.loads(result.stdout)["data"]
     assert isinstance(events, list)
     assert len(events) >= 1
     assert events[0]["event_type"] == "created"
@@ -256,7 +255,7 @@ def test_cli_interface_history_json(wgpl_db: str) -> None:
     result = runner.invoke(app, ["--json", "interface", "history", "wg0"])
 
     assert result.exit_code == 0
-    events = json.loads(result.stdout)
+    events = json.loads(result.stdout)["data"]
     assert isinstance(events, list)
     assert len(events) >= 1
     assert events[0]["event_type"] == "created"
@@ -265,7 +264,7 @@ def test_cli_interface_history_json(wgpl_db: str) -> None:
 def test_cli_peer_add_invalid_mtu_exits_cleanly(wgpl_db: str) -> None:
     _setup_interface("wg0")
 
-    result = runner.invoke(app, ["peer", "add", "wg0", "bad", "--mtu", "100"])
+    result = runner.invoke(app, ["peer", "add", "-i", "wg0", "bad", "--mtu", "100"])
 
     assert result.exit_code == 1
     assert "WGPL Error" in result.stderr
@@ -277,16 +276,15 @@ def test_cli_peer_add_single_arg_hints_usage_when_interface_unknown(
 ) -> None:
     result = runner.invoke(app, ["peer", "add", "Alice"])
 
-    assert result.exit_code == 1
-    stderr = " ".join(result.stderr.split())
-    assert "not a known interface" in stderr
-    assert "wgpl peer add <INTERFACE> <NAME>" in stderr
+    assert result.exit_code == 2
+    output = " ".join(result.output.lower().split())
+    assert "missing option '--interface'" in output or "missing parameter '--interface'" in output
 
 
 def test_cli_peer_add_missing_name_keeps_exact_one_message(wgpl_db: str) -> None:
     _setup_interface("wg0")
 
-    result = runner.invoke(app, ["peer", "add", "wg0"])
+    result = runner.invoke(app, ["peer", "add", "-i", "wg0"])
 
     assert result.exit_code == 1
     assert "exactly one" in result.stderr.lower()
@@ -313,7 +311,7 @@ def test_cli_peer_config_json_skips_private_key_warning(wgpl_db: str) -> None:
 
     assert result.exit_code == 0
     assert "contains private keys" not in result.stderr
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout)["data"]
     assert "PrivateKey" in payload["config"]
 
 
@@ -369,9 +367,9 @@ def test_cli_peer_history_respects_limit(wgpl_db: str) -> None:
             )
 
     result = runner.invoke(
-        app, ["--json", "peer", "history", "wg0", peer_id, "--limit", "3"]
+        app, ["--json", "peer", "history", "-i", "wg0", peer_id, "--limit", "3"]
     )
 
     assert result.exit_code == 0
-    events = json.loads(result.stdout)
+    events = json.loads(result.stdout)["data"]
     assert len(events) == 3

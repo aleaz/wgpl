@@ -8,6 +8,7 @@ behaviour so regressions are caught by the automated gate.
 from __future__ import annotations
 
 import pytest
+import datetime
 
 from wgpl import core, db
 from wgpl.exceptions import (
@@ -70,8 +71,6 @@ def test_node_remove_guarded_when_attached(wg0_interface: str) -> None:
 
 
 def test_node_remove_allowed_when_only_expired_attachment(wg0_interface: str) -> None:
-    import datetime
-
     peer = core.add_peer(wg0_interface, "phone", expires="1h")
     past = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
@@ -120,12 +119,12 @@ def test_peer_add_strict_node_nonexistent_fails(wg0_interface: str) -> None:
         core.add_peer(wg0_interface, node_ref="ghost")
 
 
-def test_peer_add_same_node_twice_rejected(wg0_interface: str) -> None:
-    core.add_peer(wg0_interface, "phone")
-    with pytest.raises(PeerAlreadyExistsError):
-        core.add_peer(wg0_interface, "phone")
-    with pytest.raises(PeerAlreadyExistsError):
-        core.add_peer(wg0_interface, node_ref="phone")
+def test_peer_add_same_node_twice_idempotent(wg0_interface: str) -> None:
+    peer1 = core.add_peer(wg0_interface, "phone")
+    peer2 = core.add_peer(wg0_interface, "phone")
+    assert peer1["id"] == peer2["id"]
+    peer3 = core.add_peer(wg0_interface, node_ref="phone")
+    assert peer1["id"] == peer3["id"]
 
 
 def test_peer_add_requires_exactly_one_of_name_or_node(wg0_interface: str) -> None:
