@@ -155,3 +155,21 @@ class WgBinaryNotFoundError(WgplException):
     """Raised when the 'wg' command is not found on the system."""
 
     pass
+
+
+class ValidationError(WgplException):
+    """Base for all input/schema validation errors."""
+
+    pass
+
+
+class MutuallyExclusiveOptionsError(ValidationError):
+    """Raised when mutually exclusive CLI options are provided together."""
+
+    pass
+
+
+class InvalidFieldValueError(ValidationError):
+    """Raised when a field value fails format, range, or constraint checks."""
+
+    pass

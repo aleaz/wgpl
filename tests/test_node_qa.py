@@ -12,9 +12,11 @@ import datetime
 
 from wgpl import core, db
 from wgpl.exceptions import (
+    InvalidFieldValueError,
     NodeAlreadyExistsError,
     NodeHasPeersError,
     NodeNotFoundError,
+    ValidationError,
     WgplException,
 )
 
@@ -40,7 +42,7 @@ def test_node_add_duplicate_global_name_rejected(wg0_interface: str) -> None:
     ],
 )
 def test_node_add_invalid_name_rejected(wg0_interface: str, bad_name: str) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         core.add_node(bad_name)
     assert core.list_nodes() == []
 
@@ -156,10 +158,10 @@ def test_cli_peer_add_idempotent_no_secrets_human_and_json(
 
 
 def test_peer_add_requires_exactly_one_of_name_or_node(wg0_interface: str) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         core.add_peer(wg0_interface)
     core.add_node("laptop")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         core.add_peer(wg0_interface, "laptop", node_ref="laptop")
 
 

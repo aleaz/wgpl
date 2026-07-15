@@ -349,7 +349,7 @@ def interface_add(
             _print_hints(["apply_server"])
     except InterfaceAlreadyExistsError:
         _exit_error(ctx, f"Interface {name} already exists.")
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 
@@ -629,7 +629,7 @@ def interface_update(
         else:
             console.print(f"[green]Updated interface {name}[/green]")
             _print_hints(_extract_hints(result))
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 
@@ -649,7 +649,7 @@ def node_add(
             _output(ctx, result)
         else:
             console.print(f"[green]Added node {name}[/green]")
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 
@@ -729,7 +729,7 @@ def node_update(
             _output(ctx, result)
         else:
             console.print(f"[green]Updated node {ref}[/green]")
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 
@@ -913,7 +913,7 @@ def peer_add(
             _print_hints(["apply_server"])
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 
@@ -1217,7 +1217,7 @@ def peer_update(
             _print_hints(_extract_hints(result))
     except PeerAlreadyExistsError as e:
         _exit_error(ctx, str(e))
-    except (WgplException, ValueError) as e:
+    except WgplException as e:
         _exit_error(ctx, str(e))
 
 

@@ -1,6 +1,7 @@
 import pytest
 from wgpl import core, db
 from wgpl.core import validate_endpoint, validate_public_key
+from wgpl.exceptions import InvalidFieldValueError
 
 
 def test_validate_endpoint_valid():
@@ -10,13 +11,13 @@ def test_validate_endpoint_valid():
 
 
 def test_validate_endpoint_invalid():
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         validate_endpoint("!@#$")
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         validate_endpoint("")
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         validate_endpoint("http://example.com")
-    with pytest.raises(ValueError, match="IPv4"):
+    with pytest.raises(InvalidFieldValueError, match="IPv4"):
         validate_endpoint("2001:db8::1")
 
 
@@ -27,9 +28,9 @@ def test_validate_public_key_valid():
 
 
 def test_validate_public_key_invalid():
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         validate_public_key("invalid-key")
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidFieldValueError):
         validate_public_key("a" * 42 + "==")  # Valid base64, but wrong length
 
 

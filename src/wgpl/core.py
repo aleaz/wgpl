@@ -50,12 +50,15 @@ from .validators import (
 from .exceptions import (
     InterfaceHasPeersError,
     InterfaceNotFoundError,
+    InvalidFieldValueError,
+    MutuallyExclusiveOptionsError,
     NodeHasPeersError,
     NodeNotFoundError,
     NoUpdateFieldsError,
     PeerAlreadyExistsError,
     PeerInterfaceMismatchError,
     PeerNotFoundError,
+    ValidationError,
     WgplException,
 )
 
@@ -72,18 +75,15 @@ def force_readonly():
 
 def _validate_mtu_keepalive(mtu: int | None, keepalive: int | None) -> None:
     """Reject mtu/keepalive values outside wire-safe ranges at mutation time."""
-    try:
-        if mtu is not None:
-            integrity.validate_wire_mtu(mtu)
-        if keepalive is not None:
-            integrity.validate_wire_keepalive(keepalive)
-    except WgplException as exc:
-        raise ValueError(str(exc)) from exc
+    if mtu is not None:
+        integrity.validate_wire_mtu(mtu)
+    if keepalive is not None:
+        integrity.validate_wire_keepalive(keepalive)
 
 
 def _validate_role(role: str) -> str:
     if role not in {PeerRole.ENDPOINT, PeerRole.SUBNET_ROUTER}:
-        raise ValueError(
+        raise InvalidFieldValueError(
             f"Invalid role '{role}'. Must be '{PeerRole.ENDPOINT}' or "
             f"'{PeerRole.SUBNET_ROUTER}'."
         )
@@ -93,7 +93,7 @@ def _validate_role(role: str) -> str:
 def _validate_allowed_ips_policy(policy: str) -> str:
     valid = {item.value for item in AllowedIpsPolicy}
     if policy not in valid:
-        raise ValueError(
+        raise InvalidFieldValueError(
             f"Invalid allowed_ips_policy '{policy}'. Must be one of: "
             f"{', '.join(sorted(valid))}."
         )
@@ -135,19 +135,21 @@ def _resolve_peer_routing_for_write(
 
     if validated_role == PeerRole.ENDPOINT:
         if normalized_routed is not None:
-            raise ValueError("endpoint peers must not have routed_networks")
+            raise InvalidFieldValueError(
+                "endpoint peers must not have routed_networks"
+            )
     elif normalized_routed is None:
-        raise ValueError("subnet_router requires routed_networks")
+        raise InvalidFieldValueError("subnet_router requires routed_networks")
 
     normalized_custom: str | None = None
     if validated_policy == AllowedIpsPolicy.CUSTOM:
         if custom_allowed_ips is None:
-            raise ValueError(
+            raise InvalidFieldValueError(
                 "custom_allowed_ips is required when allowed_ips_policy is custom"
             )
         normalized_custom = _normalize_custom_allowed_ips(custom_allowed_ips)
     elif custom_allowed_ips is not None:
-        raise ValueError(
+        raise InvalidFieldValueError(
             "custom_allowed_ips is only valid when allowed_ips_policy is custom"
         )
 
@@ -433,13 +435,13 @@ def add_interface(
     """Register a new interface in the DB."""
     name = name.strip()
     if not name:
-        raise ValueError("Interface name cannot be empty")
+        raise InvalidFieldValueError("Interface name cannot be empty")
     if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$", name):
-        raise ValueError(
+        raise InvalidFieldValueError(
             "Interface name contains invalid characters. Must start with alphanumeric and contain only alphanumerics, hyphens, and underscores."
         )
     if not (1 <= port <= 65535):
-        raise ValueError(f"Port must be between 1 and 65535, got {port}")
+        raise InvalidFieldValueError(f"Port must be between 1 and 65535, got {port}")
 
     endpoint = validate_endpoint(endpoint)
     public_key = validate_public_key(public_key)
@@ -447,7 +449,9 @@ def add_interface(
     try:
         normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
     except ValueError as exc:
-        raise ValueError(f"Invalid address pool '{address_pool}'") from exc
+        raise InvalidFieldValueError(
+            f"Invalid address pool '{address_pool}'"
+        ) from exc
 
     normalized_dns = validate_dns(dns) if dns is not None else None
     _validate_mtu_keepalive(mtu, keepalive)
@@ -615,7 +619,7 @@ def update_node(
 ) -> dict[str, Any]:
     """Update a node's identity fields (name/desc)."""
     if clear_desc and desc is not None:
-        raise ValueError("Cannot set both desc and clear_desc")
+        raise MutuallyExclusiveOptionsError("Cannot set both desc and clear_desc")
     if name is None and desc is None and not clear_desc:
         raise NoUpdateFieldsError("No fields provided to update")
     if name is not None:
@@ -787,7 +791,7 @@ def _resolve_node_for_attachment(
     Returns (node_id, node_name, node_created).
     """
     if (name is None) == (node_ref is None):
-        raise ValueError(
+        raise ValidationError(
             "Provide exactly one of a peer name (positional) or --node <ref>."
         )
 
@@ -1337,15 +1341,19 @@ def update_interface(
 ) -> dict[str, str | int | list[str] | None]:
     """Update interface fields. Returns the updated row and operational hints."""
     if clear_dns and dns is not None:
-        raise ValueError("Cannot set both dns and clear_dns")
+        raise MutuallyExclusiveOptionsError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
-        raise ValueError("Cannot set both desc and clear_desc")
+        raise MutuallyExclusiveOptionsError("Cannot set both desc and clear_desc")
     if clear_mtu and mtu is not None:
-        raise ValueError("Cannot set both mtu and clear_mtu")
+        raise MutuallyExclusiveOptionsError("Cannot set both mtu and clear_mtu")
     if clear_keepalive and keepalive is not None:
-        raise ValueError("Cannot set both keepalive and clear_keepalive")
+        raise MutuallyExclusiveOptionsError(
+            "Cannot set both keepalive and clear_keepalive"
+        )
     if clear_routed_networks and routed_networks is not None:
-        raise ValueError("Cannot set both routed_networks and clear_routed_networks")
+        raise MutuallyExclusiveOptionsError(
+            "Cannot set both routed_networks and clear_routed_networks"
+        )
 
     has_field = any(
         v is not None
@@ -1389,7 +1397,7 @@ def update_interface(
             hints.append("re_export_clients")
 
     if port is not None and not (1 <= port <= 65535):
-        raise ValueError(f"Port must be between 1 and 65535, got {port}")
+        raise InvalidFieldValueError(f"Port must be between 1 and 65535, got {port}")
     _validate_mtu_keepalive(mtu, keepalive)
 
     normalized_pool: str | None = None
@@ -1397,7 +1405,9 @@ def update_interface(
         try:
             normalized_pool = str(ipaddress.IPv4Network(address_pool, strict=False))
         except ValueError as exc:
-            raise ValueError(f"Invalid address pool '{address_pool}'") from exc
+            raise InvalidFieldValueError(
+                f"Invalid address pool '{address_pool}'"
+            ) from exc
 
     if endpoint is not None:
         endpoint = validate_endpoint(endpoint)
@@ -1537,19 +1547,25 @@ def update_peer(
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
     if clear_dns and dns is not None:
-        raise ValueError("Cannot set both dns and clear_dns")
+        raise MutuallyExclusiveOptionsError("Cannot set both dns and clear_dns")
     if clear_desc and desc is not None:
-        raise ValueError("Cannot set both desc and clear_desc")
+        raise MutuallyExclusiveOptionsError("Cannot set both desc and clear_desc")
     if clear_mtu and mtu is not None:
-        raise ValueError("Cannot set both mtu and clear_mtu")
+        raise MutuallyExclusiveOptionsError("Cannot set both mtu and clear_mtu")
     if clear_keepalive and keepalive is not None:
-        raise ValueError("Cannot set both keepalive and clear_keepalive")
+        raise MutuallyExclusiveOptionsError(
+            "Cannot set both keepalive and clear_keepalive"
+        )
     if clear_expires and expires is not None:
-        raise ValueError("Cannot set both expires and clear_expires")
+        raise MutuallyExclusiveOptionsError(
+            "Cannot set both expires and clear_expires"
+        )
     if clear_routed_networks and routed_networks is not None:
-        raise ValueError("Cannot set both routed_networks and clear_routed_networks")
+        raise MutuallyExclusiveOptionsError(
+            "Cannot set both routed_networks and clear_routed_networks"
+        )
     if clear_custom_allowed_ips and custom_allowed_ips is not None:
-        raise ValueError(
+        raise MutuallyExclusiveOptionsError(
             "Cannot set both custom_allowed_ips and clear_custom_allowed_ips"
         )
 

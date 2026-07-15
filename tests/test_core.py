@@ -18,6 +18,7 @@ from wgpl.exceptions import (
     AmbiguousPeerIdError,
     InterfaceDisambiguationRequiredError,
     InvalidDnsError,
+    InvalidFieldValueError,
     NodeAlreadyExistsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
@@ -27,6 +28,7 @@ from wgpl.exceptions import (
     PeerInterfaceMismatchError,
     PeerNotFoundError,
     PeersOutsidePoolError,
+    WgplException,
     WireguardConfigError,
 )
 
@@ -57,7 +59,7 @@ def test_add_peer_returns_safe_fields(wg0_interface: str) -> None:
 
 
 def test_add_peer_rejects_invalid_name(wg0_interface: str) -> None:
-    with pytest.raises(ValueError, match="invalid characters"):
+    with pytest.raises(InvalidFieldValueError, match="invalid characters"):
         core.add_peer(wg0_interface, "bad name with spaces")
 
 
@@ -352,7 +354,7 @@ def test_update_interface_no_fields_raises(wg0_interface: str) -> None:
 
 def test_add_interface_rejects_invalid_mtu(wg0_interface: str) -> None:
     pubkey = wireguard.generate_keypair().public_key
-    with pytest.raises(ValueError, match="1280"):
+    with pytest.raises(WgplException, match="1280"):
         core.add_interface(
             "wg_mtu",
             "vpn.example.com",
@@ -363,7 +365,7 @@ def test_add_interface_rejects_invalid_mtu(wg0_interface: str) -> None:
 
 
 def test_add_peer_rejects_invalid_keepalive(wg0_interface: str) -> None:
-    with pytest.raises(ValueError, match="between 0 and"):
+    with pytest.raises(WgplException, match="between 0 and"):
         core.add_peer(wg0_interface, "bad", keepalive=-1)
 
 
