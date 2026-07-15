@@ -543,3 +543,38 @@ def test_cli_peer_update_human_shows_hints(seeded: dict) -> None:
     result = _invoke(["peer", "update", "-i", "wg0", peer_id, "--ip", "10.0.0.15"])
     assert result.exit_code == 0
     assert "apply" in result.stderr.lower() or "sync" in result.stderr.lower()
+
+
+# --- JSON error envelopes for refactored exception types ---
+
+
+def test_cli_peer_update_mutual_exclusion_json(seeded: dict) -> None:
+    peer_id = seeded["peer"]["id"]
+    result = _invoke(
+        ["--json", "peer", "update", "-i", "wg0", peer_id, "--dns", "1.1.1.1", "--clear-dns"]
+    )
+    assert result.exit_code == 1
+    payload = json_status_payload(result)
+    assert payload["status"] == "error"
+    assert "dns" in payload["message"].lower()
+    assert "together" in payload["message"].lower()
+
+
+def test_cli_peer_add_invalid_name_json(wgpl_db: str) -> None:
+    _add_interface("wg0")
+    result = _invoke(["--json", "peer", "add", "bad name", "-i", "wg0"])
+    assert result.exit_code == 1
+    payload = json_status_payload(result)
+    assert payload["status"] == "error"
+    assert "invalid characters" in payload["message"].lower()
+
+
+def test_cli_add_interface_invalid_mtu_json(wgpl_db: str) -> None:
+    pubkey = _pubkey()
+    result = _invoke(
+        ["--json", "interface", "add", "wg1", "1.2.3.4", pubkey, "10.0.1.0/24", "--mtu", "100"]
+    )
+    assert result.exit_code == 1
+    payload = json_status_payload(result)
+    assert payload["status"] == "error"
+    assert "1280" in payload["message"]

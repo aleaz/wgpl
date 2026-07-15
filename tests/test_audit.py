@@ -415,3 +415,30 @@ def test_audit_event_to_dict_handles_corrupt_metadata() -> None:
     assert isinstance(metadata, dict)
     assert metadata.get("_corrupt") is True
     assert metadata.get("_raw") == "not-json"
+
+
+# --- T10: Audit diff for fields not previously covered ---
+
+
+def test_peer_update_audit_tracks_mtu_change(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "audit_mtu", mtu=1400)
+    peer_id = str(peer["id"])
+    core.update_peer(wg0_interface, peer_id, mtu=1300)
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
+    assert len(updated) == 1
+    assert "mtu" in updated[0]["metadata"]["fields"]
+    assert updated[0]["metadata"]["fields"]["mtu"]["old"] == 1400
+    assert updated[0]["metadata"]["fields"]["mtu"]["new"] == 1300
+
+
+def test_peer_update_audit_tracks_desc_change(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "audit_desc", desc="original")
+    peer_id = str(peer["id"])
+    core.update_peer(wg0_interface, peer_id, desc="updated")
+    events = core.list_peer_audit_history(peer_id, wg0_interface)
+    updated = [e for e in events if e["event_type"] == AuditEventType.UPDATED]
+    assert len(updated) == 1
+    assert "desc" in updated[0]["metadata"]["fields"]
+    assert updated[0]["metadata"]["fields"]["desc"]["old"] == "original"
+    assert updated[0]["metadata"]["fields"]["desc"]["new"] == "updated"

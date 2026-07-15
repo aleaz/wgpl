@@ -19,6 +19,7 @@ from wgpl.exceptions import (
     InterfaceDisambiguationRequiredError,
     InvalidDnsError,
     InvalidFieldValueError,
+    MutuallyExclusiveOptionsError,
     NodeAlreadyExistsError,
     InvalidPeerIpError,
     IpAlreadyInUseError,
@@ -858,3 +859,233 @@ def test_update_peer_non_custom_policy_clears_custom_allowed_ips(
     )
     assert updated["allowed_ips_policy"] == "vpn_only"
     assert updated["custom_allowed_ips"] is None
+
+
+# --- T2: PeerAccess.READ_ALL with inactive peers ---
+
+
+def test_peer_show_resolves_expired_peer(wg0_interface: str) -> None:
+    """READ_ALL resolves an expired peer without requiring -i."""
+    peer = core.add_peer(wg0_interface, "temp", expires="1h")
+    past = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    ).isoformat()
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET expires_at = ? WHERE id = ?", (past, peer["id"])
+        )
+        conn.commit()
+
+    resolved = resolve_peer_ref(str(peer["id"])[:8], access=PeerAccess.READ_ALL)
+    assert resolved == str(peer["id"])
+
+
+def test_peer_show_resolves_soft_deleted_peer(wg0_interface: str) -> None:
+    """READ_ALL resolves a soft-deleted peer."""
+    peer = core.add_peer(wg0_interface, "removed")
+    core.remove_peer(wg0_interface, str(peer["id"]))
+    resolved = resolve_peer_ref(str(peer["id"])[:8], access=PeerAccess.READ_ALL)
+    assert resolved == str(peer["id"])
+
+
+def test_read_all_no_interface_disambiguation(wg0_interface: str) -> None:
+    """READ_ALL does not require -i even with multiple interfaces."""
+    peer = core.add_peer(wg0_interface, "multi")
+    pubkey2 = wireguard.generate_keypair().public_key
+    db.add_interface("wg1", "vpn2.example.com", pubkey2, "10.1.0.0/24", 51821)
+    resolved = resolve_peer_ref(str(peer["id"])[:8], access=PeerAccess.READ_ALL)
+    assert resolved == str(peer["id"])
+
+
+# --- T3: MutuallyExclusiveOptionsError at core level ---
+
+
+def test_update_peer_mutual_exclusion_raises_correct_type(
+    wg0_interface: str,
+) -> None:
+    peer = core.add_peer(wg0_interface, "test_mutex")
+    with pytest.raises(MutuallyExclusiveOptionsError, match="dns"):
+        core.update_peer(wg0_interface, str(peer["id"]), dns="1.1.1.1", clear_dns=True)
+
+
+def test_update_interface_mutual_exclusion_raises_correct_type(
+    wg0_interface: str,
+) -> None:
+    with pytest.raises(MutuallyExclusiveOptionsError, match="mtu"):
+        core.update_interface(wg0_interface, mtu=1400, clear_mtu=True)
+
+
+def test_update_node_mutual_exclusion_raises_correct_type(
+    wg0_interface: str,
+) -> None:
+    core.add_node("devnode")
+    with pytest.raises(MutuallyExclusiveOptionsError, match="desc"):
+        core.update_node("devnode", desc="new", clear_desc=True)
+
+
+# --- T5: update_peer return dict shape ---
+
+
+def test_update_peer_returns_expected_keys(wg0_interface: str) -> None:
+    """Validate the full key set of the update_peer response."""
+    peer = core.add_peer(wg0_interface, "shape_test")
+    result = core.update_peer(wg0_interface, str(peer["id"]), dns="8.8.8.8")
+    expected_keys = {
+        "id", "name", "node", "node_id", "ip_address",
+        "dns", "dns_override", "desc",
+        "mtu", "mtu_override", "keepalive", "keepalive_override",
+        "expires_at", "role", "routed_networks",
+        "allowed_ips_policy", "custom_allowed_ips", "hints",
+    }
+    assert set(result.keys()) == expected_keys
+
+
+# --- T6: NoUpdateFieldsError for update_peer ---
+
+
+def test_update_peer_no_fields_raises(wg0_interface: str) -> None:
+    peer = core.add_peer(wg0_interface, "noop")
+    with pytest.raises(NoUpdateFieldsError):
+        core.update_peer(wg0_interface, str(peer["id"]))
+
+
+# --- T7: _prepare_peer_update unit tests ---
+
+
+def test_prepare_peer_update_hints_ip() -> None:
+    """IP change produces apply_server + re_export_client hints."""
+    from wgpl.core import _prepare_peer_update
+
+    _, _, hints = _prepare_peer_update(
+        ip_address="10.0.0.5", dns=None, clear_dns=False,
+        desc=None, clear_desc=False, mtu=None, clear_mtu=False,
+        keepalive=None, clear_keepalive=False, expires=None, clear_expires=False,
+        role=None, routed_networks=None, clear_routed_networks=False,
+        allowed_ips_policy=None, custom_allowed_ips=None, clear_custom_allowed_ips=False,
+    )
+    assert "apply_server" in hints
+    assert "re_export_client" in hints
+
+
+def test_prepare_peer_update_changed_fields_tracks_clears() -> None:
+    """clear_dns adds 'dns' to changed_fields."""
+    from wgpl.core import _prepare_peer_update
+
+    _, changed, _ = _prepare_peer_update(
+        ip_address=None, dns=None, clear_dns=True,
+        desc=None, clear_desc=False, mtu=None, clear_mtu=False,
+        keepalive=None, clear_keepalive=False, expires=None, clear_expires=False,
+        role=None, routed_networks=None, clear_routed_networks=False,
+        allowed_ips_policy=None, custom_allowed_ips=None, clear_custom_allowed_ips=False,
+    )
+    assert "dns" in changed
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [
+        {"dns": "1.1.1.1", "clear_dns": True},
+        {"desc": "x", "clear_desc": True},
+        {"mtu": 1400, "clear_mtu": True},
+        {"keepalive": 25, "clear_keepalive": True},
+        {"expires": "7d", "clear_expires": True},
+        {"routed_networks": "10.0.0.0/8", "clear_routed_networks": True},
+        {"custom_allowed_ips": "0.0.0.0/0", "clear_custom_allowed_ips": True},
+    ],
+    ids=["dns", "desc", "mtu", "keepalive", "expires", "routed_networks", "custom_allowed_ips"],
+)
+def test_prepare_peer_update_all_mutual_exclusions(pair: dict) -> None:
+    """Each of the 7 clear/set pairs raises MutuallyExclusiveOptionsError."""
+    from wgpl.core import _prepare_peer_update
+
+    defaults: dict[str, Any] = dict(
+        ip_address=None, dns=None, clear_dns=False,
+        desc=None, clear_desc=False, mtu=None, clear_mtu=False,
+        keepalive=None, clear_keepalive=False, expires=None, clear_expires=False,
+        role=None, routed_networks=None, clear_routed_networks=False,
+        allowed_ips_policy=None, custom_allowed_ips=None, clear_custom_allowed_ips=False,
+    )
+    defaults.update(pair)
+    with pytest.raises(MutuallyExclusiveOptionsError):
+        _prepare_peer_update(**defaults)
+
+
+# --- T8: update_peer IP collision with active peer ---
+
+
+def test_update_peer_ip_collision_active_peer(wg0_interface: str) -> None:
+    """Moving to an IP held by an active peer raises IpAlreadyInUseError."""
+    p1 = core.add_peer(wg0_interface, "holder")
+    p2 = core.add_peer(wg0_interface, "mover")
+    with pytest.raises(IpAlreadyInUseError):
+        core.update_peer(wg0_interface, str(p2["id"]), ip_address=str(p1["ip_address"]))
+
+
+# --- T9: Routing tristate set routed_networks via update_peer ---
+
+
+def test_update_peer_set_routed_networks(wg0_interface: str) -> None:
+    """Setting routed_networks on a subnet_router via update works."""
+    peer = core.add_peer(
+        wg0_interface, "sr",
+        role="subnet_router", routed_networks="192.168.1.0/24",
+        keepalive=25,
+    )
+    result = core.update_peer(
+        wg0_interface, str(peer["id"]),
+        routed_networks="192.168.2.0/24",
+    )
+    assert result["routed_networks"] == "192.168.2.0/24"
+
+
+# --- T11: _validate_mtu_keepalive propagates WgplException, not ValueError ---
+
+
+def test_add_peer_invalid_mtu_raises_wgpl_exception(wg0_interface: str) -> None:
+    """Invalid MTU through add_peer propagates WgplException (not ValueError)."""
+    with pytest.raises(WgplException, match="1280"):
+        core.add_peer(wg0_interface, "bad_mtu", mtu=100)
+
+
+# --- T12: update_peer on soft-deleted peer with active_only=True ---
+
+
+def test_update_peer_soft_deleted_active_only(wg0_interface: str) -> None:
+    """update_peer with active_only=True cannot find a soft-deleted peer."""
+    peer = core.add_peer(wg0_interface, "ghost")
+    peer_id = str(peer["id"])
+    core.remove_peer(wg0_interface, peer_id)
+    with pytest.raises(PeerNotFoundError):
+        core.update_peer(wg0_interface, peer_id, dns="8.8.8.8")
+
+
+# --- T13: Residual ValueError leak scan ---
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["wgpl.core", "wgpl.validators"],
+)
+def test_no_residual_raise_valueerror(module_name: str) -> None:
+    """Business modules must not raise bare ValueError; use WgplException hierarchy."""
+    import importlib
+    import inspect
+    import ast
+
+    mod = importlib.import_module(module_name)
+    source = inspect.getsource(mod)
+    tree = ast.parse(source)
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Raise) and node.exc is not None:
+            exc = node.exc
+            name: str | None = None
+            if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
+                name = exc.func.id
+            elif isinstance(exc, ast.Name):
+                name = exc.id
+            if name == "ValueError":
+                violations.append(f"line {node.lineno}")
+    assert not violations, (
+        f"{module_name} still raises ValueError at: {', '.join(violations)}"
+    )

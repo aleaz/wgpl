@@ -31,6 +31,18 @@ def test_open_database_sets_secure_permissions(tmp_path) -> None:
     assert oct(os.stat(path).st_mode & 0o777) == oct(0o600)
 
 
+def test_readonly_open_enforces_permissions(tmp_path) -> None:
+    """fchmod is applied even on read-only opens."""
+    db_path = str(tmp_path / "test.db")
+    conn = dbpath.open_database(db_path, create=True)
+    conn.close()
+    os.chmod(db_path, 0o644)
+    assert oct(os.stat(db_path).st_mode & 0o777) == oct(0o644)
+    conn = dbpath.open_database(db_path, read_only=True)
+    conn.close()
+    assert oct(os.stat(db_path).st_mode & 0o777) == oct(0o600)
+
+
 def test_init_db_uses_secure_opener(monkeypatch: pytest.MonkeyPatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "wgpl.db")
