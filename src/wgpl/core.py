@@ -1522,6 +1522,227 @@ def update_interface(
     return result
 
 
+def _prepare_peer_update(
+    *,
+    ip_address: str | None,
+    dns: str | None,
+    clear_dns: bool,
+    desc: str | None,
+    clear_desc: bool,
+    mtu: int | None,
+    clear_mtu: bool,
+    keepalive: int | None,
+    clear_keepalive: bool,
+    expires: str | None,
+    clear_expires: bool,
+    role: str | None,
+    routed_networks: str | None,
+    clear_routed_networks: bool,
+    allowed_ips_policy: str | None,
+    custom_allowed_ips: str | None,
+    clear_custom_allowed_ips: bool,
+) -> tuple[
+    dict[str, Any | UnsetType],
+    list[str],
+    list[str],
+]:
+    """Validate inputs and normalize values for a peer update (pre-transaction).
+
+    Returns (normalized_values, changed_fields, hints).
+    """
+    _mutual_exclusion_pairs: list[tuple[bool, Any, str]] = [
+        (clear_dns, dns, "dns"),
+        (clear_desc, desc, "desc"),
+        (clear_mtu, mtu, "mtu"),
+        (clear_keepalive, keepalive, "keepalive"),
+        (clear_expires, expires, "expires"),
+        (clear_routed_networks, routed_networks, "routed_networks"),
+        (clear_custom_allowed_ips, custom_allowed_ips, "custom_allowed_ips"),
+    ]
+    for clear_flag, value, name in _mutual_exclusion_pairs:
+        if clear_flag and value is not None:
+            raise MutuallyExclusiveOptionsError(
+                f"Cannot set both {name} and clear_{name}"
+            )
+
+    has_field = any(
+        v is not None
+        for v in (
+            ip_address, dns, desc, mtu, keepalive, expires,
+            role, routed_networks, allowed_ips_policy, custom_allowed_ips,
+        )
+    )
+    has_clear = any([
+        clear_dns, clear_desc, clear_mtu, clear_keepalive,
+        clear_expires, clear_routed_networks, clear_custom_allowed_ips,
+    ])
+    if not has_field and not has_clear:
+        raise NoUpdateFieldsError("No fields provided to update")
+
+    hints: list[str] = []
+    if ip_address is not None:
+        hints.append("apply_server")
+    if (
+        any(x is not None for x in (ip_address, dns, mtu, keepalive))
+        or clear_dns or clear_mtu or clear_keepalive
+        or role is not None
+        or routed_networks is not None or clear_routed_networks
+        or allowed_ips_policy is not None
+        or custom_allowed_ips is not None or clear_custom_allowed_ips
+    ):
+        hints.append("re_export_client")
+    if (
+        role is not None or routed_networks is not None
+        or clear_routed_networks or ip_address is not None
+    ):
+        hints.append("apply_server")
+
+    _validate_mtu_keepalive(mtu, keepalive)
+
+    normalized: dict[str, Any | UnsetType] = {
+        "dns": _resolve_optional(validate_dns(dns) if dns else None, clear_dns),
+        "desc": _resolve_optional(desc, clear_desc),
+        "mtu": _resolve_optional(mtu, clear_mtu),
+        "keepalive": _resolve_optional(keepalive, clear_keepalive),
+        "expires_at": _resolve_optional(
+            integrity.parse_future_duration(expires).isoformat() if expires else None,
+            clear_expires,
+        ),
+    }
+
+    changed_fields: list[str] = []
+    _field_triggers: list[tuple[str, Any, bool]] = [
+        ("ip_address", ip_address, False),
+        ("dns", dns, clear_dns),
+        ("desc", desc, clear_desc),
+        ("mtu", mtu, clear_mtu),
+        ("keepalive", keepalive, clear_keepalive),
+        ("expires", expires, clear_expires),
+        ("role", role, False),
+        ("routed_networks", routed_networks, clear_routed_networks),
+        ("allowed_ips_policy", allowed_ips_policy, False),
+        ("custom_allowed_ips", custom_allowed_ips, clear_custom_allowed_ips),
+    ]
+    for field_name, field_val, field_clear in _field_triggers:
+        if field_val is not None or field_clear:
+            changed_fields.append(field_name)
+
+    return normalized, changed_fields, hints
+
+
+def _resolve_update_routing(
+    *,
+    before: sqlite3.Row,
+    iface: sqlite3.Row,
+    role: str | None,
+    routed_networks: str | None,
+    clear_routed_networks: bool,
+    allowed_ips_policy: str | None,
+    custom_allowed_ips: str | None,
+    clear_custom_allowed_ips: bool,
+) -> tuple[str, str | None | UnsetType, str, str | None | UnsetType, str | None, str | None]:
+    """Merge tristate old+new values for routing fields (inside transaction).
+
+    Returns (effective_role, effective_routed, effective_policy, effective_custom,
+             resolved_routed, resolved_custom).
+    """
+    effective_role = (
+        _validate_role(role)
+        if role is not None
+        else str(before["role"] or PeerRole.ENDPOINT)
+    )
+
+    effective_routed: str | None | UnsetType = UNSET
+    if clear_routed_networks:
+        effective_routed = None
+    elif routed_networks is not None:
+        effective_routed = _normalize_routed_networks(
+            routed_networks, address_pool=str(iface["address_pool"])
+        )
+    elif role is not None and effective_role == PeerRole.ENDPOINT:
+        effective_routed = None
+
+    effective_policy = (
+        _validate_allowed_ips_policy(allowed_ips_policy)
+        if allowed_ips_policy is not None
+        else str(before["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY)
+    )
+
+    effective_custom: str | None | UnsetType = UNSET
+    if clear_custom_allowed_ips:
+        effective_custom = None
+    elif custom_allowed_ips is not None:
+        effective_custom = _normalize_custom_allowed_ips(custom_allowed_ips)
+    elif (
+        allowed_ips_policy is not None
+        and effective_policy != AllowedIpsPolicy.CUSTOM
+    ):
+        effective_custom = None
+
+    if effective_routed is UNSET:
+        current_routed = before["routed_networks"]
+        resolved_routed = (
+            str(current_routed) if current_routed is not None else None
+        )
+    elif effective_routed is None:
+        resolved_routed = None
+    else:
+        resolved_routed = str(effective_routed)
+
+    if effective_custom is UNSET:
+        current_custom = before["custom_allowed_ips"]
+        resolved_custom = (
+            str(current_custom) if current_custom is not None else None
+        )
+    elif effective_custom is None:
+        resolved_custom = None
+    else:
+        resolved_custom = str(effective_custom)
+
+    _resolve_peer_routing_for_write(
+        role=effective_role,
+        routed_networks=resolved_routed,
+        allowed_ips_policy=effective_policy,
+        custom_allowed_ips=resolved_custom,
+        address_pool=str(iface["address_pool"]),
+    )
+
+    return (
+        effective_role, effective_routed, effective_policy,
+        effective_custom, resolved_routed, resolved_custom,
+    )
+
+
+def _build_update_peer_response(
+    updated: sqlite3.Row,
+    iface: sqlite3.Row,
+    hints: list[str],
+) -> dict[str, Any]:
+    """Build the public response dict for an update_peer result."""
+    return {
+        "id": str(updated["id"]),
+        "name": str(updated["name"]),
+        "node": str(updated["name"]),
+        "node_id": str(updated["node_id"]),
+        "ip_address": str(updated["ip_address"]),
+        "dns": _effective_peer_dns(updated, iface),
+        "dns_override": updated["dns"],
+        "desc": updated["desc"],
+        "mtu": _effective_peer_mtu(updated, iface),
+        "mtu_override": updated["mtu"],
+        "keepalive": _effective_peer_keepalive(updated, iface),
+        "keepalive_override": updated["keepalive"],
+        "expires_at": updated["expires_at"],
+        "role": str(updated["role"] or PeerRole.ENDPOINT),
+        "routed_networks": updated["routed_networks"],
+        "allowed_ips_policy": str(
+            updated["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY
+        ),
+        "custom_allowed_ips": updated["custom_allowed_ips"],
+        "hints": list(dict.fromkeys(hints)),
+    }
+
+
 def update_peer(
     interface_ref: str,
     peer_ref: str,
@@ -1546,113 +1767,19 @@ def update_peer(
     clear_custom_allowed_ips: bool = False,
 ) -> dict[str, Any]:
     """Update peer fields. Returns safe peer data and operational hints."""
-    if clear_dns and dns is not None:
-        raise MutuallyExclusiveOptionsError("Cannot set both dns and clear_dns")
-    if clear_desc and desc is not None:
-        raise MutuallyExclusiveOptionsError("Cannot set both desc and clear_desc")
-    if clear_mtu and mtu is not None:
-        raise MutuallyExclusiveOptionsError("Cannot set both mtu and clear_mtu")
-    if clear_keepalive and keepalive is not None:
-        raise MutuallyExclusiveOptionsError(
-            "Cannot set both keepalive and clear_keepalive"
-        )
-    if clear_expires and expires is not None:
-        raise MutuallyExclusiveOptionsError(
-            "Cannot set both expires and clear_expires"
-        )
-    if clear_routed_networks and routed_networks is not None:
-        raise MutuallyExclusiveOptionsError(
-            "Cannot set both routed_networks and clear_routed_networks"
-        )
-    if clear_custom_allowed_ips and custom_allowed_ips is not None:
-        raise MutuallyExclusiveOptionsError(
-            "Cannot set both custom_allowed_ips and clear_custom_allowed_ips"
-        )
-
-    has_field = any(
-        v is not None
-        for v in (
-            ip_address,
-            dns,
-            desc,
-            mtu,
-            keepalive,
-            expires,
-            role,
-            routed_networks,
-            allowed_ips_policy,
-            custom_allowed_ips,
-        )
+    normalized, changed_fields, hints = _prepare_peer_update(
+        ip_address=ip_address,
+        dns=dns, clear_dns=clear_dns,
+        desc=desc, clear_desc=clear_desc,
+        mtu=mtu, clear_mtu=clear_mtu,
+        keepalive=keepalive, clear_keepalive=clear_keepalive,
+        expires=expires, clear_expires=clear_expires,
+        role=role,
+        routed_networks=routed_networks, clear_routed_networks=clear_routed_networks,
+        allowed_ips_policy=allowed_ips_policy,
+        custom_allowed_ips=custom_allowed_ips,
+        clear_custom_allowed_ips=clear_custom_allowed_ips,
     )
-    if (
-        not has_field
-        and not clear_dns
-        and not clear_desc
-        and not clear_mtu
-        and not clear_keepalive
-        and not clear_expires
-        and not clear_routed_networks
-        and not clear_custom_allowed_ips
-    ):
-        raise NoUpdateFieldsError("No fields provided to update")
-
-    hints: list[str] = []
-    if ip_address is not None:
-        hints.append("apply_server")
-    if (
-        any(x is not None for x in (ip_address, dns, mtu, keepalive))
-        or clear_dns
-        or clear_mtu
-        or clear_keepalive
-        or role is not None
-        or routed_networks is not None
-        or clear_routed_networks
-        or allowed_ips_policy is not None
-        or custom_allowed_ips is not None
-        or clear_custom_allowed_ips
-    ):
-        hints.append("re_export_client")
-    if (
-        role is not None
-        or routed_networks is not None
-        or clear_routed_networks
-        or ip_address is not None
-    ):
-        hints.append("apply_server")
-
-    _validate_mtu_keepalive(mtu, keepalive)
-
-    normalized_dns = _resolve_optional(validate_dns(dns) if dns else None, clear_dns)
-    normalized_desc = _resolve_optional(desc, clear_desc)
-    normalized_mtu = _resolve_optional(mtu, clear_mtu)
-    normalized_keepalive = _resolve_optional(keepalive, clear_keepalive)
-
-    normalized_expires = _resolve_optional(
-        integrity.parse_future_duration(expires).isoformat() if expires else None,
-        clear_expires,
-    )
-
-    changed_fields: list[str] = []
-    if ip_address is not None:
-        changed_fields.append("ip_address")
-    if dns is not None or clear_dns:
-        changed_fields.append("dns")
-    if desc is not None or clear_desc:
-        changed_fields.append("desc")
-    if mtu is not None or clear_mtu:
-        changed_fields.append("mtu")
-    if keepalive is not None or clear_keepalive:
-        changed_fields.append("keepalive")
-    if expires is not None or clear_expires:
-        changed_fields.append("expires")
-    if role is not None:
-        changed_fields.append("role")
-    if routed_networks is not None or clear_routed_networks:
-        changed_fields.append("routed_networks")
-    if allowed_ips_policy is not None:
-        changed_fields.append("allowed_ips_policy")
-    if custom_allowed_ips is not None or clear_custom_allowed_ips:
-        changed_fields.append("custom_allowed_ips")
 
     with db.transaction() as conn:
         iface_id = resolve_interface_ref(interface_ref, conn=conn)
@@ -1662,119 +1789,61 @@ def update_peer(
         canonical_id = resolve_peer_ref(
             peer_ref, str(iface_id), access=resolve_access, conn=conn
         )
-        peer = db.get_peer(canonical_id, conn=conn)
-        if not peer:
+        before = db.get_peer(canonical_id, conn=conn)
+        if not before:
             raise PeerNotFoundError(f"Peer {peer_ref} not found")
-        if peer["interface_id"] != iface_id:
+        if before["interface_id"] != iface_id:
             raise PeerInterfaceMismatchError(
                 f"Peer {peer_ref} does not belong to interface {interface_ref}"
             )
-        before = peer
 
         validated_ip: str | UnsetType = UNSET
         slot_ip: str | None = None
         if ip_address is not None:
             validated_ip = allocate_peer_ip(
-                iface_id,
-                conn,
-                ip_address,
-                exclude_peer_id=canonical_id,
+                iface_id, conn, ip_address, exclude_peer_id=canonical_id,
             )
             slot_ip = validated_ip
 
         if slot_ip is not None:
             _reclaim_inactive_peer_slots(
-                iface_id,
-                conn,
-                ip=slot_ip,
-                replaced_by_peer_id=canonical_id,
+                iface_id, conn, ip=slot_ip, replaced_by_peer_id=canonical_id,
             )
 
         iface = db.get_interface(iface_id, conn=conn)
         if not iface:
             raise InterfaceNotFoundError(f"Interface ID {iface_id} not found")
 
-        effective_role = (
-            _validate_role(role)
-            if role is not None
-            else str(before["role"] or PeerRole.ENDPOINT)
-        )
-        effective_routed: str | None | UnsetType = UNSET
-        if clear_routed_networks:
-            effective_routed = None
-        elif routed_networks is not None:
-            effective_routed = _normalize_routed_networks(
-                routed_networks, address_pool=str(iface["address_pool"])
-            )
-        elif role is not None and effective_role == PeerRole.ENDPOINT:
-            effective_routed = None
-
-        effective_policy = (
-            _validate_allowed_ips_policy(allowed_ips_policy)
-            if allowed_ips_policy is not None
-            else str(before["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY)
+        (
+            effective_role, effective_routed, effective_policy,
+            effective_custom, resolved_routed, resolved_custom,
+        ) = _resolve_update_routing(
+            before=before, iface=iface,
+            role=role,
+            routed_networks=routed_networks,
+            clear_routed_networks=clear_routed_networks,
+            allowed_ips_policy=allowed_ips_policy,
+            custom_allowed_ips=custom_allowed_ips,
+            clear_custom_allowed_ips=clear_custom_allowed_ips,
         )
 
-        effective_custom: str | None | UnsetType = UNSET
-        if clear_custom_allowed_ips:
-            effective_custom = None
-        elif custom_allowed_ips is not None:
-            effective_custom = _normalize_custom_allowed_ips(custom_allowed_ips)
-        elif (
-            allowed_ips_policy is not None
-            and effective_policy != AllowedIpsPolicy.CUSTOM
-        ):
-            effective_custom = None
-
-        if effective_routed is UNSET:
-            current_routed = before["routed_networks"]
-            resolved_routed = (
-                str(current_routed) if current_routed is not None else None
-            )
-        elif effective_routed is None:
-            resolved_routed = None
-        else:
-            resolved_routed = str(effective_routed)
-
-        if effective_custom is UNSET:
-            current_custom = before["custom_allowed_ips"]
-            resolved_custom = (
-                str(current_custom) if current_custom is not None else None
-            )
-        elif effective_custom is None:
-            resolved_custom = None
-        else:
-            resolved_custom = str(effective_custom)
-
-        _resolve_peer_routing_for_write(
-            role=effective_role,
-            routed_networks=resolved_routed,
-            allowed_ips_policy=effective_policy,
-            custom_allowed_ips=resolved_custom,
-            address_pool=str(iface["address_pool"]),
-        )
-
-        prospective_peer = dict(peer)
+        prospective_peer = dict(before)
         if ip_address is not None:
             prospective_peer["ip_address"] = str(validated_ip)
-        if normalized_expires is not UNSET:
-            prospective_peer["expires_at"] = normalized_expires
+        if normalized["expires_at"] is not UNSET:
+            prospective_peer["expires_at"] = normalized["expires_at"]
         prospective_peer["role"] = effective_role
         prospective_peer["routed_networks"] = resolved_routed
         prospective_peer["allowed_ips_policy"] = effective_policy
         prospective_peer["custom_allowed_ips"] = resolved_custom
         if integrity.is_peer_active(prospective_peer):
             integrity.assert_peer_activation(
-                prospective_peer,
-                iface,
-                conn=conn,
+                prospective_peer, iface, conn=conn,
                 exclude_peer_id=canonical_id,
             )
         elif ip_address is not None:
             integrity.assert_peer_slot_invariants(
-                prospective_peer,
-                iface,
-                conn=conn,
+                prospective_peer, iface, conn=conn,
                 exclude_peer_id=canonical_id,
             )
 
@@ -1782,11 +1851,11 @@ def update_peer(
             db.update_peer(
                 canonical_id,
                 ip_address=validated_ip,
-                dns=normalized_dns,
-                desc=normalized_desc,
-                mtu=normalized_mtu,
-                keepalive=normalized_keepalive,
-                expires_at=normalized_expires,
+                dns=normalized["dns"],
+                desc=normalized["desc"],
+                mtu=normalized["mtu"],
+                keepalive=normalized["keepalive"],
+                expires_at=normalized["expires_at"],
                 role=effective_role if role is not None else UNSET,
                 routed_networks=effective_routed,
                 allowed_ips_policy=(
@@ -1805,32 +1874,8 @@ def update_peer(
         actual_changes = _peer_actual_changed_fields(before, updated, changed_fields)
         if actual_changes:
             _audit_peer_from_row(
-                updated,
-                db.AuditEventType.UPDATED,
-                conn,
+                updated, db.AuditEventType.UPDATED, conn,
                 metadata={"fields": actual_changes},
             )
 
-    effective_dns = _effective_peer_dns(updated, iface)
-    return {
-        "id": str(updated["id"]),
-        "name": str(updated["name"]),
-        "node": str(updated["name"]),
-        "node_id": str(updated["node_id"]),
-        "ip_address": str(updated["ip_address"]),
-        "dns": effective_dns,
-        "dns_override": updated["dns"],
-        "desc": updated["desc"],
-        "mtu": _effective_peer_mtu(updated, iface),
-        "mtu_override": updated["mtu"],
-        "keepalive": _effective_peer_keepalive(updated, iface),
-        "keepalive_override": updated["keepalive"],
-        "expires_at": updated["expires_at"],
-        "role": str(updated["role"] or PeerRole.ENDPOINT),
-        "routed_networks": updated["routed_networks"],
-        "allowed_ips_policy": str(
-            updated["allowed_ips_policy"] or AllowedIpsPolicy.VPN_ONLY
-        ),
-        "custom_allowed_ips": updated["custom_allowed_ips"],
-        "hints": list(dict.fromkeys(hints)),
-    }
+    return _build_update_peer_response(updated, iface, hints)
