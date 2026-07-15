@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-15
+
+### Security
+
+- Replace O(2^N) `.hosts()` IP pool enumeration with O(1) bitwise validation to prevent CPU exhaustion on large pools (e.g. `/8`)
+- Harden database opener against TOCTOU races and symlink-to-regular-file swaps
+- Enforce `chmod 600` on database file even during read-only opens
+- Catch unhandled exceptions in CLI top-level to prevent stack trace leaks
+
+### Added
+
+- `wgpl validate --strict` flag: treat warnings as errors (exit 1) for CI/CD pipelines
+
+### Changed
+
+- `db doctor` now reports only SQLite structural issues (schema, triggers, `deleted_at` normalization); routing/topology checks remain exclusively in `validate`
+- `peer show` and `peer explain` use `PeerAccess.READ_ALL` (resolves expired and soft-deleted peers without requiring `--interface`)
+- Error taxonomy unified under `WgplException` hierarchy: `MutuallyExclusiveOptionsError`, `InvalidFieldValueError`, `ValidationError` replace bare `ValueError`
+- `update_peer` decomposed into `_prepare_peer_update`, `_resolve_update_routing`, and `_build_update_peer_response` (internal; public API unchanged)
+
+### Fixed
+
+- `db doctor` no longer imports `consistency.validate_state` (circular import between data and domain layers removed)
+- Duplicate `empty_deleted_at` check between `db.py` and `consistency.py` eliminated
+
 ## [1.0.0] - 2026-07-14
 
 ### Notes
