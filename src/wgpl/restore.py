@@ -88,7 +88,7 @@ def _validate_restored_data() -> None:
 def _acquire_restore_lock(db_path: str) -> tuple[int, str]:
     """Acquire an exclusive non-blocking lock for database restore."""
     lock_path = f"{db_path}.restore.lock"
-    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:

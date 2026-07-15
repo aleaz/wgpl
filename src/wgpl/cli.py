@@ -63,7 +63,7 @@ console = Console(stderr=True)  # Always write logs to stderr
 out_console = Console(width=_TERMINAL_WIDTH)  # For stdout tables if not JSON
 
 _STYLE_ID = typer_styles.STYLE_COMMANDS_TABLE_FIRST_COLUMN
-_STYLE_VALUE = typer_styles.STYLE_TYPES
+_STYLE_VALUE = "cyan"
 _STYLE_META = typer_styles.STYLE_HELPTEXT
 _STYLE_BORDER = typer_styles.STYLE_COMMANDS_PANEL_BORDER
 _MAX_HISTORY_LIMIT = 1000
@@ -1692,18 +1692,11 @@ def db_dump(
             if output:
                 core.dump_database(str(output))
             else:
-                fd, path = tempfile.mkstemp()
-                try:
-                    os.close(fd)
-                    os.unlink(path)
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = os.path.join(tmp_dir, "dump.db")
                     core.dump_database(path)
                     with open(path, "rb") as f:
                         shutil.copyfileobj(f, sys.stdout.buffer)  # type: ignore[misc]
-                finally:
-                    try:
-                        os.remove(path)
-                    except FileNotFoundError:
-                        pass
     except WgplException as e:
         _exit_error(ctx, str(e))
 
@@ -1787,4 +1780,16 @@ def apply(
 
 
 if __name__ == "__main__":
-    app()
+    try:
+        app()
+    except Exception as e:
+        import sys
+        if "--json" in sys.argv or "-j" in sys.argv:
+            import json
+            print(json.dumps({
+                "status": "error",
+                "message": f"Internal unhandled exception: {type(e).__name__}: {e}"
+            }))
+            sys.exit(1)
+        else:
+            raise
