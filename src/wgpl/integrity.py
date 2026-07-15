@@ -366,16 +366,21 @@ def validate_wire_interface_fields(iface: sqlite3.Row | Mapping[str, object]) ->
 
 def validate_peer_ip_in_pool(ip: str, network: ipaddress.IPv4Network) -> None:
     try:
-        ipaddress.IPv4Address(ip)
+        addr = ipaddress.IPv4Address(ip)
     except ValueError as exc:
         raise InvalidPeerIpError(f"Invalid IP address '{ip}'") from exc
 
-    host_ips = {str(host) for host in network.hosts()}
-    if ip not in host_ips:
-        raise InvalidPeerIpError(f"IP {ip} is not a host in pool {network}")
+    if addr not in network:
+        raise InvalidPeerIpError(f"IP {ip} is not in pool {network}")
+
+    if network.prefixlen < 31:
+        if addr == network.network_address:
+            raise InvalidPeerIpError(f"IP {ip} is the network address of pool {network}")
+        if addr == network.broadcast_address:
+            raise InvalidPeerIpError(f"IP {ip} is the broadcast address of pool {network}")
 
     try:
-        if ip == str(network[1]):
+        if addr == network[1]:
             raise InvalidPeerIpError(f"IP {ip} is reserved for the interface gateway")
     except IndexError:
         pass
