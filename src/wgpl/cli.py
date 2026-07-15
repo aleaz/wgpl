@@ -468,7 +468,9 @@ def peer_show(
             peers = core.list_peers(interface, expired_only=False, show_all=True)
             # Resolve ID correctly
             access = (
-                core.PeerAccess.READ_SENSITIVE if show_secrets else core.PeerAccess.MUTATE
+                core.PeerAccess.READ_SENSITIVE
+                if show_secrets
+                else core.PeerAccess.READ_ALL
             )
             resolved_id = core.resolve_peer_ref(peer_id, interface, access=access)
             peer = next((p for p in peers if p["id"] == resolved_id), None)
@@ -1360,7 +1362,7 @@ def peer_explain(
         None,
         "--interface",
         "-i",
-        help="Interface name or ID (required when the database has more than one interface)",
+        help="Interface name or ID prefix (narrows scope when multiple exist)",
     ),
 ) -> None:
     """Show derived AllowedIPs and LAN↔LAN routing checklist for a peer."""

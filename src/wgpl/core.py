@@ -1166,7 +1166,7 @@ def explain_peer_routing(
     interface_ref: str | None = None,
 ) -> dict[str, Any]:
     """Explain derived hub/client AllowedIPs and LAN↔LAN four-leg checklist."""
-    canonical_id = resolve_peer_ref(peer_id, interface_ref, access=PeerAccess.MUTATE)
+    canonical_id = resolve_peer_ref(peer_id, interface_ref, access=PeerAccess.READ_ALL)
     peer = db.get_peer(canonical_id)
     if not peer:
         raise PeerNotFoundError(f"Peer {peer_id} not found")

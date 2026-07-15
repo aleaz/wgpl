@@ -66,9 +66,9 @@ Invariants: `integrity.py`, `wireformat.py`, and `routing.py` (called from `core
 
 ## Peer reference resolution
 
-- `resolve_peer_ref()` uses `PeerAccess`: `READ_PUBLIC` (active only), `READ_SENSITIVE` (includes inactive; requires `interface` when >1 interface), `EXPORT_SECRET` (active only; requires `interface` when >1 interface), `MUTATE` (includes inactive).
+- `resolve_peer_ref()` uses `PeerAccess`: `READ_PUBLIC` (active only, no disambiguation), `READ_ALL` (includes inactive, no disambiguation), `READ_SENSITIVE` (includes inactive; requires `interface` when >1 interface), `EXPORT_SECRET` (active only; requires `interface` when >1 interface), `MUTATE` (includes inactive, no disambiguation).
 - Post-resolve binding: when `interface` is specified, verify `peer.interface_id` matches — no cross-interface fallbacks.
-- `get_peer_config` / `get_peer_qr*` use `EXPORT_SECRET`; `peer show --show-secrets` and `peer history` use `READ_SENSITIVE`.
+- `get_peer_config` / `get_peer_qr*` use `EXPORT_SECRET`; `peer show --show-secrets` and `peer history` use `READ_SENSITIVE`; `peer show` (no secrets) and `peer explain` use `READ_ALL`.
 - `resolve_node_ref()` resolves a node reference: an **exact node name wins**; otherwise an all-hex prefix (length ≥ 4) is treated as a node-id prefix (`AmbiguousNodeIdError` when >1 match). Raises `NodeNotFoundError` otherwise.
 
 ## Audit log

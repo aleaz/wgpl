@@ -27,6 +27,7 @@ _PEER_ID_HEX_LEN = 32
 
 class PeerAccess(StrEnum):
     READ_PUBLIC = "read_public"
+    READ_ALL = "read_all"
     READ_SENSITIVE = "read_sensitive"
     EXPORT_SECRET = "export_secret"  # nosec B105
     MUTATE = "mutate"
