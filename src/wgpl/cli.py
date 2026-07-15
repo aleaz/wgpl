@@ -1564,6 +1564,9 @@ def validate_cmd(
     interface: str | None = typer.Argument(
         None, help="Interface name to check (all if omitted)"
     ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Treat warnings as errors (exit 1)"
+    ),
 ) -> None:
     """Validate routing topology, IP pool allocations, and semantic consistency of the active configuration."""
     try:
@@ -1606,7 +1609,8 @@ def validate_cmd(
                     console.print(
                         f"[yellow]Validation passed with warnings for {scope}[/yellow]"
                     )
-            if result["status"] == "error":
+            
+            if result["status"] == "error" or (strict and result["status"] == "warning"):
                 sys.exit(1)
     except WgplException as e:
         _exit_error(ctx, str(e))

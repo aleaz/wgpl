@@ -957,9 +957,7 @@ def find_deleted_peer_id_from_audit(
 def diagnose_database(
     conn: sqlite3.Connection | None = None,
 ) -> list[dict[str, str | None]]:
-    """Return structural and consistency issues without mutating the database."""
-    from .consistency import validate_state
-
+    """Return structural and physical integrity issues without mutating the database."""
     issues: list[dict[str, str | None]] = []
     with _ensure_conn(conn) as c:
         if not _is_database_initialized(c):
@@ -998,9 +996,6 @@ def diagnose_database(
                     "detail": f"Peer {row['name']} has deleted_at='' (should be NULL)",
                 }
             )
-    result = validate_state()
-    if result["status"] != "ok":
-        issues.extend(result["issues"])  # type: ignore[arg-type]
     return issues
 
 
