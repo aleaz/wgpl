@@ -503,6 +503,7 @@ Cross-check active peers against your identity source. Remove stale access with
 | Variable | Purpose |
 |----------|---------|
 | `WGPL_DB_PATH` | Database location (default `~/.wgpl.db`) |
+| `WGPL_WG_BIN` | Path to `wg` for `apply` / `syncconf` (ignored when UID 0; defaults to `/usr/bin/wg`) |
 | `WGPL_EXEC_CMD` | Optional audit metadata (sanitized, bounded) |
 
 Ensure the database path is a regular file with mode `600`, owned by the operator.

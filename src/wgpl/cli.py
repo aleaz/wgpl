@@ -50,7 +50,7 @@ app = typer.Typer(
 interface_app = typer.Typer(help="Manage WireGuard interfaces")
 node_app = typer.Typer(help="Manage device identities (nodes)")
 peer_app = typer.Typer(help="Manage WireGuard peers")
-db_app = typer.Typer(help="Manage the SQLite database (Backup & Restore)")
+db_app = typer.Typer(help="Manage the SQLite database (doctor, backup & restore)")
 
 app.add_typer(interface_app, name="interface")
 app.add_typer(node_app, name="node")

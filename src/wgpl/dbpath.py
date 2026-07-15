@@ -253,8 +253,7 @@ def open_database(
     if fd is None:
         raise WgplException(f"Failed to open database at {path}")
 
-    if not read_only:
-        _fchmod_path(fd, path)
+    _fchmod_path(fd, path)
 
     if sys.platform.startswith("linux"):
         try:

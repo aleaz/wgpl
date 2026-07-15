@@ -203,6 +203,7 @@ Copy-paste starting points in `examples/`:
 | --- | --- | --- |
 | `WGPL_DB_PATH` | Path to the SQLite database (also settable with global `--db`) | `~/.wgpl.db` |
 | `WGPL_WG_BIN` | Path to `wg` for `apply` / `syncconf` (**ignored when UID 0**; defaults to `/usr/bin/wg`) | `wg` (PATH) |
+| `WGPL_EXEC_CMD` | Optional audit metadata: the CLI command that triggered the mutation (sanitized, bounded) | _(unset)_ |
 
 `wireguard-tools` (`wg`) is required only for `wgpl apply` on the same machine.
 Full CLI: `wgpl --help` or [docs/cli.md](docs/cli.md). Docker image `ghcr.io/aleaz/wgpl` and DB permissions: [runbook — Docker](docs/runbook.md#deployment-patterns-docker), [Environment and permissions](docs/runbook.md#environment-and-permissions).
