@@ -10,7 +10,17 @@ All commands support the global `--json` or `-j` parameter (e.g., `wgpl -j peer 
 | Domain errors | `{"status":"error","message":…}` | On **stdout**; human error lines and recovery hints on **stderr**. |
 | Typed reports / actions | Top-level `status` **without** a `data` wrap | e.g. `validate`, `db doctor`, `apply`, `db restore`, `peer remove` / `peer prune` ack. |
 
-Without `--json`, human tables and success messages typically use stderr for logs/hints while payloads such as `peer config` / `peer qr` print to stdout.
+## Scripting & Automation Contract
+
+WGPL uses a strict channel separation design:
+- **`stdout`** is exclusively for the primary data payload (config text, binary dumps, generated tables, or JSON envelopes).
+- **`stderr`** is the human diagnostic channel (success messages, warnings, logs, and validation reports).
+
+If you are writing bash scripts, do **not** attempt to parse the text output of mutating commands (like `peer add` or `validate`). Standard success messages like `[green]Added peer...[/green]` are sent to `stderr`, meaning standard command substitution (`RESULT=$(wgpl peer add ...)`) will yield an empty string.
+
+You **must** use the `--json` flag for automation. When `--json` is active, WGPL guarantees that a single, predictable JSON object will be emitted to `stdout` (even for errors), making it perfectly safe for `jq` pipelines.
+
+---
 
 Database path: global `--db PATH` or environment `WGPL_DB_PATH` (default `~/.wgpl.db`).
 
