@@ -1,6 +1,6 @@
 [project]
 name = "wgpl"
-version = "1.0.1"
+version = "1.0.2"
 description = "WGPL (WireGuard Peer Lite) — disconnected CLI for declarative hub-and-spoke IPv4 VPN intent (SQLite SSOT, BYOI)."
 readme = "README.md"
 requires-python = ">=3.12"

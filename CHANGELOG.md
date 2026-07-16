@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-16
+
+### Added
+
+- macOS Apple Silicon (`wgpl-macos-arm64.tar.gz`) standalone binary in the release workflow (PyInstaller onedir)
+- VHS marketing demos under `demo/` (tapes, scripts, rendered GIFs) linked from the README
+
+### Changed
+
+- `peer list` human tables always show a 12-char hex ID prefix (full UUID remains in `peer show` and `--json`)
+- README landing polish: single hero demo GIF, clearer Concepts emit flow, tighter Quick Start copy
+
+### Fixed
+
+- README install headings use ATX `####` (MD036) for Python/uv and standalone binary sections
+
 ## [1.0.1] - 2026-07-15
 
 ### Security
