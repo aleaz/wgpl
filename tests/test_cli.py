@@ -12,7 +12,7 @@ import uuid
 
 from wgpl import core, db, wireguard
 import wgpl.cli as cli_module
-from wgpl.cli import _format_peer_id_display, _public_peer_rows, app
+from wgpl.cli import _format_short_id, _public_peer_rows, app
 
 from tests.json_helpers import json_status_payload, json_success_data
 
@@ -237,14 +237,33 @@ def test_peer_row_to_public_dict_matches_list_json(wg0_interface: str) -> None:
     assert show_payload == list_payload
 
 
-def test_format_peer_id_full_when_single_peer() -> None:
+def test_format_short_id_strips_dashes_and_truncates() -> None:
     uid = "55c521ad-2d94-4689-8abc-123456789abc"
-    assert _format_peer_id_display(uid, 1) == uid
+    assert _format_short_id(uid) == "55c521ad2d94"
 
 
-def test_format_peer_id_short_when_multiple_peers() -> None:
-    uid = "55c521ad-2d94-4689-8abc-123456789abc"
-    assert _format_peer_id_display(uid, 3) == "55c521ad2d94"
+def test_peer_list_human_shows_short_id_even_when_alone(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "alone_peer")
+    peer_id = result["id"]
+    assert peer_id is not None
+    short_id = peer_id.replace("-", "")[:12]
+
+    list_result = runner.invoke(app, ["peer", "list"])
+
+    assert list_result.exit_code == 0
+    assert short_id in list_result.stdout
+    assert peer_id not in list_result.stdout
+
+
+def test_peer_show_human_shows_full_uuid(wg0_interface: str) -> None:
+    result = core.add_peer(wg0_interface, "show_uuid")
+    peer_id = result["id"]
+    assert peer_id is not None
+
+    show_result = runner.invoke(app, ["peer", "show", peer_id])
+
+    assert show_result.exit_code == 0
+    assert peer_id in show_result.stdout
 
 
 def test_peer_config_accepts_short_prefix(wg0_interface: str) -> None:
