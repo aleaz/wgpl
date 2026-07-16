@@ -102,13 +102,6 @@ def _safe_markup(value: str) -> str:
     return escape(value)
 
 
-def _format_peer_id_display(peer_id: str, total_peers: int) -> str:
-    """Docker-like ID: full UUID when alone, 12-char hex prefix when multiple."""
-    if total_peers == 1:
-        return peer_id
-    return peer_id.replace("-", "")[:12]
-
-
 def _format_short_id(entity_id: str) -> str:
     """Return the 12-char hex prefix used consistently in all list tables."""
     return str(entity_id).replace("-", "")[:12]
@@ -1259,7 +1252,7 @@ def peer_list(
                 )
             else:
                 for p in peers:
-                    pid = _format_peer_id_display(str(p["id"]), len(peers))
+                    pid = _format_short_id(str(p["id"]))
                     iface_name = iface_map.get(p["interface_id"], str(p["interface_id"]))
                     status = core.get_peer_status(p)
                     status_color = {
@@ -1276,10 +1269,9 @@ def peer_list(
                     )
         else:
             data = [dict(p) for p in peers]
-            total_peers = len(data)
             rows = [
                 [
-                    _styled(_format_peer_id_display(p["id"], total_peers), _STYLE_ID),
+                    _styled(_format_short_id(p["id"]), _STYLE_ID),
                     _styled(
                         _safe_markup(
                             str(iface_map.get(p["interface_id"], p["interface_id"]))
