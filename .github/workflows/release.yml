@@ -59,8 +59,10 @@ jobs:
         include:
           - os: ubuntu-latest
             binary_name: wgpl-linux-amd64
+            is_mac: false
           - os: macos-14
             binary_name: wgpl-macos-arm64
+            is_mac: true
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -97,32 +99,32 @@ jobs:
       - name: Build Standalone Binary
         run: |
           uv pip install "pyinstaller==6.14.1"
-          uv run pyinstaller \
-            --onefile \
-            --name ${{ matrix.binary_name }} \
-            --collect-submodules wgpl \
-            --copy-metadata wgpl \
-            --paths src \
-            src/wgpl/__main__.py
-          (
-            cd dist
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum ${{ matrix.binary_name }} > ${{ matrix.binary_name }}.sha256
-            else
-              shasum -a 256 ${{ matrix.binary_name }} > ${{ matrix.binary_name }}.sha256
-            fi
-          )
-          ./dist/${{ matrix.binary_name }} --version
-          ./dist/${{ matrix.binary_name }} --help >/dev/null
+          mkdir -p release_assets
+          
+          if [ "${{ matrix.is_mac }}" == "true" ]; then
+            uv run pyinstaller --onedir --name ${{ matrix.binary_name }} --collect-submodules wgpl --copy-metadata wgpl --paths src src/wgpl/__main__.py
+            (
+              cd dist
+              tar -czf ../release_assets/${{ matrix.binary_name }}.tar.gz ${{ matrix.binary_name }}
+            )
+            # macOS usually uses shasum
+            (cd release_assets && shasum -a 256 ${{ matrix.binary_name }}.tar.gz > ${{ matrix.binary_name }}.tar.gz.sha256)
+            ./dist/${{ matrix.binary_name }}/${{ matrix.binary_name }} --version
+            ./dist/${{ matrix.binary_name }}/${{ matrix.binary_name }} --help >/dev/null
+          else
+            uv run pyinstaller --onefile --name ${{ matrix.binary_name }} --collect-submodules wgpl --copy-metadata wgpl --paths src src/wgpl/__main__.py
+            cp dist/${{ matrix.binary_name }} release_assets/
+            (cd release_assets && sha256sum ${{ matrix.binary_name }} > ${{ matrix.binary_name }}.sha256)
+            ./dist/${{ matrix.binary_name }} --version
+            ./dist/${{ matrix.binary_name }} --help >/dev/null
+          fi
 
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          files: |
-            dist/${{ matrix.binary_name }}
-            dist/${{ matrix.binary_name }}.sha256
+          files: release_assets/*
 
   publish-pypi:
     name: Publish to PyPI

@@ -34,17 +34,40 @@ uv tool install wgpl
 # or: pip install wgpl
 ```
 
-**Experimental: standalone Linux binary**
+**Experimental: standalone binaries (Linux / macOS)**
 
-Unsigned release artifact for air-gapped routers. Prefer `uv`/`pip` when possible.
-Verify the checksum from the GitHub Release (`SHA256SUMS`) before running.
+Unsigned release artifacts for air-gapped routers or testing. Prefer `uv`/`pip` when possible.
+Verify the checksum from the GitHub Release (`<binary_name>.sha256`) before running.
+
+**Linux (amd64):**
 
 ```bash
 curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 \
   -o /usr/local/bin/wgpl
-# Verify SHA-256 against SHA256SUMS from the same release, then:
+# Verify SHA-256 against wgpl-linux-amd64.sha256 from the same release, then:
 chmod +x /usr/local/bin/wgpl
 ```
+
+**macOS (Apple Silicon / arm64):**
+
+Download and extract the `.tar.gz` archive. Inside, you will find a folder containing the executable ready to use:
+
+```bash
+curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-macos-arm64.tar.gz \
+  -o wgpl-macos-arm64.tar.gz
+# Verify SHA-256 against wgpl-macos-arm64.tar.gz.sha256 from the same release, then:
+tar -xzf wgpl-macos-arm64.tar.gz
+xattr -r -d com.apple.quarantine wgpl-macos-arm64  # Required to bypass macOS Gatekeeper
+
+# You can now run the executable inside the folder:
+./wgpl-macos-arm64/wgpl-macos-arm64 --version
+
+# Optional: Link it to your PATH for global access
+sudo ln -s $(pwd)/wgpl-macos-arm64/wgpl-macos-arm64 /usr/local/bin/wgpl
+```
+
+> [!TIP]
+> The standalone binaries are provided for environments without Python. However, the recommended and fastest way to install WGPL on macOS is via PyPI using `uv tool install wgpl` or `pipx install wgpl`.
 
 ### 2. Bring your own hub interface (BYOI)
 
