@@ -30,11 +30,11 @@ Tape 01 shows the install hint + `wgpl --version` before any mutations.
 
 | GIF | Story | Sysadmin flow |
 |-----|--------|----------------|
-| `01_quickstart.gif` | Peer + config + QR | `peer add` → `peer list` → capture ID → `config` / `qr` |
-| `02_split_tunnel.gif` | Cloud VPC split tunnel | declare policy → `list` → `peer explain` |
-| `03_branch_offices.gif` | NY ↔ London AllowedIPs | two `subnet_router`s → `list` → `explain` both → `validate` |
-| `04_mixed_topology.gif` | Laptops + three branches | build topo → `list` → `explain` gateway → `validate --strict` |
-| `05_remote_sync.gif` | `export \| ssh … wg syncconf` | declare → `interface export` → remote sync (mocked) |
+| [01_quickstart.gif](output/01_quickstart.gif) | Peer + config + QR | `peer add` → `peer list` → capture ID → `config` / `qr` |
+| [02_split_tunnel.gif](output/02_split_tunnel.gif) | Cloud VPC split tunnel | declare policy → `list` → `peer explain` |
+| [03_branch_offices.gif](output/03_branch_offices.gif) | NY ↔ London AllowedIPs | two `subnet_router`s → `list` → `explain` both → `validate` |
+| [04_mixed_topology.gif](output/04_mixed_topology.gif) | Laptops + three branches | build topo → `list` → `explain` gateway → `validate --strict` |
+| [05_remote_sync.gif](output/05_remote_sync.gif) | `export \| ssh … wg syncconf` | declare → `interface export` → remote sync (mocked) |
 
 Peer refs are never “magic”: demos show `peer list`, then a visible
 `P=$(wgpl -j peer list … | jq …)` (or `NY=` / `LDN=`) before `$P` is used.
