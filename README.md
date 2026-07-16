@@ -27,19 +27,19 @@ Architecture and module layers: [DESIGN.md](DESIGN.md).
 
 ### 1. Install
 
-**Recommended: Python / uv** (Python 3.12+)
+#### Recommended: Python / uv (Python 3.12+)
 
 ```bash
 uv tool install wgpl
 # or: pip install wgpl
 ```
 
-**Experimental: standalone binaries (Linux / macOS)**
+#### Experimental: standalone binaries (Linux / macOS)
 
 Unsigned release artifacts for air-gapped routers or testing. Prefer `uv`/`pip` when possible.
 Verify the checksum from the GitHub Release (`<binary_name>.sha256`) before running.
 
-**Linux (amd64):**
+#### Linux (amd64)
 
 ```bash
 curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64 \
@@ -48,7 +48,7 @@ curl -sL https://github.com/aleaz/wgpl/releases/latest/download/wgpl-linux-amd64
 chmod +x /usr/local/bin/wgpl
 ```
 
-**macOS (Apple Silicon / arm64):**
+#### macOS (Apple Silicon / arm64)
 
 Download and extract the `.tar.gz` archive. Inside, you will find a folder containing the executable ready to use:
 
