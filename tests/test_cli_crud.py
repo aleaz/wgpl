@@ -306,25 +306,67 @@ def test_cli_peer_add_missing_name_keeps_exact_one_message(wgpl_db: str) -> None
 def test_cli_peer_config_warns_private_keys_on_stderr(wgpl_db: str) -> None:
     _setup_interface("wg0")
     peer = core.add_peer("wg0", "phone")
+    expected = core.get_peer_config(str(peer["id"]))
 
     result = runner.invoke(app, ["peer", "config", peer["id"]])
 
     assert result.exit_code == 0
-    assert "PrivateKey" in result.stdout
-    assert "contains private keys" in result.stderr
-    assert "PrivateKey" not in result.stderr
+    assert result.stdout == f"{expected}\n"
+    assert result.stderr == "(contains private keys; keep output restricted)\n"
 
 
 def test_cli_peer_config_json_skips_private_key_warning(wgpl_db: str) -> None:
     _setup_interface("wg0")
     peer = core.add_peer("wg0", "phone")
+    expected = core.get_peer_config_payload(str(peer["id"]))
 
     result = runner.invoke(app, ["--json", "peer", "config", peer["id"]])
 
     assert result.exit_code == 0
-    assert "contains private keys" not in result.stderr
-    payload = json.loads(result.stdout)["data"]
-    assert "PrivateKey" in payload["config"]
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload == {"status": "success", "data": expected}
+    assert isinstance(payload["data"]["config"], str)
+    assert isinstance(payload["data"]["client_allowed_ips"], list)
+    assert all(
+        isinstance(prefix, str)
+        for prefix in payload["data"]["client_allowed_ips"]
+    )
+
+
+def test_cli_config_contract_has_independent_exact_baselines(
+    wgpl_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = "CLIENT-ARTIFACT"
+    payload: dict[str, object] = {
+        "config": artifact,
+        "client_allowed_ips": ["10.0.0.0/24"],
+        "allowed_ips_source": "derived",
+    }
+
+    def exact_artifact(*args: object, **kwargs: object) -> str:
+        return artifact
+
+    def exact_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        return payload
+
+    monkeypatch.setattr(core, "get_peer_config", exact_artifact)
+    monkeypatch.setattr(core, "get_peer_config_payload", exact_payload)
+
+    human = runner.invoke(app, ["peer", "config", "peer-ref"])
+    json_result = runner.invoke(app, ["--json", "peer", "config", "peer-ref"])
+
+    assert human.exit_code == 0
+    assert human.stdout == "CLIENT-ARTIFACT\n"
+    assert human.stderr == "(contains private keys; keep output restricted)\n"
+    assert json_result.exit_code == 0
+    assert json_result.stdout == (
+        '{"status": "success", "data": {"config": "CLIENT-ARTIFACT", '
+        '"client_allowed_ips": ["10.0.0.0/24"], '
+        '"allowed_ips_source": "derived"}}\n'
+    )
+    assert json_result.stderr == ""
 
 
 def test_cli_peer_qr_warns_private_keys_on_stderr(wgpl_db: str) -> None:
@@ -335,7 +377,30 @@ def test_cli_peer_qr_warns_private_keys_on_stderr(wgpl_db: str) -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip()
-    assert "contains private keys" in result.stderr
+    assert "contains private keys" not in result.stdout
+    assert result.stderr == "(contains private keys; keep output restricted)\n"
+
+
+def test_cli_ascii_qr_contract_has_independent_exact_baselines(
+    wgpl_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def exact_qr(*args: object, **kwargs: object) -> str:
+        return "QR\nART"
+
+    monkeypatch.setattr(core, "get_peer_qr", exact_qr)
+
+    human = runner.invoke(app, ["peer", "qr", "peer-ref"])
+    json_result = runner.invoke(app, ["--json", "peer", "qr", "peer-ref"])
+
+    assert human.exit_code == 0
+    assert human.stdout == "QR\nART\n"
+    assert human.stderr == "(contains private keys; keep output restricted)\n"
+    assert json_result.exit_code == 0
+    assert json_result.stdout == (
+        '{"status": "success", "data": {"qr": "QR\\nART"}}\n'
+    )
+    assert json_result.stderr == ""
 
 
 def test_cli_peer_config_wrong_interface_prefix_reports_mismatch(

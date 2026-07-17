@@ -6,7 +6,7 @@ import io
 import sqlite3
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from . import db
 from .db import UNSET, UnsetType
@@ -25,6 +25,12 @@ from .audit import (
     list_peer_audit_history,
 )
 from .ipam import _reclaim_inactive_peer_slots, allocate_peer_ip
+from .projection.composition import render_wireguard_client, render_wireguard_server
+from .projection.snapshots import (
+    ClientSnapshot,
+    ServerPeerSnapshot,
+    ServerSnapshot,
+)
 from .refs import (
     PeerAccess,
     get_interface_by_ref,
@@ -1053,6 +1059,156 @@ def prune_peers(interface_ref: str) -> int:
     # No auto-sync here. The DB is the SSOT. Users must run `wgpl apply` to sync state to the OS.
 
 
+def _build_server_snapshot(
+    interface_ref: str,
+    *,
+    conn: sqlite3.Connection,
+) -> ServerSnapshot:
+    """Assemble a least-privilege server projection value on one connection."""
+    assert_database_valid(interface_ref, conn=conn)
+    iface_id = resolve_interface_ref(interface_ref, conn=conn)
+    iface = db.get_interface(iface_id, conn=conn)
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
+
+    integrity.assert_exportable_interface(iface)
+    peers: list[ServerPeerSnapshot] = []
+    for peer in db.list_peers(iface_id, conn=conn):
+        if not integrity.is_peer_active(peer):
+            continue
+        integrity.assert_exportable_peer(peer, iface, mode="server")
+        peers.append(
+            ServerPeerSnapshot(
+                public_key=str(peer["public_key"]),
+                preshared_key=(
+                    str(peer["preshared_key"])
+                    if peer["preshared_key"] is not None
+                    else None
+                ),
+                allowed_ips=tuple(routing.resolve_hub_allowed_ips(peer)),
+            )
+        )
+
+    return ServerSnapshot(
+        interface_name=str(iface["name"]),
+        mtu=int(str(iface["mtu"])) if iface["mtu"] is not None else None,
+        peers=tuple(peers),
+    )
+
+
+def _build_client_snapshot(
+    peer_id: str,
+    allowed_ips: str | None,
+    *,
+    interface_ref: str | None,
+    conn: sqlite3.Connection,
+) -> tuple[
+    ClientSnapshot,
+    tuple[str, ...],
+    Literal["derived", "override"],
+]:
+    """Assemble one authorized client projection value on one connection."""
+    canonical_id = resolve_peer_ref(
+        peer_id,
+        interface_ref,
+        access=PeerAccess.EXPORT_SECRET,
+        conn=conn,
+    )
+    peer = db.get_peer(canonical_id, conn=conn)
+    if not peer or not integrity.is_peer_active(peer):
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    iface = db.get_interface(peer["interface_id"], conn=conn)
+    if not iface:
+        raise InterfaceNotFoundError(f"Interface ID {peer['interface_id']} not found")
+
+    preflight_ref = interface_ref if interface_ref is not None else str(iface["id"])
+    assert_database_valid(preflight_ref, conn=conn)
+
+    peer = db.get_peer(canonical_id, conn=conn)
+    if not peer or not integrity.is_peer_active(peer):
+        raise PeerNotFoundError(f"Peer {peer_id} not found")
+
+    integrity.assert_exportable_interface(iface)
+    integrity.assert_exportable_peer(peer, iface, mode="client")
+
+    source: Literal["derived", "override"]
+    if allowed_ips is None:
+        active_peers = [
+            row
+            for row in db.list_peers(
+                int(str(peer["interface_id"])),
+                conn=conn,
+            )
+            if integrity.is_peer_active(row)
+        ]
+        snapshot_allowed_ips = tuple(
+            routing.resolve_client_allowed_ips(peer, iface, active_peers)
+        )
+        public_allowed_ips = snapshot_allowed_ips
+        source = "derived"
+    else:
+        public_allowed_ips = tuple(
+            part.strip() for part in allowed_ips.split(",") if part.strip()
+        )
+        normalized_allowed_ips = validate_allowed_ips(allowed_ips)
+        snapshot_allowed_ips = tuple(normalized_allowed_ips.split(","))
+        source = "override"
+
+    prefix_length = ipaddress.IPv4Network(
+        str(iface["address_pool"]),
+        strict=False,
+    ).prefixlen
+    snapshot = ClientSnapshot(
+        private_key=str(peer["private_key"]),
+        ip_address=str(peer["ip_address"]),
+        address_prefix_length=prefix_length,
+        dns=effective_peer_dns(peer, iface),
+        mtu=effective_peer_mtu(peer, iface),
+        server_public_key=str(iface["public_key"]),
+        preshared_key=(
+            str(peer["preshared_key"])
+            if peer["preshared_key"] is not None
+            else None
+        ),
+        endpoint=str(iface["endpoint"]),
+        port=int(str(iface["port"])),
+        allowed_ips=snapshot_allowed_ips,
+        keepalive=effective_peer_keepalive(peer, iface),
+    )
+    return snapshot, public_allowed_ips, source
+
+
+def _project_server_config(interface_ref: str) -> tuple[str, str]:
+    """Build one consistent Server snapshot and render it after closing the DB."""
+    with db.read_snapshot() as conn:
+        snapshot = _build_server_snapshot(interface_ref, conn=conn)
+    artifact = render_wireguard_server(snapshot)
+    return snapshot.interface_name, artifact
+
+
+def _project_client_config(
+    peer_id: str,
+    allowed_ips: str | None = None,
+    *,
+    interface_ref: str | None = None,
+) -> tuple[
+    str,
+    tuple[str, ...],
+    Literal["derived", "override"],
+]:
+    """Build one consistent Client snapshot and render it after closing the DB."""
+    with db.read_snapshot() as conn:
+        snapshot, public_allowed_ips, source = _build_client_snapshot(
+            peer_id,
+            allowed_ips,
+            interface_ref=interface_ref,
+            conn=conn,
+        )
+    artifact = render_wireguard_client(snapshot)
+    return artifact, public_allowed_ips, source
+
+
 def _emit_server_config(interface_ref: str) -> str:
     """Emit server syncconf after consistency preflight and export validation."""
     assert_database_valid(interface_ref)
@@ -1121,17 +1277,21 @@ def get_peer_config(
     interface_ref: str | None = None,
 ) -> str:
     """Generates the WireGuard client configuration file (.conf format) in plain text."""
-    return _emit_client_config(peer_id, allowed_ips, interface_ref=interface_ref)
+    return _project_client_config(
+        peer_id,
+        allowed_ips,
+        interface_ref=interface_ref,
+    )[0]
 
 
-def get_peer_config_payload(
+def _get_peer_config_payload_legacy(
     peer_id: str,
     allowed_ips: str | None = None,
     *,
     interface_ref: str | None = None,
 ) -> dict[str, Any]:
-    """Return client config text plus derived AllowedIPs metadata for JSON output."""
-    config = get_peer_config(
+    """Build the legacy Client JSON payload for joint source-code rollback."""
+    config = _emit_client_config(
         peer_id, allowed_ips=allowed_ips, interface_ref=interface_ref
     )
     canonical_id = resolve_peer_ref(
@@ -1156,6 +1316,25 @@ def get_peer_config_payload(
     return {
         "config": config,
         "client_allowed_ips": client_ips,
+        "allowed_ips_source": source,
+    }
+
+
+def get_peer_config_payload(
+    peer_id: str,
+    allowed_ips: str | None = None,
+    *,
+    interface_ref: str | None = None,
+) -> dict[str, Any]:
+    """Return client config text plus AllowedIPs metadata from one snapshot."""
+    config, client_allowed_ips, source = _project_client_config(
+        peer_id,
+        allowed_ips,
+        interface_ref=interface_ref,
+    )
+    return {
+        "config": config,
+        "client_allowed_ips": list(client_allowed_ips),
         "allowed_ips_source": source,
     }
 
@@ -1283,17 +1462,12 @@ def get_peer_qr_png_bytes(
 
 def get_interface_config(interface_ref: str) -> str:
     """Generates the declarative config string for the server interface."""
-    return _emit_server_config(interface_ref)
+    return _project_server_config(interface_ref)[1]
 
 
 def sync_interface(interface_ref: str) -> None:
     """Syncs the WireGuard interface with the DB state declaratively using syncconf."""
-    iface_id = resolve_interface_ref(interface_ref)
-    iface = db.get_interface(iface_id)
-    if not iface:
-        raise InterfaceNotFoundError(f"Interface {interface_ref} not found")
-    name = str(iface["name"])
-    conf_content = _emit_server_config(interface_ref)
+    name, conf_content = _project_server_config(interface_ref)
     wireguard.syncconf(name, conf_content)
 
 

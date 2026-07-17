@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import stat
 import tempfile
@@ -17,6 +18,10 @@ from wgpl import core, db, wireguard
 from wgpl.cli import app
 
 from tests.json_helpers import json_status_payload, json_success_data
+from tests.test_projection_parity import (
+    GOLDEN_DIR,
+    seed_legacy_projection,
+)
 
 runner = CliRunner()
 
@@ -226,14 +231,24 @@ def test_cli_interface_update_conflicting_clear_flags(
     assert "WGPL Error" in result.stderr
 
 
-def test_cli_interface_export_human_and_json(seeded: dict) -> None:
+def test_cli_interface_export_human_and_json(wgpl_db: str) -> None:
+    seed_legacy_projection()
+    expected = (GOLDEN_DIR / "server.conf").read_text(encoding="utf-8")
+
     human = _invoke(["interface", "export", "wg0"])
     assert human.exit_code == 0
-    assert "[Peer]" in human.stdout
+    assert human.stdout == f"{expected}\n"
+    assert human.stderr == ""
 
     j = _invoke(["--json", "interface", "export", "wg0"])
     assert j.exit_code == 0
-    assert "[Peer]" in json_success_data(j)["config"]
+    payload = json_success_data(j)
+    assert payload == {"config": expected}
+    assert isinstance(payload["config"], str)
+    assert j.stdout == (
+        json.dumps({"status": "success", "data": {"config": expected}}) + "\n"
+    )
+    assert j.stderr == ""
 
 
 def test_cli_interface_history_pagination(seeded: dict) -> None:
@@ -487,6 +502,8 @@ def test_cli_validate_global_and_scoped(seeded: dict) -> None:
 def test_cli_apply_human(mock_sync: MagicMock, seeded: dict) -> None:
     result = _invoke(["apply", "wg0"])
     assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == "Successfully applied DB state to wg0\n"
     mock_sync.assert_called_once_with("wg0")
 
 

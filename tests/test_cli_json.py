@@ -249,6 +249,10 @@ def test_json_apply(mock_sync: object, wgpl_db: str, iface_pubkey: str) -> None:
         "action": "apply",
         "interface": "wg0",
     }
+    assert result.stdout == (
+        '{"status": "success", "action": "apply", "interface": "wg0"}\n'
+    )
+    assert result.stderr == ""
 
 
 @patch.object(core, "sync_interface")

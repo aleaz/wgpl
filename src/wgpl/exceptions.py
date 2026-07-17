@@ -173,3 +173,21 @@ class InvalidFieldValueError(ValidationError):
     """Raised when a field value fails format, range, or constraint checks."""
 
     pass
+
+
+class ProjectionError(WgplException):
+    """Base for internal projection dispatch and rendering failures."""
+
+    pass
+
+
+class UnknownProjectionError(ProjectionError):
+    """Raised when an internal projection identifier is not registered."""
+
+    pass
+
+
+class ProjectionRenderError(ProjectionError):
+    """Raised when a renderer fails outside the WGPL exception contract."""
+
+    pass

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sqlite3
 import stat
 import tempfile
 
 import pytest
 from typer.testing import CliRunner
 
-from wgpl import db, wireguard
+from wgpl import core, db, wireguard
 from wgpl.cli import app
 
 from tests.json_helpers import json_status_payload, json_success_data
@@ -21,6 +23,58 @@ IFACE_PUBKEY = wireguard.generate_keypair().public_key
 MISSING_IFACE = "wg0"
 MISSING_PEER = "00000000-0000-0000-0000-000000000001"
 MISSING_NODE = "ghostnode"
+PROJECTION_COMMANDS = [
+    ["interface", "export", MISSING_IFACE],
+    ["peer", "config", MISSING_PEER],
+    ["peer", "qr", MISSING_PEER],
+    ["apply", MISSING_IFACE],
+]
+
+_ROW_QUERIES = (
+    ("interfaces", "SELECT * FROM interfaces ORDER BY id"),
+    ("nodes", "SELECT * FROM nodes ORDER BY id"),
+    ("peers", "SELECT * FROM peers ORDER BY id"),
+    ("audit_events", "SELECT * FROM audit_events ORDER BY id"),
+)
+
+
+def _database_observation(
+    path: str,
+) -> tuple[
+    bytes,
+    tuple[tuple[str, tuple[tuple[object, ...], ...]], ...],
+    tuple[tuple[object, ...], ...],
+    int,
+    tuple[bool, bool],
+]:
+    database_path = Path(path)
+    with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as conn:
+        rows = tuple(
+            (table, tuple(tuple(row) for row in conn.execute(query).fetchall()))
+            for table, query in _ROW_QUERIES
+        )
+        schema = tuple(
+            tuple(row)
+            for row in conn.execute(
+                """
+                SELECT type, name, tbl_name, sql
+                FROM sqlite_schema
+                ORDER BY type, name
+                """
+            ).fetchall()
+        )
+        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+    return (
+        database_path.read_bytes(),
+        rows,
+        schema,
+        user_version,
+        (
+            Path(f"{database_path}-wal").exists(),
+            Path(f"{database_path}-shm").exists(),
+        ),
+    )
 
 
 def _no_traceback(result: object) -> None:
@@ -256,3 +310,150 @@ def test_corrupt_db_json_error(corrupt_db_path: str) -> None:
     payload = json_status_payload(result)
     assert payload["status"] == "error"
     assert payload["message"]
+
+
+@pytest.mark.parametrize("command", PROJECTION_COMMANDS)
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_projection_commands_on_missing_database(
+    fresh_db_path: str,
+    command: list[str],
+    json_mode: bool,
+) -> None:
+    args = ["--json", *command] if json_mode else command
+
+    result = runner.invoke(app, args)
+
+    _no_traceback(result)
+    assert result.exit_code == 1
+    apply_creates_database = command[0] == "apply"
+    assert os.path.exists(fresh_db_path) is apply_creates_database
+    expected_message = (
+        f"Interface {MISSING_IFACE} not found"
+        if apply_creates_database
+        else f"Database does not exist: {fresh_db_path}"
+    )
+    expected_stderr = f"WGPL Error: {expected_message}"
+    if json_mode:
+        payload = json_status_payload(result)
+        assert payload == {
+            "status": "error",
+            "message": expected_message,
+        }
+        assert " ".join(result.stderr.split()) == expected_stderr
+    else:
+        assert result.stdout == ""
+        assert " ".join(result.stderr.split()) == expected_stderr
+
+
+@pytest.mark.parametrize("command", PROJECTION_COMMANDS)
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_projection_commands_reject_corrupt_database(
+    corrupt_db_path: str,
+    command: list[str],
+    json_mode: bool,
+) -> None:
+    args = ["--json", *command] if json_mode else command
+
+    result = runner.invoke(app, args)
+
+    _no_traceback(result)
+    assert result.exit_code == 1
+    expected_message = (
+        f"Failed to connect to database at {corrupt_db_path}: "
+        "file is not a database"
+    )
+    if json_mode:
+        payload = json_status_payload(result)
+        assert payload == {"status": "error", "message": expected_message}
+        assert " ".join(result.stderr.split()) == f"WGPL Error: {expected_message}"
+    else:
+        assert result.stdout == ""
+        assert " ".join(result.stderr.split()) == f"WGPL Error: {expected_message}"
+
+
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_populated_projection_reads_preserve_database_and_schema(
+    wgpl_db: str,
+    wg0_interface: str,
+    json_mode: bool,
+) -> None:
+    peer = core.add_peer(wg0_interface, "readonly_projection_peer")
+    peer_id = str(peer["id"])
+    commands = (
+        ["interface", "export", wg0_interface],
+        ["peer", "config", peer_id],
+        ["peer", "qr", peer_id],
+    )
+
+    initial = _database_observation(wgpl_db)
+    schema_objects = {(str(row[0]), str(row[1])) for row in initial[2]}
+    assert initial[3] == 1
+    assert {
+        name for object_type, name in schema_objects if object_type == "table"
+    } == {
+        "audit_events",
+        "interfaces",
+        "nodes",
+        "peers",
+        "sqlite_sequence",
+    }
+    assert {
+        name
+        for object_type, name in schema_objects
+        if object_type == "index" and not name.startswith("sqlite_autoindex_")
+    } == {
+        "idx_audit_entity",
+        "idx_audit_interface",
+        "idx_peers_active_ip",
+        "idx_peers_active_node",
+    }
+    assert {
+        name for object_type, name in schema_objects if object_type == "trigger"
+    } == {
+        "trg_audit_immutable_delete",
+        "trg_audit_immutable_update",
+    }
+
+    for command in commands:
+        before = _database_observation(wgpl_db)
+        args = ["--json", *command] if json_mode else command
+        result = runner.invoke(app, args)
+        after = _database_observation(wgpl_db)
+
+        assert result.exit_code == 0
+        assert after == before
+        assert after == initial
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["peer", "config", MISSING_PEER, "--allowed-ips", "not-a-network"],
+        ["peer", "qr", MISSING_PEER, "--allowed-ips", "not-a-network"],
+    ],
+)
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_cli_invalid_override_precedes_missing_database(
+    fresh_db_path: str,
+    command: list[str],
+    json_mode: bool,
+) -> None:
+    args = ["--json", *command] if json_mode else command
+
+    result = runner.invoke(app, args)
+
+    _no_traceback(result)
+    assert result.exit_code == 1
+    assert not os.path.exists(fresh_db_path)
+    expected_message = (
+        "Invalid AllowedIPs format 'not-a-network' (WGPL supports IPv4 only)"
+    )
+    if json_mode:
+        assert json_status_payload(result) == {
+            "status": "error",
+            "message": expected_message,
+        }
+        assert " ".join(result.stderr.split()) == f"WGPL Error: {expected_message}"
+    else:
+        assert result.stdout == ""
+        assert result.stderr == f"WGPL Error: {expected_message}\n"

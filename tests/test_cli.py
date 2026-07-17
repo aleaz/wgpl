@@ -13,11 +13,44 @@ import uuid
 from wgpl import core, db, wireguard
 import wgpl.cli as cli_module
 from wgpl.cli import _format_short_id, _public_peer_rows, app
+from wgpl.exceptions import ProjectionRenderError
 
 from tests.json_helpers import json_status_payload, json_success_data
 
 
 runner = CliRunner()
+
+
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_projection_failure_public_diagnostics_expose_only_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    wgpl_db: str,
+    json_mode: bool,
+) -> None:
+    nested_secret = "renderer-internal-secret"
+    error = ProjectionRenderError("Projection 'wireguard' failed for client target")
+
+    def fail_projection(*args: object, **kwargs: object) -> dict[str, object]:
+        raise error from RuntimeError(nested_secret)
+
+    monkeypatch.setattr(core, "get_peer_config_payload", fail_projection)
+    monkeypatch.setattr(core, "get_peer_config", fail_projection)
+    args = ["peer", "config", "peer-ref"]
+    if json_mode:
+        args.insert(0, "--json")
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert nested_secret not in result.stdout
+    assert nested_secret not in result.stderr
+    assert str(error) in result.stderr
+    if json_mode:
+        payload = json_status_payload(result)
+        assert payload["message"] == str(error)
+        assert nested_secret not in str(payload)
+    else:
+        assert result.stdout == ""
 
 
 def _ensure_node(name: str) -> str:
@@ -324,6 +357,10 @@ def test_peer_qr_output_png(wg0_interface: str) -> None:
 
     assert qr_result.exit_code == 0
     assert qr_result.stdout == ""
+    assert " ".join(qr_result.stderr.split()) == (
+        f"Wrote QR code to {output_path} "
+        "(contains private keys; keep file permissions restricted)"
+    )
     assert output_path.exists()
     assert output_path.read_bytes().startswith(b"\x89PNG")
     assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
@@ -345,6 +382,7 @@ def test_peer_qr_output_json(wg0_interface: str) -> None:
         "path": str(output_path),
         "peer_id": result["id"],
     }
+    assert qr_result.stderr == ""
 
 
 def test_db_dump_cli_writes_hints_to_stderr(wg0_interface: str) -> None:

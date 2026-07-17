@@ -2,7 +2,7 @@ import datetime
 import sqlite3
 import subprocess
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typing import Any
@@ -181,8 +181,90 @@ def test_get_peer_qr_png_bytes_returns_valid_png(wg0_interface: str) -> None:
     assert result["id"] is not None
     png_bytes = core.get_peer_qr_png_bytes(result["id"])
 
+    assert isinstance(png_bytes, bytes)
     assert png_bytes.startswith(b"\x89PNG")
     assert len(png_bytes) > 100
+
+
+def test_projection_public_return_types_and_override_metadata(
+    wg0_interface: str,
+) -> None:
+    peer = core.add_peer(wg0_interface, "projection_types")
+    peer_id = str(peer["id"])
+
+    server_config = core.get_interface_config(wg0_interface)
+    client_config = core.get_peer_config(
+        peer_id, allowed_ips="10.0.0.1/24", interface_ref="wg0"
+    )
+    payload = core.get_peer_config_payload(
+        peer_id, allowed_ips="10.0.0.1/24", interface_ref="wg0"
+    )
+    qr = core.get_peer_qr(peer_id, interface_ref="wg0")
+    png = core.get_peer_qr_png_bytes(peer_id, interface_ref="wg0")
+
+    assert isinstance(server_config, str)
+    assert isinstance(client_config, str)
+    assert isinstance(payload, dict)
+    assert isinstance(payload["client_allowed_ips"], list)
+    assert all(isinstance(prefix, str) for prefix in payload["client_allowed_ips"])
+    assert isinstance(qr, str)
+    assert isinstance(png, bytes)
+    assert "AllowedIPs = 10.0.0.0/24" in client_config
+    assert payload["client_allowed_ips"] == ["10.0.0.1/24"]
+    assert payload["allowed_ips_source"] == "override"
+
+
+def test_peer_config_payload_uses_one_projected_result() -> None:
+    with patch.object(
+        core,
+        "_project_client_config",
+        return_value=(
+            "projected-client-config",
+            ("10.0.0.1/24", "192.168.1.7/24"),
+            "override",
+        ),
+    ) as project_client:
+        payload = core.get_peer_config_payload(
+            "peer-id",
+            allowed_ips="10.0.0.1/24,192.168.1.7/24",
+            interface_ref="wg0",
+        )
+
+    assert payload == {
+        "config": "projected-client-config",
+        "client_allowed_ips": ["10.0.0.1/24", "192.168.1.7/24"],
+        "allowed_ips_source": "override",
+    }
+    assert isinstance(payload["client_allowed_ips"], list)
+    project_client.assert_called_once_with(
+        "peer-id",
+        "10.0.0.1/24,192.168.1.7/24",
+        interface_ref="wg0",
+    )
+
+
+def test_qr_consumers_receive_exact_config_text() -> None:
+    config = "[Interface]\nPrivateKey = exact-input\n"
+    qr_instance = MagicMock()
+    qr_instance.print_ascii.side_effect = lambda out, invert: out.write("ascii-qr")
+    png_image = MagicMock()
+    png_image.save.side_effect = lambda buffer: buffer.write(b"png-bytes")
+    qr_instance.make_image.return_value = png_image
+
+    with (
+        patch.object(core, "get_peer_config", return_value=config) as get_config,
+        patch("wgpl.core.qrcode.QRCode", return_value=qr_instance),
+    ):
+        ascii_qr = core.get_peer_qr("peer-id", interface_ref="wg0")
+        png_qr = core.get_peer_qr_png_bytes("peer-id", interface_ref="wg0")
+
+    assert ascii_qr == "ascii-qr"
+    assert png_qr == b"png-bytes"
+    assert qr_instance.add_data.call_args_list == [((config,), {}), ((config,), {})]
+    assert get_config.call_args_list == [
+        (("peer-id",), {"allowed_ips": None, "interface_ref": "wg0"}),
+        (("peer-id",), {"allowed_ips": None, "interface_ref": "wg0"}),
+    ]
 
 
 def test_allocate_peer_ip_with_requested_ip(wg0_interface: str) -> None:

@@ -287,6 +287,17 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+@contextmanager
+def read_snapshot() -> Generator[sqlite3.Connection, None, None]:
+    """Provide one deferred, rollback-only transaction for consistent reads."""
+    with get_db() as conn:
+        conn.execute("BEGIN DEFERRED")
+        try:
+            yield conn
+        finally:
+            conn.rollback()
+
+
 def _create_readonly_connection(*, verify: bool = True) -> sqlite3.Connection:
     """Creates a read-only secure connection to the SQLite database."""
     try:

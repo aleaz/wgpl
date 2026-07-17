@@ -115,6 +115,9 @@ def _validate_routing_topology(
                             address_pool=address_pool,
                             tunnel_ip=str(peer["ip_address"]),
                         )
+                    except ValueError:
+                        # Invalid peer IPs are reported by the peer validation pass.
+                        pass
                     except WgplException as exc:
                         issues.append(
                             _issue(
@@ -415,9 +418,13 @@ def validate_state(
     return {"status": status, "issues": issues}
 
 
-def assert_database_valid(interface: str | None = None) -> None:
+def assert_database_valid(
+    interface: str | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> None:
     """Raise when the database fails consistency checks (errors only; warnings pass)."""
-    result = validate_state(interface)
+    result = validate_state(interface, conn=conn)
     if result["status"] != "error":
         return
     issues = cast(list[dict[str, str | None]], result["issues"])
