@@ -317,10 +317,20 @@ Only these existing files require implementation changes:
   - preserves public facade signatures
 - `src/wgpl/consistency.py`
   - allows `assert_database_valid()` to use a supplied connection
+  - may catch `ValueError` only when re-parsing an already-validated peer
+    tunnel IP inside `_validate_routing_topology()`, so a second topology
+    parse cannot discard an already-detected `ip_outside_pool` issue as an
+    escaped `ipaddress.AddressValueError`
 - `src/wgpl/db.py`
   - provides one explicit consistent read-snapshot context
 - `src/wgpl/exceptions.py`
   - owns internal projection exceptions
+
+That consistency handler is a narrowly scoped historical-bug correction, not a
+Projection Engine feature. It does not change activation validation, export
+gates, snapshot assembly, renderer ownership, or public Core signatures. Peer
+IP validity continues to be reported by the peer validation pass; topology
+validation merely continues after an already-recognized corrupt IP.
 
 `src/wgpl/wireformat.py`, `src/wgpl/cli.py`, the schema, and migrations remain
 unchanged in version 1.1.
@@ -1146,6 +1156,19 @@ Compare:
 - exception class
 - exception message
 - whether `wireguard.syncconf()` was called
+
+For an active subnet router with a malformed tunnel IP and non-empty
+`routed_networks`, also prove independently in consistency/topology tests
+that:
+
+- `validate_state()` returns `status == "error"` with an `ip_outside_pool`
+  issue
+- no `ipaddress.AddressValueError` escapes from topology validation
+- `assert_database_valid()` raises `WgplException` and remains fail-closed
+
+That case documents the §4.7 consistency handler. Projection differential
+parity may exercise the same corrupt IP, but consistency ownership must not
+depend on the projection suite alone.
 
 ## 11.8 Consumer identity
 

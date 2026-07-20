@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import datetime
+import ipaddress
 import uuid
 
+import pytest
 from typer.testing import CliRunner
 
 from wgpl import core, db, wireguard
 from wgpl.cli import app
+from wgpl.exceptions import WgplException
 from wgpl.routing import AllowedIpsPolicy, PeerRole
 
 from tests.json_helpers import json_status_payload
@@ -190,6 +193,41 @@ def test_validate_subnet_router_missing_routed_networks(wgpl_db: str) -> None:
     issues = result["issues"]
     assert isinstance(issues, list)
     assert any(i["code"] == "subnet_router_missing_routed_networks" for i in issues)
+
+
+def test_validate_malformed_subnet_router_ip_stays_structured(
+    wgpl_db: str,
+) -> None:
+    """Corrupt tunnel IPs report through consistency, not AddressValueError."""
+    _add_iface()
+    peer = core.add_peer(
+        "wg0",
+        "bad-ip-router",
+        role=PeerRole.SUBNET_ROUTER,
+        routed_networks="192.168.10.0/24",
+        keepalive=25,
+    )
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE peers SET ip_address = ? WHERE id = ?",
+            ("unsafe\nip", peer["id"]),
+        )
+        conn.commit()
+
+    try:
+        result = core.validate_state("wg0")
+    except ipaddress.AddressValueError as exc:
+        raise AssertionError(
+            "topology validation leaked AddressValueError"
+        ) from exc
+
+    assert result["status"] == "error"
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    assert any(issue["code"] == "ip_outside_pool" for issue in issues)
+
+    with pytest.raises(WgplException, match="ip_outside_pool"):
+        core.assert_database_valid("wg0")
 
 
 def test_assert_database_valid_allows_warnings(wgpl_db: str) -> None:

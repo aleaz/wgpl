@@ -499,6 +499,14 @@ messages MUST NOT expose implementation details or secrets. Existing exception
 types, messages where contractual, CLI exit codes, JSON error behavior, and
 stdout/stderr separation MUST remain unchanged for existing commands.
 
+Compatibility protects documented WGPL domain exceptions and structured
+consistency reports. It does not preserve accidental third-party exception
+leaks such as bare `ValueError` or `ipaddress.AddressValueError` that escape
+from internal parsers. Those leaks are defects: operators already receive
+fail-closed structured consistency issues such as `ip_outside_pool`, and the
+CLI/`assert_database_valid()` boundary continues to surface them as
+`WgplException`.
+
 ---
 
 # 13. Migration Plan
@@ -637,7 +645,7 @@ Version 1.1 permits no breaking changes to:
 - CLI command names, arguments, options, output channels, warnings, and exit
   codes
 - public Core signatures, return types, reference-resolution semantics, and
-  exception behavior
+  documented WGPL exception behavior
 - server and client configuration bytes, including ordering, blank lines,
   encoding, and terminal newline
 - JSON envelopes and error behavior
@@ -647,6 +655,12 @@ Version 1.1 permits no breaking changes to:
   behavior
 - read-only behavior, including not creating a missing live database
 - database schema and `PRAGMA user_version`
+
+Compatibility does not require preserving accidental non-domain exception
+leaks. In particular, an active subnet router with a malformed tunnel IP MUST
+remain fail-closed and MUST continue to surface through the structured
+consistency/`WgplException` boundary rather than through an escaped
+`ipaddress.AddressValueError`.
 
 Existing tests MUST continue passing unchanged, but that is necessary rather
 than sufficient. Differential and golden tests described in the acceptance
@@ -755,7 +769,10 @@ The RFC will be considered implemented when:
 - tests prove that each target receives only its authorized secrets and that
   metadata, errors, and logs contain no secrets
 - stdout/stderr separation, warnings, JSON envelopes, exit codes, and existing
-  exception behavior remain unchanged
+  documented WGPL exception behavior remain unchanged
+- accidental third-party exception leaks are not treated as compatibility
+  baselines; malformed active subnet-router IPs remain fail-closed through
+  structured consistency/`WgplException` reporting
 - repeated rendering from the same fixed snapshot and request produces
   identical bytes
 - read-only commands do not create or mutate the live database
